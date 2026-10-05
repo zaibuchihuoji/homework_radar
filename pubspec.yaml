@@ -1,0 +1,64 @@
+name: homework_radar
+description: "作业雷达 — 汇总学习通与中国大学MOOC的作业与截止时间"
+publish_to: 'none'
+version: 1.0.0+2
+
+environment:
+  sdk: ^3.13.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  # WebView 登录取 Cookie
+  webview_flutter: ^4.10.0
+  # HTTP 请求（手动管理 Cookie 头）
+  http: ^1.2.0
+  # HTML 解析（学习通页面）
+  html: ^0.15.4
+  # 本地存储
+  shared_preferences: ^2.3.0
+  # 截止提醒通知
+  flutter_local_notifications: ^19.0.0
+  timezone: ^0.10.0
+  intl: ^0.20.0
+  # 桌面小组件数据通道
+  home_widget: ^0.7.0
+  # 小组件玻璃底图存到应用支持目录
+  path_provider: ^2.1.6
+  # 日历视图
+  table_calendar: ^3.1.2
+  image_picker: ^1.2.3
+  google_mlkit_text_recognition: ^0.17.1
+  file_picker: ^13.1.0
+  spreadsheet_decoder: ^2.3.0
+  # 教务导出的「假 xls」HTML/CSV 常是 GBK 编码，UTF-8 强解会全乱码
+  fast_gbk: ^1.0.0
+  # 智慧树网关要求参数 AES 加密成 secretStr（客户端 JS 同款 CBC/PKCS7）
+  encrypt: ^5.0.3
+  # 应用内检查更新（读本地版本号 + 打开下载页）
+  package_info_plus: ^10.2.2
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  excel: ^4.0.6
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter_launcher_icons:
+  image_path: "assets/icon/icon_rounded.png"
+  adaptive_icon_background: "#0F6B54"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  android: true
+  ios: true
+  remove_alpha_ios: true
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/splash/splash_badge.png
+    - assets/splash/splash_slogan.png

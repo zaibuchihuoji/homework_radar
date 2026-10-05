@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 透明模式的紧急横幅（绿色档）：低饱和绿玻璃药丸，纯半透无描边 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#66DCEDE7"/>
+    <corners android:radius="12dp"/>
+</shape>

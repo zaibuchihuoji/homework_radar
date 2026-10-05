@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>教学综合管理服务平台（测试桩）</title>
+<style>
+  body { font-family: sans-serif; margin: 0; background: #f4f6f8; }
+  #bar { background: #0f6b54; color: #fff; padding: 10px 16px; font-size: 18px; }
+  #app { padding: 24px; }
+  .btn { display: inline-block; background: #0f6b54; color: #fff; padding: 12px 28px;
+         border-radius: 8px; font-size: 16px; cursor: pointer; }
+  iframe { width: 100%; height: 88vh; border: 0; background: #fff; }
+</style>
+</head>
+<body>
+<div id="bar">教学综合管理服务平台（本地测试桩）</div>
+<div id="app">
+  <p>欢迎使用教务系统，请先完成统一身份认证。</p>
+  <span class="btn" onclick="login()">统一身份认证登录</span>
+</div>
+<script>
+  // 模拟登录后切换到外壳框架页（不触发顶层页面导航）；
+  // 课表在「外壳 frame → 课表 frame」两层嵌套里，验证递归走查
+  function login() {
+    document.getElementById('app').innerHTML =
+      '<iframe src="shell.html" style="width:100%;height:80vh;border:0"></iframe>';
+  }
+</script>
+</body>
+</html>

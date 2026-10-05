@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 最近截止小组件：玻璃底 ImageView（透明模式承载壁纸折射位图） + 内容层 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 液态玻璃底：透明模式由 GlassWallpaperRenderer 推位图，白卡模式隐藏 -->
+    <ImageView
+        android:id="@+id/w_glass"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:importantForAccessibility="no"
+        android:visibility="gone"/>
+
+    <LinearLayout
+        android:id="@+id/w_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@drawable/widget_bg"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="14dp">
+
+        <!-- 头部：图标 + 标题 + 更新时间（超矮尺寸下整体隐藏） -->
+        <LinearLayout
+            android:id="@+id/w_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:id="@+id/w_icon"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:src="@mipmap/ic_launcher"/>
+
+            <TextView
+                android:id="@+id/w_title"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="作业通"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:shadowColor="#66000000"
+                android:shadowRadius="6"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:textColor="#0F6B54"/>
+
+            <TextView
+                android:id="@+id/w_subtitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text="· 最近截止"
+                android:textSize="11sp"
+                android:shadowColor="#59000000"
+                android:shadowRadius="6"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:textColor="#9CA3AF"/>
+
+            <TextView
+                android:id="@+id/w_updated"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text=""
+                android:textSize="10sp"
+                android:shadowColor="#4D000000"
+                android:shadowRadius="6"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:textColor="#B0B7C3"/>
+        </LinearLayout>
+
+        <!-- 紧急焦点横幅：今天/明天/最近一条（中等以上尺寸显示） -->
+        <LinearLayout
+            android:id="@+id/w_banner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/widget_banner_green"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/w_bannertext"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text=""
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:textColor="#0F6B54"/>
+        </LinearLayout>
+
+        <!-- 课程待办分布（中等以上尺寸显示） -->
+        <LinearLayout
+            android:id="@+id/w_courses"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/w_cc0"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/widget_chip_bg"
+                android:gravity="center"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text=""
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:textColor="#0F6B54"/>
+
+            <TextView
+                android:id="@+id/w_cc1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/widget_chip_bg"
+                android:gravity="center"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text=""
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:textColor="#0F6B54"/>
+
+            <TextView
+                android:id="@+id/w_cc2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/widget_chip_bg"
+                android:gravity="center"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text=""
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:textColor="#0F6B54"/>
+
+            <TextView
+                android:id="@+id/w_cc3"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/widget_chip_bg"
+                android:gravity="center"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text=""
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:textColor="#0F6B54"/>
+        </LinearLayout>
+
+        <!-- 可滚动列表：显示不全时上下滑动 -->
+        <ListView
+            android:id="@+id/w_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="8dp"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:scrollbars="none"/>
+
+        <!-- 空态：没有待办作业时显示 -->
+        <TextView
+            android:id="@+id/w_empty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="暂无待办作业 🎉"
+            android:textSize="13sp"
+            android:shadowColor="#59000000"
+            android:shadowRadius="6"
+            android:shadowDx="0"
+            android:shadowDy="0"
+            android:textColor="#9CA3AF"
+            android:visibility="gone"/>
+    </LinearLayout>
+</FrameLayout>

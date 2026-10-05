@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 小组件 ListView 的单行布局。文字带柔和暗影：玻璃体半透，
+     暗影在深浅壁纸上都提升文字对比（同 timetable_widget_row） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/hw_row"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="3dp"
+    android:layout_marginBottom="3dp"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/widget_row_bg"
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
+
+    <TextView
+        android:id="@+id/w_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:minWidth="34dp"
+        android:text=""
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:shadowColor="#66000000"
+        android:shadowRadius="6"
+        android:shadowDx="0"
+        android:shadowDy="0"/>
+
+    <TextView
+        android:id="@+id/w_item"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="8dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text=""
+        android:textSize="13sp"
+        android:shadowColor="#66000000"
+        android:shadowRadius="6"
+        android:shadowDx="0"
+        android:shadowDy="0"
+        android:textColor="#1F2937"/>
+
+    <TextView
+        android:id="@+id/w_due"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:text=""
+        android:textSize="10sp"
+        android:shadowColor="#59000000"
+        android:shadowRadius="6"
+        android:shadowDx="0"
+        android:shadowDy="0"
+        android:textColor="#9CA3AF"/>
+</LinearLayout>

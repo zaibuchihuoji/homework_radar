@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课表小组件：玻璃底 ImageView（透明模式承载壁纸折射位图） + 内容层 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 液态玻璃底：透明模式由 GlassWallpaperRenderer 推位图，白卡模式隐藏 -->
+    <ImageView
+        android:id="@+id/tt_glass"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:importantForAccessibility="no"
+        android:visibility="gone"/>
+
+    <LinearLayout
+        android:id="@+id/tt_content"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@drawable/widget_bg"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="14dp">
+
+        <LinearLayout
+            android:id="@+id/tt_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp">
+
+            <ImageView
+                android:id="@+id/tt_icon"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:src="@mipmap/ic_launcher"/>
+
+            <TextView
+                android:id="@+id/tt_date"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:text="9月1日 周一"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:shadowColor="#66000000"
+                android:shadowRadius="6"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:textColor="#0F6B54"/>
+
+            <TextView
+                android:id="@+id/tt_week"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:maxLines="1"
+                android:text="第1周"
+                android:textSize="11sp"
+                android:shadowColor="#59000000"
+                android:shadowRadius="6"
+                android:shadowDx="0"
+                android:shadowDy="0"
+                android:textColor="#9CA3AF"/>
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/tt_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="8dp"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:scrollbars="none"/>
+
+        <TextView
+            android:id="@+id/tt_empty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="今天没有课 🎉"
+            android:textSize="13sp"
+            android:shadowColor="#59000000"
+            android:shadowRadius="6"
+            android:shadowDx="0"
+            android:shadowDy="0"
+            android:textColor="#9CA3AF"
+            android:visibility="gone"/>
+    </LinearLayout>
+</FrameLayout>

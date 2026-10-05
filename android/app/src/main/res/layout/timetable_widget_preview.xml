@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课表小组件的选择器静态预览：网格示意（星期列 × 节次行，含一个
+     实心绿「进行中」格）。刻意与作业小组件的「横向列表」预览拉开形态差，
+     用户在微件选择器里一眼可辨。仅用于展示观感，不承担真实数据渲染 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/tt_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_bg"
+    android:paddingStart="10dp"
+    android:paddingEnd="10dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:src="@mipmap/ic_launcher"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="9月1日 周一 · 第1周"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#0F6B54"/>
+    </LinearLayout>
+
+    <!-- 星期表头：与下方格子列对齐（时间列 26dp + 4 个等宽格）。
+         占位不能用 android.widget.Space——AppWidgetHostView 的白名单拒绝
+         加载该类（真机日志实证 InflateException），用空 LinearLayout 顶位 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="26dp"
+            android:layout_height="1dp"
+            android:orientation="horizontal"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:gravity="center"
+            android:text="一"
+            android:textSize="9sp"
+            android:textColor="#9CA3AF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:gravity="center"
+            android:text="二"
+            android:textSize="9sp"
+            android:textColor="#9CA3AF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:gravity="center"
+            android:text="三"
+            android:textSize="9sp"
+            android:textColor="#9CA3AF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:gravity="center"
+            android:text="四"
+            android:textSize="9sp"
+            android:textColor="#9CA3AF"/>
+    </LinearLayout>
+
+    <!-- 8:00 行 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="22dp"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="26dp"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:text="8:00"
+            android:textSize="9sp"
+            android:textColor="#B0B7C3"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell_class"
+            android:gravity="center"
+            android:text="高数"
+            android:textSize="8sp"
+            android:textColor="#0F6B54"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell_class"
+            android:gravity="center"
+            android:text="大英"
+            android:textSize="8sp"
+            android:textColor="#0F6B54"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell"/>
+    </LinearLayout>
+
+    <!-- 10:00 行（三格进行中：实心绿） -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="22dp"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="26dp"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:text="10:00"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:textColor="#0F6B54"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell_class"
+            android:gravity="center"
+            android:text="物理"
+            android:textSize="8sp"
+            android:textColor="#0F6B54"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell_now"
+            android:gravity="center"
+            android:text="化学"
+            android:textSize="8sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell"/>
+    </LinearLayout>
+
+    <!-- 14:00 行 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="22dp"
+        android:layout_marginTop="4dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="26dp"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:text="14:00"
+            android:textSize="9sp"
+            android:textColor="#B0B7C3"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell_class"
+            android:gravity="center"
+            android:text="数据结构"
+            android:textSize="8sp"
+            android:textColor="#0F6B54"/>
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_marginStart="3dp"
+            android:background="@drawable/tt_cell"/>
+    </LinearLayout>
+</LinearLayout>

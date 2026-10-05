@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 透明模式的列表行：亮玻璃药丸（vivo 图标"玻璃体"式）。
+     28%→16% 白：亮区护字、暗区不发白发塑料；
+     文字靠深色 + 阴影双保险保持可读。无描边。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:startColor="#48FFFFFF"
+        android:endColor="#29FFFFFF"/>
+    <corners android:radius="12dp"/>
+</shape>

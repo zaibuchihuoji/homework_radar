@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 透明模式（深色壁纸）课程待办分布药丸：深绿玻璃底 + 浅字（代码设 #D1FAE5）。
+     浅色壁纸沿用实底 widget_chip_bg + 深绿字。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#B3059669"/>
+    <corners android:radius="14dp"/>
+    <stroke android:width="2dp" android:color="#80FFFFFF"/>
+</shape>

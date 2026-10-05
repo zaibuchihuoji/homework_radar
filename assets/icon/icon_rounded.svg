@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="orange" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FF923E"/>
+      <stop offset="1" stop-color="#F3681A"/>
+    </linearGradient>
+    <filter id="paperShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="2" dy="10" stdDeviation="9" flood-color="#160F55" flood-opacity="0.35"/>
+    </filter>
+    <filter id="badgeShadow" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="1" dy="5" stdDeviation="5" flood-color="#160F55" flood-opacity="0.30"/>
+    </filter>
+    <g id="paper">
+      <g transform="rotate(-6 250 256)">
+        <rect x="162" y="148" width="176" height="216" rx="20" fill="#FFFFFF" filter="url(#paperShadow)"/>
+        <circle cx="205" cy="195" r="13" fill="url(#orange)"/>
+        <path d="M 199.5 195.5 L 204 200.5 L 212 190.5" fill="none" stroke="#FFFFFF" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="228" y="190" width="88" height="10" rx="5" fill="#CBD8D0"/>
+        <rect x="184" y="244" width="132" height="10" rx="5" fill="#CBD8D0"/>
+        <rect x="184" y="297" width="106" height="10" rx="5" fill="#CBD8D0"/>
+      </g>
+    </g>
+    <g id="badge">
+      <circle cx="332" cy="336" r="42" fill="#0F6B54" filter="url(#badgeShadow)"/>
+      <circle cx="332" cy="336" r="35" fill="url(#orange)"/>
+      <path d="M 332 318 L 332 336 L 346 344" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </defs>
+
+  <!-- 圆角底（传统图标） -->
+  <rect width="512" height="512" rx="115" fill="#0F6B54"/>
+  <use href="#paper"/>
+  <use href="#badge"/>
+</svg>

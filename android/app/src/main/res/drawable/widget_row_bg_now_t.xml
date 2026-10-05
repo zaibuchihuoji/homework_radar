@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 透明模式（深色壁纸）下"进行中"课程行：品牌绿玻璃（半透，无描边）。
+     之前是 #B3 不透实心加白框，玻璃面板上浮着一块塑料；降到 45% 让壁纸透出，
+     高亮靠色相跳变成立，不靠不透明度。
+     行内文字用浅薄荷色（代码设置）。浅色壁纸走实底版 widget_row_bg_now。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#73059669"/>
+    <corners android:radius="12dp"/>
+</shape>

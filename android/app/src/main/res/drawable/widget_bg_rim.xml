@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 液态玻璃的镜面 rim：叠在壁纸折射位图（w_glass ImageView）之上。
+     玻璃本体由 GlassWallpaperRenderer 的位图提供，这里只负责边缘光学：
+       ① 内层辉光：内缩一圈的弱描边，模拟光在玻璃厚度里的折射
+       ② 镜面描边：最外圈高光 rim，即"液态玻璃"的标志性亮边
+     实测 Pixel 桌面系统圆角掩模半径 ≈ 21dp：内缩 1dp + 半径 20dp 与掩模同心；
+     内容层自带 12dp padding，描边不会被列表行盖住 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ① 内层辉光（折射） -->
+    <item android:top="3dp" android:bottom="3dp" android:left="3dp" android:right="3dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000"/>
+            <corners android:radius="18dp"/>
+            <stroke android:width="2dp" android:color="#2EFFFFFF"/>
+        </shape>
+    </item>
+    <!-- ② 镜面描边 -->
+    <item android:top="1dp" android:bottom="1dp" android:left="1dp" android:right="1dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000"/>
+            <corners android:radius="20dp"/>
+            <stroke android:width="2dp" android:color="#A6FFFFFF"/>
+        </shape>
+    </item>
+</layer-list>

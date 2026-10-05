@@ -1,0 +1,7 @@
+<network-security-config>
+    <!-- 放行明文 HTTP：教务网址由用户任意输入（超级课程表式导入），
+         大量校内教务（正方/URP 老系统）只有 http 站点，而 WebView 遵循本配置——
+         按域白名单放行会让其他学校的 http 教务直接打不开。
+         平台登录页（超星/MOOC）均为固定 https 域名，不受影响。 -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

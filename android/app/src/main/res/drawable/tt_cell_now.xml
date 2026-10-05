@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课表小组件预览：进行中课程格（实心绿） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#0F6B54"/>
+    <corners android:radius="6dp"/>
+</shape>

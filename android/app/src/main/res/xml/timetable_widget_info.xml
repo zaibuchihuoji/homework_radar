@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 今日课表小组件：30 分钟系统重绘一次，让「正在上」的高亮跟着时间走 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="180dp"
+    android:minHeight="80dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/timetable_widget"
+    android:previewLayout="@layout/timetable_widget_preview"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"/>

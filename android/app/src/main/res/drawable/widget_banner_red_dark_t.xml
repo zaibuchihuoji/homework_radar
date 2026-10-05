@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 透明模式（深色壁纸）紧急横幅：深红玻璃底 + 浅字（代码设 #FCA5A5）。
+     半透深红让"紧急"参与玻璃语言，不再是一块实心贴纸。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#B3DC2626"/>
+    <corners android:radius="10dp"/>
+    <stroke android:width="2dp" android:color="#80FFFFFF"/>
+</shape>
