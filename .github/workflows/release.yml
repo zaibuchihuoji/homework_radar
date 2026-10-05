@@ -3,6 +3,10 @@
 # 和 KEYSTORE_PASSWORD；没配也能构建，但出来的是 debug 签名包（仅测试用）。
 name: Release APK
 
+# 新仓库默认 GITHUB_TOKEN 只读，创建 Release 需要 contents: write
+permissions:
+  contents: write
+
 on:
   push:
     tags:
