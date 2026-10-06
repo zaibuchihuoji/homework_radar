@@ -8,8 +8,10 @@
 /// 1. 课程列表 `GET {origin}/v2/api/web/courses/list?identity=2`
 ///    → {list: [{classroom_id, role, ...}]}，role==6 为学生身份；
 /// 2. 学习日志 `GET /v2/api/web/logs/learn/{classroomId}?page=&offset=200&sort=0&actype=-1`
-///    → {activities: [...]}，type==19 作业 / type==20 考试，
-///    截止 = content.score_d（毫秒 epoch，0/负数表示未设置）；
+///    → {activities: [...]}。真机实证（2026-10-06）：考核为 type==5，
+///    截止/成绩在条目顶层 deadline/score/status；社区文档形状 type==19
+///    作业 / 20 考试（截止 content.score_d）保留为兜底。详见
+///    parseLogActivities 注释；
 /// 3. 练习进度 `GET /mooc-api/v1/lms/exercise/get_exercise_list/{leafTypeId}/`——
 ///    一期不拉（完成状态证据弱，恒 todo + 合并层保留旧状态，同 MOOC 口径）。
 ///
@@ -19,8 +21,11 @@
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/homework.dart';
 import 'safe_http.dart';
@@ -112,8 +117,8 @@ class YuketangService {
     return data is Map && data['list'] is List;
   }
 
-  /// 我的课程（学生身份 role==6）。首页失败置 listFailed；主站失败自动
-  /// 换 pro origin（长江雨课堂口径），成功者记入 _activeOrigin。
+  /// 我的课程。首页失败置 listFailed；主站失败自动换 pro origin（长江雨
+  /// 课堂口径），成功者记入 _activeOrigin。调试构建把原始响应落盘供校准。
   Future<List<YktCourse>> courses() async {
     for (final origin in origins) {
       final resp = await _get('$origin/v2/api/web/courses/list?identity=2');
@@ -122,6 +127,14 @@ class YuketangService {
         return [];
       }
       if (resp.statusCode != 200) continue;
+      if (kDebugMode) {
+        try {
+          final dir = await getApplicationDocumentsDirectory();
+          final host = Uri.parse(origin).host;
+          File('${dir.path}/ykt_courses_$host.json')
+              .writeAsStringSync(resp.body, flush: true);
+        } catch (_) {}
+      }
       final parsed = parseCourseList(resp.body);
       if (parsed != null) {
         _activeOrigin = origin;
@@ -133,9 +146,13 @@ class YuketangService {
     return [];
   }
 
-  /// 课程列表解析（公开纯函数便于单测）：收 list 里 role==6 的学生课程，
-  /// 名字取 course_name/name/title，缺省「课程 {cid}」。list 缺失/非数组
-  /// 返回 null（形状陌生），空数组返回空列表（授权正常无课）。
+  /// 课程列表解析（公开纯函数便于单测）：收学生课程，名字取
+  /// course_name/name/title，缺省「课程 {cid}」。list 缺失/非数组返回
+  /// null（形状陌生），空数组返回空列表（授权正常无课）。
+  ///
+  /// role 口径：社区实证 6=学生，2026-10-06 真机（个人版号）实证 5 也是
+  /// 学生（一门 57 人班级课）。因此先按 5/6 过滤；若列表非空却没有一条
+  /// 命中，视为 role 字段口径再漂移，兜底全收——宁可多拉，不能静默 0 课。
   static List<YktCourse>? parseCourseList(String body) {
     dynamic json;
     try {
@@ -146,14 +163,9 @@ class YuketangService {
     if (json is! Map) return null;
     final data = json['data'] ?? json;
     if (data is! Map || data['list'] is! List) return null;
-    final out = <YktCourse>[];
-    final seen = <String>{};
-    for (final e in data['list'] as List) {
-      if (e is! Map) continue;
-      if (e['role'] != 6 && e['role'] != '6') continue;
+    YktCourse? fromEntry(Map e) {
       final cid = e['classroom_id'];
-      if (cid == null || '$cid'.trim().isEmpty) continue;
-      if (!seen.add('$cid')) continue;
+      if (cid == null || '$cid'.trim().isEmpty) return null;
       String? name;
       for (final k in const ['course_name', 'name', 'title']) {
         final v = e[k];
@@ -162,15 +174,32 @@ class YuketangService {
           break;
         }
       }
-      out.add(YktCourse(name ?? '课程 $cid', '$cid'.trim()));
+      return YktCourse(name ?? '课程 $cid', '$cid'.trim());
+    }
+
+    final out = <YktCourse>[];
+    final seen = <String>{};
+    for (final e in data['list'] as List) {
+      if (e is! Map) continue;
+      final role = e['role'];
+      if (role != 6 && role != '6' && role != 5 && role != '5') continue;
+      final c = fromEntry(e);
+      if (c != null && seen.add(c.classroomId)) out.add(c);
+    }
+    if (out.isEmpty) {
+      for (final e in data['list'] as List) {
+        if (e is! Map) continue;
+        final c = fromEntry(e);
+        if (c != null && seen.add(c.classroomId)) out.add(c);
+      }
     }
     return out;
   }
 
-  /// 单门课程的作业/考试截止（学习日志活动流）。type==19 作业、20 考试；
-  /// 截止 = content.score_d（毫秒，>0 才有效）。返回 null = 拉取失败
-  /// （请求失败/形状陌生），与「解析到但没带截止」区分——失败被当空的话
-  /// 该课旧条目会被整课清掉。
+  /// 单门课程的作业/考试截止（学习日志活动流）。形状见
+  /// [parseLogActivities]：type=5 顶层 deadline / type=19,20 content.score_d。
+  /// 返回 null = 拉取失败（请求失败/形状陌生），与「解析到但没带截止」
+  /// 区分——失败被当空的话该课旧条目会被整课清掉。
   Future<List<HomeworkItem>?> homeworkOf(YktCourse c) async {
     final out = <HomeworkItem>[];
     var sawActivity = false;
@@ -184,6 +213,13 @@ class YuketangService {
       // 中途任何一页失败都整体返回 null：半截数据不能当权威结果，
       // 否则 complete 守卫会把没拉到的旧条目当「确认消失」清掉
       if (resp == null || resp.statusCode != 200) return null;
+      if (kDebugMode) {
+        try {
+          final dir = await getApplicationDocumentsDirectory();
+          File('${dir.path}/ykt_${c.classroomId}_p$page.json')
+              .writeAsStringSync(resp.body, flush: true);
+        } catch (_) {}
+      }
       final parsed = parseLogActivities(resp.body, courseName: c.name);
       if (parsed == null) return null; // 形状陌生 → 不可信结果
       sawActivity = sawActivity || parsed.isNotEmpty;
@@ -239,11 +275,19 @@ class YuketangService {
 
   // ---- 纯函数解析（公开便于单测）----
 
-  /// 学习日志解析：activities 里收 type 19/20 的条目。
-  /// 条目 id：activity.id → content.leaf_type_id → content.leaf_id 兜底；
-  /// 标题：activity.title → 「作业/考试」；截止：content.score_d（毫秒，
-  /// 必须 >0）。无截止的条目跳过（雷达核心原则）。activities 缺失/非数组
-  /// 返回 null（形状陌生）。
+  /// 学习日志解析（公开便于单测）。
+  ///
+  /// 条目形状两套并存（2026-10-06 真机实证 + 社区文档）：
+  /// - type=5 习题/考核（真机实证）：截止在条目顶层 `deadline`（毫秒），
+  ///   status/score/total_score 也在顶层，content 为空；status==3 或带
+  ///   score 视为已完成判分；
+  /// - type=19 作业 / 20 考试（社区口径）：截止 content.score_d，无完成
+  ///   证据恒 todo；
+  /// - 其余（type=14 图文课件等教学内容）无截止概念，跳过。
+  ///
+  /// 返回 null 仅限「截止型条目（5/19/20）存在却一条都没解析出截止」——
+  /// 字段口径可能再漂移，空列表会被合并层当权威整课清理，不能赌。
+  /// 全是教学内容或 activities 为空 = 权威「本课无截止条目」，返回空列表。
   static List<HomeworkItem>? parseLogActivities(
     String body, {
     required String courseName,
@@ -259,30 +303,36 @@ class YuketangService {
     final data = json['data'] ?? json;
     if (data is! Map || data['activities'] is! List) return null;
     final out = <HomeworkItem>[];
+    var sawDeadlineCapable = false;
     for (final raw in data['activities'] as List) {
       if (raw is! Map) continue;
       final type = raw['type'];
-      if (type != 19 && type != 20 && type != '19' && type != '20') continue;
-      final content = raw['content'];
-      if (content is! Map) continue;
-      final due = _dueOf(content['score_d']);
+      final isExamType =
+          type == 5 || type == 20 || type == '5' || type == '20';
+      final isWorkType = type == 19 || type == '19';
+      if (!isExamType && !isWorkType) continue;
+      sawDeadlineCapable = true;
+      final content = raw['content'] is Map ? raw['content'] as Map : const {};
+      final due = _dueOf(raw['deadline']) ?? _dueOf(content['score_d']);
       if (due == null) continue; // 无截止无法排提醒，跳过
       final id = raw['id'] ?? content['leaf_type_id'] ?? content['leaf_id'];
       if (id == null) continue;
       String? title;
       final t = raw['title'];
       if (t is String && t.trim().isNotEmpty) title = t.trim();
+      final graded = raw['status'] == 3 ||
+          raw['status'] == '3' ||
+          raw['score'] is num;
       out.add(HomeworkItem(
         id: 'ykt_${stableHash(courseName)}_${type}_$id',
         platform: PlatformKind.yuketang,
         course: courseName,
-        title: title ?? (type == 20 || type == '20' ? '考试' : '作业'),
+        title: title ?? (isExamType ? '考试' : '作业'),
         dueAt: due,
-        // 日志活动流没有可信的完成状态证据，恒 todo；合并层对 yuketang
-        // 保留旧状态（同 MOOC/学堂在线口径），不打回
-        status: HwStatus.todo,
+        status: graded ? HwStatus.done : HwStatus.todo,
       ));
     }
+    if (sawDeadlineCapable && out.isEmpty) return null;
     return out;
   }
 
