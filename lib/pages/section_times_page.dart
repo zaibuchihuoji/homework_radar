@@ -5,6 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../ui/theme_forms.dart';
 import '../services/section_times.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
@@ -41,22 +42,34 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
     final base = start ? cur.$1 : cur.$2;
     final picked = await showTimePicker(
       context: context,
-      initialTime: TimeOfDay(hour: base ~/ 60, minute: base % 60),
+      initialTime: TimeOfDay(hour: (base ~/ 60) % 24, minute: base % 60),
     );
     if (picked == null || !mounted) return;
-    final m = picked.hour * 60 + picked.minute;
+    // 作息允许末节在24:00结束；选择器只接受0..23小时，用00:00表达日末。
+    final pickedMinute = picked.hour * 60 + picked.minute;
+    final m = !start && pickedMinute == 0 ? 24 * 60 : pickedMinute;
     // 不能与相邻节重叠：乱序/重叠的作息会让上课提醒和时刻指示线错位。
     // 相接（本节下课 = 上节下课时间）是允许的；与下一节**相等也算重叠**——
     // 只拦严格大于的话能存出零长度节，读回时被存储层静默换成默认表，
     // 页面显示与提醒/小组件实际生效时间分叉。
     if (start && section > 1 && m < _times[section - 2].$2) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('与第${section - 1}节重叠（那节 ${_hm(_times[section - 2].$2)} 才下课）')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '与第${section - 1}节重叠（那节 ${_hm(_times[section - 2].$2)} 才下课）',
+          ),
+        ),
+      );
       return;
     }
     if (section < _times.length && m >= _times[section].$1) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('与第${section + 1}节重叠（那节 ${_hm(_times[section].$1)} 就上课）')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '与第${section + 1}节重叠（那节 ${_hm(_times[section].$1)} 就上课）',
+          ),
+        ),
+      );
       return;
     }
     if (!start && m <= cur.$1) {
@@ -75,8 +88,8 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
       if (end <= m) {
         // 末节选到 23:59 这类时刻：挤不出合法的结束时间，拒掉而不是
         // 存出 start==end 的零长度节
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('这个起始时间太晚，存不下完整的节次')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('这个起始时间太晚，存不下完整的节次')));
         return;
       }
       next = (m, end);
@@ -100,8 +113,8 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
     final last = _times.last;
     var start = last.$2 + 5;
     if (start + 45 > 24 * 60) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('已经排到深夜，加不下了')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('已经排到深夜，加不下了')));
       return;
     }
     setState(() => _times.add((start, start + 45)));
@@ -111,16 +124,18 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
   Future<void> _reset() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => ThemedAlertDialog(
         title: const Text('恢复默认作息'),
         content: const Text('放弃自定义时间，回到内置作息表？'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消')),
+            child: const Text('取消'),
+          ),
           FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('恢复')),
+            child: const Text('恢复'),
+          ),
         ],
       ),
     );
@@ -143,7 +158,8 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
         style: TextStyle(
             fontSize: 13.5,
             fontWeight: FontWeight.w600,
-            color: full ? textFaint(context) : _brandOf(context)),
+          color: full ? textFaint(context) : _brandOf(context),
+        ),
       ),
       subtitle: Text(
         full ? '与课表网格一致' : '晚课/16 节制学校在这里补齐时刻',
@@ -178,7 +194,10 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
               '有 13-16 节晚课的学校请在这里补全时刻，'
               '否则对应课程不排上课提醒。',
               style: TextStyle(
-                  fontSize: 12.5, height: 1.6, color: textSecondary(context)),
+                fontSize: 12.5,
+                height: 1.6,
+                color: textSecondary(context),
+              ),
             ),
           ),
           Expanded(
@@ -193,34 +212,45 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
                 return ListTile(
                   leading: SizedBox(
                     width: 46,
-                    child: Text('第${i + 1}节',
+                    child: Text(
+                      '第${i + 1}节',
                         style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w700,
-                            color: textPrimary(context))),
+                        color: textPrimary(context),
+                      ),
+                    ),
                   ),
                   title: Row(
                     children: [
                       TextButton(
                         onPressed: () => _pick(section: i + 1, start: true),
-                        child: Text(_hm(a),
+                        child: Text(
+                          _hm(a),
                             style: const TextStyle(
                                 fontSize: 16.5,
                                 fontWeight: FontWeight.w700,
-                                fontFeatures: [FontFeature.tabularFigures()])),
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text('–',
-                            style: TextStyle(color: textFaint(context))),
+                        child: Text(
+                          '–',
+                          style: TextStyle(color: textFaint(context)),
+                        ),
                       ),
                       TextButton(
                         onPressed: () => _pick(section: i + 1, start: false),
-                        child: Text(_hm(b),
+                        child: Text(
+                          _hm(b),
                             style: const TextStyle(
                                 fontSize: 16.5,
                                 fontWeight: FontWeight.w700,
-                                fontFeatures: [FontFeature.tabularFigures()])),
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
                       ),
                     ],
                   ),

@@ -9,14 +9,18 @@ import 'package:homework_radar/ui/tokens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('五样式 × 明暗都能给出完整调色板', () {
     for (final style in ThemeStyle.values) {
       for (final bright in Brightness.values) {
         final pal = stylePalette(style, bright);
         final tag = '${style.name}/${bright.name}';
         expect(pal.bg.a, 1.0, reason: '$tag bg 必须不透明');
-        expect(pal.modal.a, greaterThanOrEqualTo(0.9),
-            reason: '$tag modal 允许微透但必须接近实底（弹层可读兜底）');
+        expect(
+          pal.modal.a,
+          greaterThanOrEqualTo(0.9),
+          reason: '$tag modal 允许微透但必须接近实底（弹层可读兜底）',
+        );
         expect(pal.accent.a, 1.0, reason: '$tag accent');
         // 像素直角 radius=0 是设计，其余样式必须大于 0（下面 pixel 分支另有断言）
         expect(pal.radius, greaterThanOrEqualTo(0), reason: '$tag radius');
@@ -32,14 +36,15 @@ void main() {
         // 带自绘底衬的样式必须声明 hasThemedBg（Scaffold 据此透明化，
         // 否则底衬被不透明底色盖住——莫兰迪/像素曾踩过）
         expect(
-            pal.hasThemedBg,
-            style == ThemeStyle.morandi ||
-                style == ThemeStyle.pixel ||
-                style == ThemeStyle.receipt ||
-                style == ThemeStyle.terminal ||
-                style == ThemeStyle.journal ||
-                style == ThemeStyle.editorial,
-            reason: tag);
+          pal.hasThemedBg,
+          style == ThemeStyle.morandi ||
+              style == ThemeStyle.pixel ||
+              style == ThemeStyle.receipt ||
+              style == ThemeStyle.terminal ||
+              style == ThemeStyle.journal ||
+              style == ThemeStyle.editorial,
+          reason: tag,
+        );
         if (pal.inkWash) {
           expect(pal.cardWash, isNotNull, reason: '$tag 水墨必须有浓淡墨阶');
           expect(pal.cardWash!.length, 2, reason: tag);
@@ -74,20 +79,29 @@ void main() {
     // 墨阶渐变在两个水墨样式之间逐色插值，跨水墨/非水墨整体切换
     final i1 = stylePalette(ThemeStyle.amoled, Brightness.light);
     final i2 = stylePalette(ThemeStyle.amoled, Brightness.dark);
-    expect(i1.lerp(i2, 0.5).cardWash![0],
-        Color.lerp(i1.cardWash![0], i2.cardWash![0], 0.5));
+    expect(
+      i1.lerp(i2, 0.5).cardWash![0],
+      Color.lerp(i1.cardWash![0], i2.cardWash![0], 0.5),
+    );
     expect(a.lerp(b, 0.5).cardWash, isNull, reason: 't<0.5 用 a 的 cardWash');
-    expect(stylePalette(ThemeStyle.clean, Brightness.light)
-            .lerp(stylePalette(ThemeStyle.amoled, Brightness.light), 0.9)
-            .inkWash,
-        true, reason: 't>=0.5 用 b 的 inkWash');
+    expect(
+      stylePalette(
+        ThemeStyle.clean,
+        Brightness.light,
+      ).lerp(stylePalette(ThemeStyle.amoled, Brightness.light), 0.9).inkWash,
+      true,
+      reason: 't>=0.5 用 b 的 inkWash',
+    );
   });
 
   test('全部样式卡不透明；墨黑无描边、层次靠墨阶', () {
     for (final style in ThemeStyle.values) {
       for (final bright in Brightness.values) {
-        expect(stylePalette(style, bright).card.a, 1.0,
-            reason: '${style.name}/${bright.name}');
+        expect(
+          stylePalette(style, bright).card.a,
+          1.0,
+          reason: '${style.name}/${bright.name}',
+        );
       }
     }
     final amoled = stylePalette(ThemeStyle.amoled, Brightness.dark);
@@ -96,9 +110,11 @@ void main() {
     expect(amoled.cardBorder.a, 0, reason: '水墨无描边，层次全靠浓淡墨阶');
     // 浅色不再回退清夏：宣纸玉白底 + 墨晕阴影，是独立的水墨浅色语言
     final amoledLight = stylePalette(ThemeStyle.amoled, Brightness.light);
-    expect(amoledLight.bg,
-        isNot(stylePalette(ThemeStyle.clean, Brightness.light).bg),
-        reason: '墨黑浅色必须是独立水墨语言，不能回退清夏');
+    expect(
+      amoledLight.bg,
+      isNot(stylePalette(ThemeStyle.clean, Brightness.light).bg),
+      reason: '墨黑浅色必须是独立水墨语言，不能回退清夏',
+    );
     expect(amoledLight.shadow, isNotEmpty, reason: '浅色墨晕负责卡面分层');
   });
 
@@ -108,8 +124,11 @@ void main() {
       final pal = theme.extension<StylePalette>();
       expect(pal, isNotNull, reason: '${style.name} 必须挂上扩展');
       expect(pal!.accent, stylePalette(style, Brightness.light).accent);
-      expect(theme.colorScheme.primary, pal.accent,
-          reason: '${style.name} 组件主色必须与调色板一致');
+      expect(
+        theme.colorScheme.primary,
+        pal.accent,
+        reason: '${style.name} 组件主色必须与调色板一致',
+      );
       expect(theme.scaffoldBackgroundColor, pal.bg);
     }
   });
@@ -117,31 +136,39 @@ void main() {
   test('深色锁：非清夏主题即使请求深色也返回浅色主题', () {
     for (final style in ThemeStyle.values) {
       final dark = buildTheme(Brightness.dark, style);
-      if (style == ThemeStyle.clean) {
-        expect(dark.scaffoldBackgroundColor,
-            stylePalette(style, Brightness.dark).bg,
-            reason: '清夏保留独立深色语言');
+      if (style == ThemeStyle.clean || style == ThemeStyle.green) {
+        expect(
+          dark.scaffoldBackgroundColor,
+          stylePalette(style, Brightness.dark).bg,
+          reason: '清夏保留独立深色语言',
+        );
       } else {
-        expect(dark.scaffoldBackgroundColor,
-            stylePalette(style, Brightness.light).bg,
-            reason: '${style.name} 未打磨深色观感，必须钳回浅色');
+        expect(
+          dark.scaffoldBackgroundColor,
+          stylePalette(style, Brightness.light).bg,
+          reason: '${style.name} 未打磨深色观感，必须钳回浅色',
+        );
       }
     }
   });
 
   test('更新版本号比较：逐段数值比较，兼容 v 前缀与缺段', () {
     expect(compareVersions('1.0.1', '1.0.0'), greaterThan(0));
-    expect(compareVersions('v1.1.0', '1.0.9'), greaterThan(0),
-        reason: 'v 前缀要剥掉；9→10 是数值比较不是字典序');
+    expect(
+      compareVersions('v1.1.0', '1.0.9'),
+      greaterThan(0),
+      reason: 'v 前缀要剥掉；9→10 是数值比较不是字典序',
+    );
     expect(compareVersions('1.0', '1.0.0'), 0, reason: '缺段补 0');
     expect(compareVersions('1.0.0', '1.0.0'), 0);
     expect(compareVersions('1.0.0', '0.9.9'), greaterThan(0));
     expect(compareVersions('0.9.9', '1.0.0'), lessThan(0));
     final info = UpdateInfo(
-        version: '1.0.1',
-        releaseUrl: 'https://github.com/x/y/releases',
-        apkUrl: 'https://github.com/x/y/releases/download/v1.0.1/app.apk',
-        notes: '');
+      version: '1.0.1',
+      releaseUrl: 'https://github.com/x/y/releases',
+      apkUrl: 'https://github.com/x/y/releases/download/v1.0.1/app.apk',
+      notes: '',
+    );
     expect(info.isNewerThan('1.0.0'), true);
     expect(info.isNewerThan('1.0.1'), false);
     expect(info.isNewerThan('1.0.2'), false);
@@ -170,8 +197,11 @@ void main() {
 
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
-    expect(BackupService.exportMap()['settings']['uiStyle'], 'clean',
-        reason: '默认样式也要随备份走，恢复端才能确定还原');
+    expect(
+      BackupService.exportMap()['settings']['uiStyle'],
+      'clean',
+      reason: '默认样式也要随备份走，恢复端才能确定还原',
+    );
     await BackupService.importJson(exported);
     expect(Storage.uiStyle(), 'paper');
   });

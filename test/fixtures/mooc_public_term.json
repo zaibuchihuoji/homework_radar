@@ -1,0 +1,45 @@
+{
+  "code": 0,
+  "result": {
+    "id": 2,
+    "courseId": 1,
+    "chapters": [
+      {
+        "id": 10,
+        "lessons": [
+          {
+            "id": 11,
+            "units": [
+              {
+                "contentType": 3,
+                "id": 12,
+                "name": "Document"
+              }
+            ],
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 14,
+            "contentType": 3,
+            "contentId": 8,
+            "name": "Homework",
+            "test": {
+              "id": 8,
+              "type": 3,
+              "name": "Homework",
+              "deadline": 1799765999000,
+              "examId": -1
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [],
+        "exam": null
+      }
+    ],
+    "exams": []
+  }
+}

@@ -14,42 +14,65 @@ import 'timetable_parser.dart';
 class TimetableTextParser {
   TimetableTextParser._();
 
-  static final _dayLine =
-      RegExp(r'^[（(]?\s*(?:星期|周|礼拜)\s*([一二三四五六日天])\s*[)）]?$');
+  static final _dayLine = RegExp(
+    r'^[（(]?\s*(?:星期|周|礼拜)\s*([一二三四五六日天])\s*[)）]?$',
+  );
+
   /// 行内星期前缀：星期字后面必须是空白/「第」/数字/行尾才算前缀，
   /// 否则「周一鸣 高等数学」这类课名/人名会被当成星期吞掉。
-  static final _dayPrefix =
-      RegExp(r'^(?:星期|周|礼拜)\s*([一二三四五六日天])(?=\s|第|\d|$)');
+  static final _dayPrefix = RegExp(r'^(?:星期|周|礼拜)\s*([一二三四五六日天])(?=\s|第|\d|$)');
 
   /// 星期词（不限行首）：用于识别网页复制的整行星期表头。
   static final _dayWord = RegExp(r'(?:星期|周|礼拜)[一二三四五六日天]');
 
   /// 表头行除星期词外还可能夹的列头词/空白（「节次/时间/上午/下午/午/中午/
   /// 晚上」）。靠「剔除后整行为空」兜底，多列几个词不会误伤含真实内容的行。
-  static final _headerFiller =
-      RegExp(r'节次|时间|上午|下午|中午|晚上|午|\s');
+  static final _headerFiller = RegExp(r'节次|时间|上午|下午|中午|晚上|午|\s');
 
   /// 学期文本（与 timetable_parser.dart extractJs 的正则同口径）。
-  static final _semester =
-      RegExp(r'\d{4}-\d{4}学年第[一二三四]学期');
+  static final _semester = RegExp(r'\d{4}-\d{4}学年第[一二三四]学期');
 
   /// 节次行（「3-4节」「第3,4节」）：行内式整行课程的开头标志。
-  static final _leadingSections =
-      RegExp(r'^第?\s*\d{1,2}\s*[-–—,，]\s*\d{1,2}\s*节$');
+  static final _leadingSections = RegExp(
+    r'^第?\s*\d{1,2}\s*[-–—,，]\s*\d{1,2}\s*节$',
+  );
 
   static int _dayNum(String cn) {
-    const map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7, '天': 7};
+    const map = {
+      '一': 1,
+      '二': 2,
+      '三': 3,
+      '四': 4,
+      '五': 5,
+      '六': 6,
+      '日': 7,
+      '天': 7,
+    };
     return map[cn] ?? 0;
   }
 
-  static List<Course> parse(String text) =>
-      parseWithSemester(text).courses;
+  static List<String> _inlineTokens(String line) {
+    final merged = <String>[];
+    for (final token in line.split(RegExp(r'\s+')).where((s) => s.isNotEmpty)) {
+      if (merged.isNotEmpty &&
+          _leadingSections.hasMatch(token) &&
+          TimetableParser.parseWeekLine(merged.last)?.$1.isNotEmpty == true) {
+        merged[merged.length - 1] = '${merged.last} $token';
+      } else {
+        merged.add(token);
+      }
+    }
+    return merged;
+  }
+
+  static List<Course> parse(String text) => parseWithSemester(text).courses;
 
   /// 解析并附带扫出的学期文本（「2025-2026学年第一学期」）。
   /// 页面把 semesterText 传给 onTimetableCaptured 后，换学期贴整表
   /// 才会走整体替换而不是 union 合并，避免两学期课程混排。
   static ({List<Course> courses, String semesterText}) parseWithSemester(
-      String text) {
+    String text,
+  ) {
     var t = text.replaceAll('\r', '');
     // URP 花括号字段 → 逐字段成行
     if (t.contains('{')) t = t.replaceAll(RegExp(r'[{};；|]'), '\n');
@@ -65,8 +88,13 @@ class TimetableTextParser {
         // 块式格式（应用文档教用户的主格式）本就不含节次字段：兜底出的
         // 1-1 节不是真实数据，标「节次待定」让预览页不预勾选，否则一键
         // 入库后上课提醒全按第 1 节排
-        out.add(TimetableParser.entryToCourse(e, weekday,
-            provisionalSections: e.start <= 0));
+        out.add(
+          TimetableParser.entryToCourse(
+            e,
+            weekday,
+            provisionalSections: e.start <= 0,
+          ),
+        );
       }
       block = [];
     }
@@ -111,7 +139,7 @@ class TimetableTextParser {
         weekday = _dayNum(mPre.group(1)!);
         final rest = workLine.substring(mPre.end).trim();
         if (rest.isNotEmpty) {
-          block.addAll(rest.split(RegExp(r'\s+')).where((s) => s.isNotEmpty));
+          block.addAll(_inlineTokens(rest));
         }
         continue;
       }
@@ -119,26 +147,22 @@ class TimetableTextParser {
       // 无前缀行与行内式一致按空白分词：同一天第二门课省略「周X」前缀时
       //（如「3-4节 大学物理 王二 2-17周 5-102」），整行入块会成课名、
       // 因无周次被 parseCellLines 静默丢弃
-      final tokens =
-          workLine.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
-      // 「1-16周 第1-2节」周次+节次同行的粘贴形态：拆开的纯节次 token 会被
-      // parseCellLines 当独立节次行误开新条目（本门丢节次、教室成幽灵），
-      // 合并回前面的周次 token 恢复整行语义
-      final merged = <String>[];
-      for (final tok in tokens) {
-        if (merged.isNotEmpty &&
-            _leadingSections.hasMatch(tok) &&
-            merged.last.contains('周') &&
-            merged.last.startsWith(RegExp(r'\d'))) {
-          merged[merged.length - 1] = '${merged.last} $tok';
-        } else {
-          merged.add(tok);
-        }
-      }
+      // 块式字段原样保留，避免 College English / 大学英语 A 被拆成另一门课。
+      // 只有以节次开头的完整行才使用行内分词。
+      final tokens = _inlineTokens(workLine);
+      final inline = tokens.length > 1 &&
+          (RegExp(r'^第?\d{1,2}(?:[-–—,，]\d{1,2})?节$').hasMatch(tokens.first) ||
+              (tokens.length >= 3 &&
+                  tokens.skip(1).any(
+                        (t) =>
+                            TimetableParser.parseWeekLine(t)?.$1.isNotEmpty ==
+                            true,
+                      )));
+      final merged = inline ? tokens : [workLine];
       // 节次开头的多词行是完整的一门课：先结算上一块。不结算的话它的
       // 节次行会挂到上一门课上，把上一门已确定的节次改写掉
       //（单 token 的独立节次行是块式的字段行，仍归当前块）
-      if (merged.length > 1 && _leadingSections.hasMatch(merged.first)) {
+      if (inline) {
         flush();
       }
       block.addAll(merged);

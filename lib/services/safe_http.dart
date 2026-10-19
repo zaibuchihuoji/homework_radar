@@ -14,7 +14,13 @@ import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart' as http_io;
 
 class SafeHttpLogEntry {
-  SafeHttpLogEntry(this.time, this.method, this.url, this.status, this.bodySnippet);
+  SafeHttpLogEntry(
+    this.time,
+    this.method,
+    this.url,
+    this.status,
+    this.bodySnippet,
+  );
 
   final DateTime time;
   final String method;
@@ -23,12 +29,12 @@ class SafeHttpLogEntry {
   final String bodySnippet;
 
   Map<String, dynamic> toJson() => {
-        'time': time.toIso8601String(),
-        'method': method,
-        'url': url,
-        'status': status,
-        'body': bodySnippet,
-      };
+    'time': time.toIso8601String(),
+    'method': method,
+    'url': url,
+    'status': status,
+    'body': bodySnippet,
+  };
 }
 
 class SafeHttp {
@@ -108,6 +114,63 @@ class SafeHttp {
     if (log.length > maxLogEntries) log.removeRange(maxLogEntries, log.length);
   }
 
+  /// The socket client must never follow redirects itself: it knows nothing
+  /// about our destination allowlist. Keep one outer timeout for this entire
+  /// chain, including every response header and body.
+  static Future<http.Response> _sendRedirectChain(
+    http.Request initial, {
+    required bool followRedirects,
+  }) async {
+    var request = initial;
+    final visited = <Uri>{initial.url};
+    var redirects = 0;
+    while (true) {
+      request.followRedirects = false;
+      final response = await _client.send(request).then(http.Response.fromStream);
+      final code = response.statusCode;
+      // Match Dart HttpClient's automatic redirect semantics. In particular,
+      // POST 301/302/307/308 must not start replaying a sensitive request body.
+      final canRedirect = request.method == 'GET' || request.method == 'HEAD'
+          ? const [301, 302, 303, 307, 308].contains(code)
+          : request.method == 'POST' && code == 303;
+      if (!followRedirects || !canRedirect) return response;
+
+      final location = response.headers['location'];
+      if (location == null) {
+        throw http.ClientException('重定向响应缺少目标地址');
+      }
+      final target = validate(request.url.resolve(location).toString());
+      if (target == null || target.userInfo.isNotEmpty ||
+          (request.url.scheme == 'https' && target.scheme != 'https')) {
+        throw http.ClientException('重定向目标未通过安全校验');
+      }
+      if (redirects >= 5 || !visited.add(target)) {
+        throw http.ClientException('重定向循环或超过上限');
+      }
+      redirects++;
+
+      final method = request.method == 'POST' ? 'GET' : request.method;
+      final next = http.Request(method, target);
+      final sameOrigin = request.url.scheme == target.scheme &&
+          request.url.host == target.host && request.url.port == target.port;
+      if (sameOrigin) {
+        next.headers.addAll(request.headers);
+      } else {
+        // Credential-bearing headers include caller-defined CSRF/session
+        // headers, not just Cookie/Authorization. Do not forward any caller
+        // headers or private Referer across origins, even between allowed sites.
+        next.headers['User-Agent'] = _ua;
+      }
+      if (method != request.method) {
+        next.headers.removeWhere((name, _) => const [
+          'content-type', 'content-length', 'transfer-encoding',
+        ].contains(name.toLowerCase()));
+      }
+      // Automatic POST redirects become GET; no body is ever replayed.
+      request = next;
+    }
+  }
+
   static Future<http.Response?> get(
     String url, {
     Map<String, String>? headers,
@@ -122,7 +185,7 @@ class SafeHttp {
       final req = http.Request('GET', u)
         ..followRedirects = followRedirects
         ..headers.addAll({'User-Agent': _ua, ...?headers});
-      final resp = await http.Response.fromStream(await _client.send(req))
+      final resp = await _sendRedirectChain(req, followRedirects: followRedirects)
           .timeout(_requestTimeout);
       _record('GET', url, resp.statusCode, resp.body);
       return resp;
@@ -152,7 +215,7 @@ class SafeHttp {
           'Content-Type': 'application/x-www-form-urlencoded',
           ...?headers,
         });
-      final resp = await http.Response.fromStream(await _client.send(req))
+      final resp = await _sendRedirectChain(req, followRedirects: followRedirects)
           .timeout(_requestTimeout);
       _record('POST', url, resp.statusCode, resp.body);
       return resp;
@@ -184,7 +247,7 @@ class SafeHttp {
           'Content-Type': 'application/json; charset=utf-8',
           ...?headers,
         });
-      final resp = await http.Response.fromStream(await _client.send(req))
+      final resp = await _sendRedirectChain(req, followRedirects: followRedirects)
           .timeout(_requestTimeout);
       _record('POST', url, resp.statusCode, resp.body);
       return resp;
@@ -198,8 +261,8 @@ class SafeHttp {
 
   static Map<String, String> authedHeaders(String? cookie) =>
       cookie == null || cookie.isEmpty
-          ? {}
-          : {'Cookie': cookie, 'Referer': 'https://mooc1.chaoxing.com/'};
+      ? {}
+      : {'Cookie': cookie, 'Referer': 'https://mooc1.chaoxing.com/'};
 }
 
 class DebugLogCodec {
@@ -210,13 +273,15 @@ class DebugLogCodec {
     try {
       final list = (jsonDecode(s) as List).cast<Map<String, dynamic>>();
       return list
-          .map((j) => SafeHttpLogEntry(
-                DateTime.tryParse(j['time'] as String? ?? '') ?? DateTime.now(),
-                j['method'] as String? ?? '?',
-                j['url'] as String? ?? '',
-                j['status'] as int?,
-                j['body'] as String? ?? '',
-              ))
+          .map(
+            (j) => SafeHttpLogEntry(
+              DateTime.tryParse(j['time'] as String? ?? '') ?? DateTime.now(),
+              j['method'] as String? ?? '?',
+              j['url'] as String? ?? '',
+              j['status'] as int?,
+              j['body'] as String? ?? '',
+            ),
+          )
           .toList();
     } catch (_) {
       return [];

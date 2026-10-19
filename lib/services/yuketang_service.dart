@@ -89,19 +89,24 @@ class YuketangService {
   /// Cookie 是否有效（问一次课程列表）。结论见 [YktSessionState]。
   Future<YktSessionState> checkLogin() async {
     if (cookie == null || cookie!.isEmpty) return YktSessionState.expired;
+    var unknown = false;
     for (final origin in origins) {
       final resp = await _get('$origin/v2/api/web/courses/list?identity=2');
-      if (resp == null) return YktSessionState.unknown; // 网络失败 ≠ 登录过期
+      if (resp == null || resp.statusCode >= 500) {
+        unknown = true;
+        continue;
+      }
       if (resp.statusCode == 401 || resp.statusCode == 403) {
-        return YktSessionState.expired;
+        continue;
       }
       if (resp.statusCode == 200 && courseListOk(resp.body)) {
         _activeOrigin = origin;
         return YktSessionState.ok;
       }
-      // 该 origin 不认这份会话（形状陌生/业务拒绝）：换下一个 origin
+      // 陌生页面、限流和未校准的业务码不是过期证据；仍尝试另一站。
+      unknown = true;
     }
-    return YktSessionState.expired;
+    return unknown ? YktSessionState.unknown : YktSessionState.expired;
   }
 
   /// 课程列表响应判定（公开纯函数便于单测）：JSON Map 且 list 是数组。
@@ -112,7 +117,7 @@ class YuketangService {
     } catch (_) {
       return false;
     }
-    if (json is! Map) return false;
+    if (json is! Map || !_envelopeOk(json)) return false;
     final data = json['data'] ?? json;
     return data is Map && data['list'] is List;
   }
@@ -120,12 +125,13 @@ class YuketangService {
   /// 我的课程。首页失败置 listFailed；主站失败自动换 pro origin（长江雨
   /// 课堂口径），成功者记入 _activeOrigin。调试构建把原始响应落盘供校准。
   Future<List<YktCourse>> courses() async {
-    for (final origin in origins) {
+    final ordered = [
+      ?_activeOrigin,
+      ...origins.where((o) => o != _activeOrigin),
+    ];
+    for (final origin in ordered) {
       final resp = await _get('$origin/v2/api/web/courses/list?identity=2');
-      if (resp == null) {
-        listFailed = true;
-        return [];
-      }
+      if (resp == null) continue;
       if (resp.statusCode != 200) continue;
       if (kDebugMode) {
         try {
@@ -160,7 +166,7 @@ class YuketangService {
     } catch (_) {
       return null;
     }
-    if (json is! Map) return null;
+    if (json is! Map || !_envelopeOk(json)) return null;
     final data = json['data'] ?? json;
     if (data is! Map || data['list'] is! List) return null;
     YktCourse? fromEntry(Map e) {
@@ -179,6 +185,11 @@ class YuketangService {
 
     final out = <YktCourse>[];
     final seen = <String>{};
+    // A malformed student row must not disappear from a supposedly complete
+    // course list, even when another course parsed successfully.
+    for (final e in data['list'] as List) {
+      if (e is! Map || fromEntry(e) == null) return null;
+    }
     for (final e in data['list'] as List) {
       if (e is! Map) continue;
       final role = e['role'];
@@ -202,7 +213,6 @@ class YuketangService {
   /// 区分——失败被当空的话该课旧条目会被整课清掉。
   Future<List<HomeworkItem>?> homeworkOf(YktCourse c) async {
     final out = <HomeworkItem>[];
-    var sawActivity = false;
     final seen = <String>{};
     for (var page = 0; page < _maxLogPages; page++) {
       final resp = await _get(
@@ -220,9 +230,12 @@ class YuketangService {
               .writeAsStringSync(resp.body, flush: true);
         } catch (_) {}
       }
-      final parsed = parseLogActivities(resp.body, courseName: c.name);
+      final parsed = parseLogActivities(
+        resp.body,
+        courseName: c.name,
+        classroomId: c.classroomId,
+      );
       if (parsed == null) return null; // 形状陌生 → 不可信结果
-      sawActivity = sawActivity || parsed.isNotEmpty;
       var added = 0;
       for (final item in parsed) {
         if (seen.add(item.id)) {
@@ -231,12 +244,23 @@ class YuketangService {
         }
       }
       // 短页/整页重复 = 日志拉完
-      if (parsed.length < _logPageSize || added == 0) break;
+      final envelope = jsonDecode(resp.body) as Map;
+      final payload = envelope['data'] ?? envelope;
+      final activityCount = (payload['activities'] as List).length;
+      final hasMore = payload['has_more'];
+      if (hasMore == false ||
+          (hasMore == null && activityCount < _logPageSize)) {
+        break;
+      }
+      if (hasMore != null && hasMore is! bool) return null;
+      // Filtered-empty pages may still contain older homework on the next page.
+      // Repeated nonempty homework pages cannot establish that the feed ended.
+      if (parsed.isNotEmpty && added == 0) {
+        failedCount++;
+        return out;
+      }
+      if (page == _maxLogPages - 1) failedCount++;
     }
-    // 有活动却一条可用截止都没有：多半是 score_d 字段没对上（未真机
-    // 校准）。返回 null 而不是权威空列表——空列表 + complete 守卫会把
-    // 该课程旧条目整批清掉
-    if (sawActivity && out.isEmpty) return null;
     return out;
   }
 
@@ -244,7 +268,10 @@ class YuketangService {
   Future<List<HomeworkItem>> allHomework({
     void Function(int done, int total)? onProgress,
   }) async {
-    if (await checkLogin() != YktSessionState.ok) return [];
+    if (await checkLogin() != YktSessionState.ok) {
+      listFailed = true;
+      return [];
+    }
     final cs = await courses();
     final out = <HomeworkItem>[];
     final queue = List<YktCourse>.of(cs);
@@ -299,42 +326,52 @@ class YuketangService {
     } catch (_) {
       return null;
     }
-    if (json is! Map) return null;
+    if (json is! Map || !_envelopeOk(json)) return null;
     final data = json['data'] ?? json;
     if (data is! Map || data['activities'] is! List) return null;
     final out = <HomeworkItem>[];
     var sawDeadlineCapable = false;
     for (final raw in data['activities'] as List) {
-      if (raw is! Map) continue;
+      if (raw is! Map || raw['type'] == null) return null;
       final type = raw['type'];
-      final isExamType =
-          type == 5 || type == 20 || type == '5' || type == '20';
+      final isExamType = type == 5 || type == 20 || type == '5' || type == '20';
       final isWorkType = type == 19 || type == '19';
       if (!isExamType && !isWorkType) continue;
       sawDeadlineCapable = true;
       final content = raw['content'] is Map ? raw['content'] as Map : const {};
       final due = _dueOf(raw['deadline']) ?? _dueOf(content['score_d']);
-      if (due == null) continue; // 无截止无法排提醒，跳过
+      if (due == null) {
+        return null; // Partial parse failure cannot authorize cleanup.
+      }
       final id = raw['id'] ?? content['leaf_type_id'] ?? content['leaf_id'];
-      if (id == null) continue;
+      if (id == null) return null;
       String? title;
       final t = raw['title'];
       if (t is String && t.trim().isNotEmpty) title = t.trim();
-      final graded = raw['status'] == 3 ||
-          raw['status'] == '3' ||
-          raw['score'] is num;
-      out.add(HomeworkItem(
-        id: 'ykt_${stableHash(courseName)}_${type}_$id',
-        platform: PlatformKind.yuketang,
-        course: courseName,
-        title: title ?? (isExamType ? '考试' : '作业'),
-        dueAt: due,
-        status: graded ? HwStatus.done : HwStatus.todo,
-      ));
+      final graded =
+          raw['status'] == 3 || raw['status'] == '3' || raw['score'] is num;
+      out.add(
+        HomeworkItem(
+          id: 'ykt_${stableHash(courseName)}_${type}_$id',
+          platform: PlatformKind.yuketang,
+          course: courseName,
+          title: title ?? (isExamType ? '考试' : '作业'),
+          dueAt: due,
+          status: graded ? HwStatus.done : HwStatus.todo,
+          sourceKey: classroomId.isEmpty ? null : 'ykt|$classroomId|$type|$id',
+        ),
+      );
     }
     if (sawDeadlineCapable && out.isEmpty) return null;
     return out;
   }
+
+  // Captured production responses use errcode=0; bare envelopes are retained
+  // for compatibility. An explicit error always wins over a list-shaped data.
+  static bool _envelopeOk(Map json) =>
+      !json.containsKey('errcode') ||
+      json['errcode'] == 0 ||
+      json['errcode'] == '0';
 
   /// score_d → 截止时间：数字（秒/毫秒，>0）或数字字符串；0/负数/解析
   /// 失败返回 null（雨课堂用 0 表示「未设置」，绝不能变 1970 假截止）。

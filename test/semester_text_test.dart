@@ -10,11 +10,10 @@ void main() {
         isTrue);
   });
 
-  test('OCR 误读一两个字符仍视为同一学期（宁少替换不误清课表）', () {
+  test('学期数字不同不得当作OCR噪声；O与0的明确数字误读可归一', () {
     expect(AppState.sameSemesterText('2025-2026学年第3学期', '2025-2026学年第2学期'),
-        isTrue,
-        reason: '「第2/第3」一字之差是典型 OCR 噪声');
-    expect(AppState.sameSemesterText('第二学期', '第三学期'), isTrue);
+        isFalse);
+    expect(AppState.sameSemesterText('第二学期', '第三学期'), isFalse);
     expect(AppState.sameSemesterText('2025-2O26学年第2学期', '2025-2026学年第2学期'),
         isTrue,
         reason: '数字 0 误读为字母 O');

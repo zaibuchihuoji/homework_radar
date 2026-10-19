@@ -12,6 +12,7 @@ import '../app_state.dart';
 import '../models/course.dart';
 import '../services/timetable_xls_parser.dart';
 import 'jw_preview_page.dart';
+import 'timetable_import_confirmation.dart';
 
 class JwXlsImportPage extends StatefulWidget {
   const JwXlsImportPage({super.key, required this.state});
@@ -71,7 +72,8 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
       }
       final selected = await Navigator.of(context).push<List<Course>>(
         MaterialPageRoute(
-          builder: (_) => JwPreviewPage(courses: courses, sourceLabel: 'Excel导入'),
+          builder: (_) =>
+              JwPreviewPage(courses: courses, sourceLabel: 'Excel导入'),
         ),
       );
       if (!mounted) return;
@@ -83,14 +85,28 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
         });
         return;
       }
+      final replace = await confirmTimetableImport(
+        context,
+        selected: selected,
+        existing: widget.state.courses,
+        requiresReplacement: widget.state.timetableRequiresReplacement(),
+        replacementPreview: widget.state.timetableReplacement(selected),
+        sourceLabel: 'Excel导入',
+      );
+      if (!mounted) return;
+      if (replace == null) {
+        setState(() {
+          _busy = false;
+          _status = '';
+        });
+        return;
+      }
       try {
         await widget.state.onTimetableCaptured(
           courses: selected,
           rawPage: '',
-          // Excel 导入的是教务导出的整表：声明 fullImport 让入库侧按
-          // 整体替换处理，不与旧课做 union 合并（fullImport 为新可选
-          // 命名参数，由 onTimetableCaptured 侧定义）
-          fullImport: true,
+          // 只有明确选择并确认删除影响，才替换未包含的旧课。
+          fullImport: replace,
           source: 'Excel导入',
         );
       } catch (e) {
@@ -131,7 +147,10 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
               '「星期一 ~ 星期日」表头。\n'
               '老版二进制 .xls 请先另存为 .xlsx。',
               style: TextStyle(
-                  fontSize: 13, height: 1.8, color: Colors.grey.shade600),
+                fontSize: 13,
+                height: 1.8,
+                color: Colors.grey.shade600,
+              ),
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
@@ -140,7 +159,8 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
                   ? const SizedBox(
                       width: 14,
                       height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Icon(Icons.table_view_rounded),
               label: Text(_busy ? '处理中…' : '选择课表文件'),
             ),
@@ -149,7 +169,10 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
               Text(
                 _status,
                 style: TextStyle(
-                    fontSize: 12.5, height: 1.6, color: Colors.grey.shade700),
+                  fontSize: 12.5,
+                  height: 1.6,
+                  color: Colors.grey.shade700,
+                ),
               ),
             ],
           ],

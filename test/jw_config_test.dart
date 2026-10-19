@@ -1,18 +1,50 @@
 // 教务配置：URL 规范化与旧版数据迁移。
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:homework_radar/services/jw_config.dart';
 import 'package:homework_radar/services/secure_store.dart';
 import 'package:homework_radar/services/storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    final secure = <String, String>{};
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('homework_radar/platform'),
+          (call) async {
+            final args = (call.arguments as Map?) ?? {};
+            final key = args['key'] as String?;
+            switch (call.method) {
+              case 'secureRead':
+                return secure[key];
+              case 'secureWrite':
+                secure[key!] = args['value'] as String;
+                return true;
+              case 'secureDelete':
+                secure.remove(key);
+                return true;
+              default:
+                return null;
+            }
+          },
+        );
+  });
   test('normalizeUrl：补协议 / 去空白 / 拒绝非法域名', () {
     // 无协议输入默认按 https（抓取页打不开会自动回落 http）
-    expect(JwStore.normalizeUrl(' jw.zzuli.edu.cn '), 'https://jw.zzuli.edu.cn');
-    expect(JwStore.normalizeUrl('https://jiaowu.xxx.edu.cn/home'),
-        'https://jiaowu.xxx.edu.cn/home');
-    expect(JwStore.normalizeUrl('http://jw.zzuli.edu.cn'),
-        'http://jw.zzuli.edu.cn');
+    expect(
+      JwStore.normalizeUrl(' jw.zzuli.edu.cn '),
+      'https://jw.zzuli.edu.cn',
+    );
+    expect(
+      JwStore.normalizeUrl('https://jiaowu.xxx.edu.cn/home'),
+      'https://jiaowu.xxx.edu.cn/home',
+    );
+    expect(
+      JwStore.normalizeUrl('http://jw.zzuli.edu.cn'),
+      'http://jw.zzuli.edu.cn',
+    );
     expect(JwStore.normalizeUrl('不是网址'), isNull);
     expect(JwStore.normalizeUrl(''), isNull);
     expect(JwStore.normalizeUrl('no-dot'), isNull);
@@ -53,7 +85,9 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
     await SecureStore.write('zf_cookie', 'a=b');
-    await JwStore.save(const JwConfig(name: '测试大学', url: 'http://jw.test.edu.cn/'));
+    await JwStore.save(
+      const JwConfig(name: '测试大学', url: 'http://jw.test.edu.cn/'),
+    );
     await JwStore.clear();
     // 此前删除后 load() 一看 zf_cookie 非空就把配置弹回默认学校，删除形同虚设
     expect(JwStore.load(), isNull);

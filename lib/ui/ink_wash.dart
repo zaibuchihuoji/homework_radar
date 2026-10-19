@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'adaptive.dart';
+import 'tokens.dart';
+import 'dashed_line.dart';
 
 /// 水墨飞白分隔线：中段饱满、两端收锋，笔毛带干笔留白。
 /// 与暖纸的虚线缝线、清夏的直线 Divider 构成三套分隔语言。
@@ -43,8 +45,7 @@ class _BrushPainter extends CustomPainter {
       final profile = math.sin(math.pi * t);
       final y = midY + math.sin(t * 9.2) * 0.5;
       final roll = rnd.nextDouble();
-      final alpha =
-          roll < 0.14 ? 0.08 : 0.55 + profile * 0.4;
+      final alpha = roll < 0.14 ? 0.08 : 0.55 + profile * 0.4;
       paint.color = color.withValues(alpha: alpha);
       paint.strokeWidth = thickness * (0.30 + 0.70 * profile);
       canvas.drawLine(Offset(x, y), Offset(x + step * 1.5, y), paint);
@@ -60,22 +61,103 @@ class _BrushPainter extends CustomPainter {
 /// 全 app 统一的「题款」语言）；暖纸=衬线信纸体；其余样式常规标题。
 /// 放在本文件而非 adaptive.dart，避免 adaptive ↔ ink_wash 循环 import。
 Widget appBarTitle(BuildContext c, String text) {
+  final pal = paletteOf(c);
   final base = TextStyle(
-      fontSize: 17, fontWeight: FontWeight.w700, color: textPrimary(c));
+    fontSize: pal.editorial ? 19 : 17,
+    fontWeight: pal.comic || pal.editorial ? FontWeight.w800 : FontWeight.w700,
+    fontFamily: pal.pixel || pal.receipt || pal.terminal
+        ? 'monospace'
+        : pal.journal
+        ? 'serif'
+        : null,
+    color: textPrimary(c),
+  );
   if (!isInkStyle(c)) {
-    return Text(text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: serifTitle(c, base));
+    final title = Text(
+      text,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: serifTitle(c, base),
+    );
+    if (pal.terminal || pal.pixel || pal.editorial || pal.morandi) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (pal.terminal)
+            ExcludeSemantics(
+              child: Text('> ', style: base.copyWith(color: pal.accent)),
+            )
+          else if (pal.pixel)
+            Container(
+              width: 9,
+              height: 9,
+              margin: const EdgeInsets.only(right: 8),
+              color: pal.accent,
+            )
+          else if (pal.editorial)
+            Container(
+              width: 3,
+              height: 20,
+              margin: const EdgeInsets.only(right: 8),
+              color: pal.accent,
+            )
+          else
+            Container(
+              width: 7,
+              height: 7,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                color: pal.accent.withValues(alpha: 0.6),
+                shape: BoxShape.circle,
+              ),
+            ),
+          Flexible(child: title),
+        ],
+      );
+    }
+    if (pal.comic) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: pal.card,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: pal.cardBorder, width: 1.5),
+        ),
+        child: title,
+      );
+    }
+    if (pal.receipt || pal.paper) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          title,
+          const SizedBox(height: 3),
+          SizedBox(width: 90, child: DashedLine(color: pal.cardBorder)),
+        ],
+      );
+    }
+    if (pal.journal) {
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(top: -5, left: 5, child: journalTape(c, text, width: 33)),
+          Padding(padding: const EdgeInsets.only(top: 4), child: title),
+        ],
+      );
+    }
+    return title;
   }
   return Row(
     mainAxisSize: MainAxisSize.min,
     children: [
       Flexible(
-        child: Text(text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: inkTitle(c, serifTitle(c, base))),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: inkTitle(c, serifTitle(c, base)),
+        ),
       ),
       const SizedBox(width: 7),
       const InkSealChip(),
@@ -144,18 +226,50 @@ class _MountainsPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final w = size.width, h = size.height;
     // 三层山：远山最高最淡，近山最矮最浓；(x, y) 都是相对宽高的 0~1。
-    _layer(canvas, const [
-      (0.00, 0.46), (0.16, 0.14), (0.33, 0.46), (0.52, 0.08),
-      (0.70, 0.42), (0.88, 0.20), (1.00, 0.46),
-    ], 0.10, w, h);
-    _layer(canvas, const [
-      (0.00, 0.62), (0.13, 0.42), (0.31, 0.66), (0.49, 0.36),
-      (0.67, 0.62), (0.83, 0.48), (1.00, 0.68),
-    ], 0.15, w, h);
-    _layer(canvas, const [
-      (0.00, 0.82), (0.21, 0.64), (0.41, 0.86), (0.63, 0.60),
-      (0.85, 0.80), (1.00, 0.70),
-    ], 0.21, w, h);
+    _layer(
+      canvas,
+      const [
+        (0.00, 0.46),
+        (0.16, 0.14),
+        (0.33, 0.46),
+        (0.52, 0.08),
+        (0.70, 0.42),
+        (0.88, 0.20),
+        (1.00, 0.46),
+      ],
+      0.10,
+      w,
+      h,
+    );
+    _layer(
+      canvas,
+      const [
+        (0.00, 0.62),
+        (0.13, 0.42),
+        (0.31, 0.66),
+        (0.49, 0.36),
+        (0.67, 0.62),
+        (0.83, 0.48),
+        (1.00, 0.68),
+      ],
+      0.15,
+      w,
+      h,
+    );
+    _layer(
+      canvas,
+      const [
+        (0.00, 0.82),
+        (0.21, 0.64),
+        (0.41, 0.86),
+        (0.63, 0.60),
+        (0.85, 0.80),
+        (1.00, 0.70),
+      ],
+      0.21,
+      w,
+      h,
+    );
     _bird(canvas, Offset(w * 0.78, h * 0.16), 7, 0.42);
     _bird(canvas, Offset(w * 0.87, h * 0.10), 5, 0.36);
     _bird(canvas, Offset(w * 0.70, h * 0.26), 4.5, 0.30);
@@ -183,7 +297,10 @@ class _MountainsPainter extends CustomPainter {
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: [ink.withValues(alpha: alpha), ink.withValues(alpha: alpha * 0.10)],
+        colors: [
+          ink.withValues(alpha: alpha),
+          ink.withValues(alpha: alpha * 0.10),
+        ],
       ).createShader(Rect.fromLTWH(0, 0, w, h));
     canvas.drawPath(path, paint);
   }

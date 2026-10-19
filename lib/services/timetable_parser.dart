@@ -5,7 +5,7 @@
 ///  - 强智（QiangZhi）学生课表：格子「课程名/周次/教室/教师」，行头常为空；
 ///  - URP：格子为花括号字段「{课程名;教师;周次;教室}」。
 /// 表头「星期X」「周X」两种写法都认。抓取与解析解耦：检测到含星期表头的
-/// 最大表格后取其 outerHTML，回到 Dart 逐格解析。
+/// 表格后取其 outerHTML，回到 Dart 逐格解析；多个课表候选必须人工选择。
 library;
 
 import 'dart:convert';
@@ -20,12 +20,12 @@ enum JwKind { kingosoft, zsoft, qiangzhi, urp, unknown }
 
 extension JwKindLabel on JwKind {
   String get label => switch (this) {
-        JwKind.kingosoft => '金智青果',
-        JwKind.zsoft => '正方',
-        JwKind.qiangzhi => '强智',
-        JwKind.urp => 'URP',
-        JwKind.unknown => '未知类型',
-      };
+    JwKind.kingosoft => '金智青果',
+    JwKind.zsoft => '正方',
+    JwKind.qiangzhi => '强智',
+    JwKind.urp => 'URP',
+    JwKind.unknown => '未知类型',
+  };
 }
 
 /// 按页面特征猜测教务系统类型（只用于展示，解析是通用的）。
@@ -47,6 +47,7 @@ class ParsedTimetable {
     this.semesterText = '',
     this.detectedWeek,
     this.rawPage = '',
+    this.error,
   });
 
   final List<Course> courses;
@@ -62,6 +63,8 @@ class ParsedTimetable {
 
   /// 原始表格 HTML（调试用）
   final String rawPage;
+
+  final String? error;
 
   bool get isEmpty => courses.isEmpty;
 }
@@ -79,7 +82,7 @@ class CourseEntry {
 class TimetableParser {
   TimetableParser._();
 
-  /// WebView 内执行的提取脚本：找含「星期一…星期日/周一…周日」的最大表格，
+  /// WebView 内执行的提取脚本：保留含「星期一/周一」的独立最外层表格，
   /// 连同学号/学期/周次文本一起打包成 JSON 返回。
   static const extractJs = r'''
 (function() {
@@ -106,18 +109,26 @@ class TimetableParser {
     return out;
   }
   var best = '';
-  var bestLen = 0;
+  var roots = [];
   var ds = docs();
   for (var k = 0; k < ds.length; k++) {
     var tables = ds[k].querySelectorAll('table');
     for (var i = 0; i < tables.length; i++) {
       var h = tables[i].outerHTML || '';
-      if (has(h) && h.length > bestLen) {
-        best = h;
-        bestLen = h.length;
+      if (has(h)) {
+        // 祖先表格的outerHTML已包含子表格，不重复打包；独立兄弟表必须保留，
+        // 不能先按大小丢掉一张，再让Dart误认为已获得完整课表。
+        var p = tables[i].parentElement;
+        var nested = false;
+        while (p) {
+          if (roots.indexOf(p) >= 0) { nested = true; break; }
+          p = p.parentElement;
+        }
+        if (!nested) roots.push(tables[i]);
       }
     }
   }
+  best = roots.map(function(t) { return t.outerHTML || ''; }).join('\n');
   var text = '';
   for (var k = 0; k < ds.length; k++) {
     text += (ds[k].body ? ds[k].body.innerText : '') + '\n';
@@ -126,7 +137,8 @@ class TimetableParser {
   var m = text.match(/学号[：:]\s*(\d{6,15})/);
   if (m) xh = m[1];
   var week = '';
-  m = text.match(/第\s*(\d{1,2})\s*周/);
+  // 通知、课程安排中的「第N周」不是当前周，不得用于校准开学日期。
+  m = text.match(/(?:当前|本周|现在|今日)[：:\s]*(?:为|是)?\s*第?\s*(\d{1,2})\s*周/);
   if (m) week = m[1];
   var sem = '';
   m = text.match(/\d{4}-\d{4}学年第[一二三四]学期/);
@@ -160,6 +172,8 @@ class TimetableParser {
         detectedWeek: int.tryParse(weekText),
         rawPage: table,
       );
+    } on FormatException catch (e) {
+      return ParsedTimetable(courses: const [], error: e.message);
     } catch (_) {
       return ParsedTimetable(courses: const []);
     }
@@ -198,27 +212,44 @@ class TimetableParser {
   static List<Course> parseKingosoftTable(String tableHtml) =>
       parseTimetableGrid(tableHtml);
 
-  /// 通用课表网格解析：候选表按「含星期表头」筛出后取最小的（叶子表）优先解析。
+  /// 每张候选必须有自己的星期表头。多个非空课表可能是分时段表、
+  /// 不同学期或重复视图，无法仅凭HTML安全确定归属时拒绝自动选表。
   static List<Course> parseTimetableGrid(String tableHtml) {
     final doc = html_parser.parse(tableHtml);
     final candidates = <dom.Element>[];
     for (final t in doc.querySelectorAll('table')) {
       if (_hasWeekdayHeaderRow(t)) candidates.add(t);
     }
-    candidates
-        .sort((a, b) => a.outerHtml.length.compareTo(b.outerHtml.length));
+    candidates.sort((a, b) => a.outerHtml.length.compareTo(b.outerHtml.length));
+    List<Course>? selected;
     for (final t in candidates) {
       final courses = _parseGrid(t);
-      if (courses.isNotEmpty) return courses;
+      if (courses.isEmpty) continue;
+      if (selected != null) {
+        throw const FormatException(
+          '检测到多张课表，无法确认它们属于同一学期或不同视图。'
+          '请在教务中只保留目标课表后重试，或按目标课表粘贴文本导入。',
+        );
+      }
+      selected = courses;
     }
-    return const [];
+    return selected ?? const [];
   }
 
   static int _dayOfHeader(String text) {
     final m = RegExp(r'^\s*(?:星期|周|礼拜)\s*([一二三四五六日天])\s*$')
         .firstMatch(text.trim());
     if (m == null) return 0;
-    const map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7, '天': 7};
+    const map = {
+      '一': 1,
+      '二': 2,
+      '三': 3,
+      '四': 4,
+      '五': 5,
+      '六': 6,
+      '日': 7,
+      '天': 7,
+    };
     return map[m.group(1)!] ?? 0;
   }
 
@@ -271,7 +302,8 @@ class TimetableParser {
   /// 同时返回每格的源 rowspan：rowspan 连堂格的节次要延伸到被跨行带，
   /// 解析条目时靠它知道这格横跨了几个行带。
   static (List<List<dom.Element?>>, Map<(int, int), int>) _expandTable(
-      dom.Element table) {
+    dom.Element table,
+  ) {
     final rows = _tableRows(table);
     final grid = <List<dom.Element?>>[];
     final spanAt = <(int, int), int>{}; // (行,列) → 该格源 rowspan
@@ -360,11 +392,13 @@ class TimetableParser {
     // 表头行：含 ≥5 个「星期X/周X」格
     var headerIndex = -1;
     var headerDayCount = 7;
+    var headerDays = <int, int>{};
     for (var i = 0; i < grid.length; i++) {
       final days = _rowHeaderDaysOfRow(grid[i]);
       if (days.length >= 5) {
         headerIndex = i;
         headerDayCount = days.length;
+        headerDays = days;
         break;
       }
     }
@@ -428,8 +462,10 @@ class TimetableParser {
       final fallback = bandSections[r] ?? _bigToSections(++bigCounter);
       if (fallback == null) continue;
 
-      for (var d = 1; d <= 7; d++) {
-        final idx = dayStart + d - 1;
+      final firstDayColumn = headerDays.keys.reduce((a, b) => a < b ? a : b);
+      for (final day in headerDays.entries) {
+        final d = day.value;
+        final idx = dayStart + day.key - firstDayColumn;
         if (idx >= row.length) break;
         final cell = row[idx];
         if (cell == null) continue; // 跨行格延续：不重复解析
@@ -470,15 +506,15 @@ class TimetableParser {
   /// 保持无行头表既有行为）。
   static (int, int)? _rowHeadSections(String text) {
     final t = text.trim();
-    final mPair =
-        RegExp(r'^第?\s*(\d{1,2})\s*[,，]\s*(\d{1,2})\s*节?$').firstMatch(t);
+    final mPair = RegExp(r'^第?\s*(\d{1,2})\s*[,，]\s*(\d{1,2})\s*节?$')
+        .firstMatch(t);
     if (mPair != null) {
       final a = int.parse(mPair.group(1)!);
       final b = int.parse(mPair.group(2)!);
       if (a >= 1 && b >= a && b <= 16) return (a, b);
     }
-    final mRange =
-        RegExp(r'^第\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*节$').firstMatch(t);
+    final mRange = RegExp(r'^第?\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*节$')
+        .firstMatch(t);
     if (mRange != null) {
       final a = int.parse(mRange.group(1)!);
       final b = int.parse(mRange.group(2)!);
@@ -493,16 +529,18 @@ class TimetableParser {
   }
 
   static String _plainText(dom.Element e) {
-    final frag = html_parser.parseFragment(e.innerHtml
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' '));
+    final frag = html_parser.parseFragment(
+      e.innerHtml.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' '),
+    );
     return (frag.text ?? '').trim();
   }
 
   /// 单元格富文本：<br> 与块级元素边界都转为换行。
   static String _cellRichText(dom.Element cell) {
     final withBreaks = cell.innerHtml.replaceAllMapped(
-        RegExp(r'<br\s*/?>|</div>|</p>|</li>|</h[1-6]>', caseSensitive: false),
-        (_) => '\n');
+      RegExp(r'<br\s*/?>|</div>|</p>|</li>|</h[1-6]>', caseSensitive: false),
+      (_) => '\n',
+    );
     final frag = html_parser.parseFragment(withBreaks);
     return (frag.text ?? '').replaceAll(RegExp(r'\r'), '').trim();
   }
@@ -518,15 +556,17 @@ class TimetableParser {
     (int, int)? sections;
 
     // 后缀括号节次：[1-2]
-    final bracket =
-        RegExp(r'\[(\d{1,2})\s*[-–—]?\s*(\d{1,2})?\]\s*$').firstMatch(rest);
-    // 后缀节次：(1-2)节 / (第1-2节) / 第1-2节 / 1-2节
-    final jie = RegExp(r'[（(]?\s*第?\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*节\s*[）)]?\s*$')
+    final bracket = RegExp(r'\[(\d{1,2})\s*[-–—]?\s*(\d{1,2})?\]\s*$')
         .firstMatch(rest);
+    // 后缀节次：(1-2)节 / (第1-2节) / 第1-2节 / 1-2节
+    final jie = RegExp(
+      r'[（(]?\s*第?\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*节\s*[）)]?\s*$',
+    ).firstMatch(rest);
     // 独立节次行：第1-2节 / 1-2节
     final jieOnly = RegExp(r'^第?\s*(\d{1,2})\s*节$').firstMatch(rest);
     // 独立节次区间行：第1-2节 / 1-2节
-    final jieRange = RegExp(r'^第?\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*节$').firstMatch(rest);
+    final jieRange = RegExp(r'^第?\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*节$')
+        .firstMatch(rest);
 
     if (bracket != null) {
       final a = int.parse(bracket.group(1)!);
@@ -545,6 +585,7 @@ class TimetableParser {
       rest = '';
     } else if (jieOnly != null) {
       final a = int.parse(jieOnly.group(1)!);
+      if (a < 1 || a > 16) return (const <int>[], null);
       sections = (a, a);
       rest = '';
     }
@@ -568,17 +609,21 @@ class TimetableParser {
   /// 字符类必须与 Course.parseWeeks（支持 ~）保持一致——门槛比解析器窄的话，
   /// 这类周次行整门课静默消失。
   static final _weeksExpr = RegExp(
-      r'^第?\s*\d{1,2}\s*(?:[-–—~]\s*\d{1,2})?\s*[单双]?\s*周?'
-      r'(?:\s*[,，]\s*第?\s*\d{1,2}\s*(?:[-–—~]\s*\d{1,2})?\s*[单双]?\s*周?)*'
-      r'(?:\s*[（(]\s*[单双]\s*[）)])?$');
+    r'^第?\s*\d{1,2}\s*(?:[-–—~]\s*\d{1,2})?\s*[单双]?\s*周?'
+    r'(?:\s*[,，]\s*第?\s*\d{1,2}\s*(?:[-–—~]\s*\d{1,2})?\s*[单双]?\s*周?)*'
+    r'(?:\s*[（(]\s*[单双]周?\s*[）)])?$',
+  );
 
   /// 中文教师名通常 2~3 字；4 字纯中文行更可能是课名，不认作教师
   ///（避免「操作系统」「大学物理」这类课名被吞进教师字段）。
   /// 分隔符允许空白：真实青果页多教师用空格分隔（「李建春 黄道颖」，
   /// 见 test/fixtures/zf_kingosoft_real.html），旧正则不认会整行静默丢弃。
-  static final _teacherCjk =
-      RegExp(r'^[\u4e00-\u9fa5]{2,3}(?:[\s,，、]+[\u4e00-\u9fa5]{2,3})*$');
-  static final _teacherSuffix = RegExp(r'^[\u4e00-\u9fa5]{1,4}(老师|教授|副教授|讲师|助教)$');
+  static final _teacherCjk = RegExp(
+    r'^[\u4e00-\u9fa5]{2,3}(?:[\s,，、]+[\u4e00-\u9fa5]{2,3})*$',
+  );
+  static final _teacherSuffix = RegExp(
+    r'^[\u4e00-\u9fa5]{1,4}(老师|教授|副教授|讲师|助教)$',
+  );
 
   /// 2~3 字纯中文短行：条目完结后更可能是下一门短课名（「体育」「化学」）
   /// 而不是教师名。
@@ -588,8 +633,7 @@ class TimetableParser {
   /// 分类前直接跳过，否则会顶替课名或被误认成教师。
   static final _weekdayToken = RegExp(r'^(?:星期|周)[一二三四五六日天]$');
 
-  static final _roomHint = RegExp(
-      r'[教楼馆室场区厅]|\d{3,4}|平台|机房|操场|公寓|基地|中心|实训');
+  static final _roomHint = RegExp(r'[教楼馆室场区厅]|\d{3,4}|平台|机房|操场|公寓|基地|中心|实训');
 
   static bool _looksLikeRoom(String s) {
     if (s.length > 24 || s.contains('周') || s.contains('[')) return false;
@@ -605,8 +649,10 @@ class TimetableParser {
   /// 注意：完全解析不出周次的行默认不产出条目（避免垃圾数据）；
   /// [keepWeekless] = true 时保留无周次但有名字的条目（截图导入的
   /// OCR 漏读周次行场景，交给预览页人工补），网格/文本导入保持严格。
-  static List<CourseEntry> parseCellLines(String raw,
-      {bool keepWeekless = false}) {
+  static List<CourseEntry> parseCellLines(
+    String raw, {
+    bool keepWeekless = false,
+  }) {
     // URP 花括号字段：{课程名;教师;周次;教室} → 逐字段成行
     var text = raw;
     if (text.contains('{')) {
@@ -626,7 +672,8 @@ class TimetableParser {
       if (cur.weeks.isNotEmpty || keepWeekless) entries.add(cur);
     }
 
-    for (final line in lines) {
+    for (var lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      final line = lines[lineIndex];
       // 纯星期词（星期一/周一…）：表头残片，分类前直接跳过
       if (_weekdayToken.hasMatch(line)) continue;
       final ws = parseWeekLine(line);
@@ -670,6 +717,17 @@ class TimetableParser {
       // 短课名而不是教师——吞进教师字段还会让紧跟的教室行变成幽灵
       // 课名条目
       if (cur.weeks.isNotEmpty && _shortCjk.hasMatch(line)) {
+        final next = lineIndex + 1 < lines.length ? lines[lineIndex + 1] : null;
+        // 块尾教师（课程/周次/教室/教师）：后接下一门长课名或块结束。
+        // 「体育/王五/3-18周」则仍是新课程，不能吞成前课的教师。
+        if (cur.teacher.isEmpty &&
+            (next == null ||
+                (parseWeekLine(next) == null &&
+                    !_looksLikeTeacher(next) &&
+                    !_looksLikeRoom(next)))) {
+          cur.teacher = line;
+          continue;
+        }
         push();
         cur = CourseEntry()..name = line;
         continue;
@@ -691,18 +749,23 @@ class TimetableParser {
   /// 条目 → Course。节次缺失时用行头兜底区间（青果带 [1-2]，正方/强智常不带）。
   /// [provisionalSections] = 兜底出的节次不是真实数据（块式文本导入本就
   /// 没有节次字段），预览页据此标「节次待定」且不预勾选。
-  static Course entryToCourse(CourseEntry e, int weekday,
-      {(int, int)? fallbackSections, bool provisionalSections = false}) {
+  static Course entryToCourse(
+    CourseEntry e,
+    int weekday, {
+    (int, int)? fallbackSections,
+    bool provisionalSections = false,
+  }) {
     final start = e.start > 0 ? e.start : (fallbackSections?.$1 ?? 1);
     final end = e.start > 0
         ? (e.end >= e.start ? e.end : e.start)
         : (fallbackSections?.$2 ?? start).clamp(start, 16);
     return Course(
       id: Course.makeId(
-          name: e.name,
-          weekday: weekday,
-          startSection: start,
-          endSection: end),
+        name: e.name,
+        weekday: weekday,
+        startSection: start,
+        endSection: end,
+      ),
       name: e.name,
       teacher: e.teacher,
       room: e.room,
@@ -715,10 +778,13 @@ class TimetableParser {
   }
 
   static List<Course> _parseCell(
-      String raw, int weekday, (int, int) fallbackSections) {
+    String raw,
+    int weekday,
+    (int, int) fallbackSections,
+  ) {
     return [
       for (final e in parseCellLines(raw))
-        entryToCourse(e, weekday, fallbackSections: fallbackSections)
+        entryToCourse(e, weekday, fallbackSections: fallbackSections),
     ];
   }
 }

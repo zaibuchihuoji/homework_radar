@@ -11,15 +11,16 @@
 ///    → data.content_info.leaf_type_id（练习包 id，非作业叶子为 null）；
 /// 3. 练习列表 `GET /api/v1/lms/exercise/get_exercise_list/{leafTypeId}/`。
 ///
-/// 「我的课程」列表端点未在社区项目实证（各家爬虫均手工传课程 id）：
-/// 走候选端点 + 宽松形状匹配 + 真机调试日志校准（与智慧树作业端点同一套
-/// 防御）。截止时间字段同样未实证：宽松收集（deadline/end_time 等），
-/// 无截止的条目跳过——作业雷达以截止提醒为核心。
+/// 当前官方前端已核实 user-courses、leaf_type 6/5、章节 score_deadline
+/// 与考试 exam/cover 的 deadline。陌生结构仍标为不完整，不能据此清理旧记录。
 library;
 
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/homework.dart';
 import 'safe_http.dart';
@@ -43,10 +44,19 @@ class XtCourse {
 }
 
 /// 章节树扫描结果：null = 结构陌生（信封不通/无 leaf 结构），调用方按
-/// 失败计；homeworkLeaves 为空但结构可辨 = 权威「本课程无作业叶子」。
+/// 失败计；homeworkLeaves/examLeaves 均空但结构可辨 = 权威「本课程无
+/// 作业/考试叶子」。
 class XtChapterScan {
   final List<({String id, String name})> homeworkLeaves;
-  XtChapterScan(this.homeworkLeaves);
+
+  /// 官方前端 LearnSpace.Exam 对应 leaf_type=5，作业对应 6。
+  final List<({String id, String name})> examLeaves;
+  final Map<String, DateTime?> deadlines;
+  XtChapterScan(
+    this.homeworkLeaves, [
+    this.examLeaves = const [],
+    this.deadlines = const {},
+  ]);
 }
 
 class XuetangxService {
@@ -61,18 +71,17 @@ class XuetangxService {
   /// 响应 {success, data.product_list}；未登录 HTTP 403 Django 风格。
   /// status: 1=在学 2=即将开始 3=已结束——一期拉在学+即将开始，已结束
   /// 的作业截止基本死线已过，不进雷达。
-  static const String _userCoursesUrl =
-      '$_base/api/v1/lms/user/user-courses/';
+  static const String _userCoursesUrl = '$_base/api/v1/lms/user/user-courses/';
   static const List<int> courseStatuses = [1, 2];
   static const int _maxCoursePages = 5; // 每页 10 条（前端 count/10 口径）
 
   Map<String, String> get _headers => {
-        'Cookie': SafeHttp.cookieHeader(cookie),
-        'xtbz': 'xt',
-        'x-client': 'web',
-        'x-csrftoken': 'undefined',
-        'referer': '$_base/',
-      };
+    'Cookie': SafeHttp.cookieHeader(cookie),
+    'xtbz': 'xt',
+    'x-client': 'web',
+    'x-csrftoken': 'undefined',
+    'referer': '$_base/',
+  };
 
   /// 请求层失败（课程列表候选全失败/章节树不可达），同步层据此放弃清理。
   bool listFailed = false;
@@ -95,7 +104,14 @@ class XuetangxService {
     if (resp.statusCode != 200) return XtSessionState.unknown;
     // 信封可解析即视为会话有效（{success,data} 形态，无 code 字段也认）
     if (envelopeOk(resp.body)) return XtSessionState.ok;
-    return XtSessionState.expired;
+    try {
+      final json = jsonDecode(resp.body);
+      if (json is Map &&
+          const [401, 403, '401', '403'].contains(json['code'])) {
+        return XtSessionState.expired;
+      }
+    } catch (_) {}
+    return XtSessionState.unknown;
   }
 
   /// 信封判定（公开纯函数便于单测）：Map 且（code 为成功码，或直接带
@@ -108,32 +124,41 @@ class XuetangxService {
       return false;
     }
     if (json is! Map) return false;
+    if (_envelopeRejected(json)) return false;
     final code = json['code'];
-    final codeOk = code is num ? code == 0 || code == 200 : code == '0' || code == '200';
+    final codeOk = code is num
+        ? code == 0 || code == 200
+        : code == '0' || code == '200';
     return codeOk || json.containsKey('data');
   }
 
-  /// 我的课程（在学+即将开始，翻页拉全）。第一页失败置 listFailed；
-  /// 后续页/状态组失败降级为「拿到多少算多少」——首页已证明会话和端点
-  /// 可用，抖动不该让整个平台当次失效。
+  static bool _envelopeRejected(Map json) =>
+      json['success'] == false ||
+      (json['errcode'] != null && !const [0, '0'].contains(json['errcode'])) ||
+      (json['error_code'] != null &&
+          !const [0, '0'].contains(json['error_code'])) ||
+      (json.containsKey('code') &&
+          json['code'] != null &&
+          !const [0, 200, '0', '200'].contains(json['code']));
+
+  /// 我的课程（在学+即将开始，翻页拉全）。任一页/状态组失败、分页重复
+  /// 或达到上限都置 listFailed：可保留已抓结果，不能据半截列表清旧。
   Future<List<XtCourse>> courses() async {
     final found = <XtCourse>[];
     final seen = <String>{};
-    var first = true;
     for (final status in courseStatuses) {
       for (var page = 1; page <= _maxCoursePages; page++) {
         final resp = await _get('$_userCoursesUrl?status=$status&page=$page');
         if (resp == null || resp.statusCode != 200) {
-          if (first) listFailed = true;
+          listFailed = true;
           return found;
         }
         final parsed = parseCourseListJson(resp.body);
         if (parsed == null) {
           // 命中端点但形状陌生：可能页面结构变化，绝不能当「没有课程」
-          if (first) listFailed = true;
+          listFailed = true;
           return found;
         }
-        first = false;
         var added = 0;
         for (final c in parsed) {
           if (seen.add('${c.cid}#${c.sign}')) {
@@ -142,43 +167,93 @@ class XuetangxService {
           }
         }
         // 空页/短页/整页重复 = 这个状态组已拉完
-        if (parsed.isEmpty || added == 0) break;
+        if (parsed.isEmpty) break;
+        if (added == 0) {
+          listFailed = true;
+          break;
+        }
+        if (page == _maxCoursePages) listFailed = true;
       }
     }
     return found;
   }
 
-  /// 课程章节树里的作业叶子（leaf_type=6）。单课程作业清单的入口。
-  /// 返回 null = 章节结构陌生（请求失败/信封不通/全树无 leaf_type 字段），
+  /// 课程章节树里的作业/考试叶子（leaf_type=6 作业、5 考试）。
+  /// 返回 null = 章节结构陌生或部分叶子损坏；明确的空章节/空叶子有效，
   /// 与「解析出 0 个作业叶子」（结构可辨、确实没有）严格区分。
+  /// kDebugMode 落盘章节树原文供考试叶子口径校准。
   Future<List<HomeworkItem>?> homeworkOf(XtCourse c) async {
-    final resp = await _get('$_base/api/v1/lms/learn/course/chapter'
-        '?cid=${Uri.encodeQueryComponent(c.cid)}'
-        '&sign=${Uri.encodeQueryComponent(c.sign)}');
+    final resp = await _get(
+      '$_base/api/v1/lms/learn/course/chapter'
+      '?cid=${Uri.encodeQueryComponent(c.cid)}'
+      '&sign=${Uri.encodeQueryComponent(c.sign)}',
+    );
     if (resp == null || resp.statusCode != 200) return null;
+    if (kDebugMode) {
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        File('${dir.path}/xtx_chapter_${c.cid}.json')
+            .writeAsStringSync(resp.body, flush: true);
+      } catch (_) {}
+    }
     final scan = parseChapterScan(resp.body);
     if (scan == null) return null;
     final out = <HomeworkItem>[];
     for (final leaf in scan.homeworkLeaves) {
-      final item = await _homeworkOfLeaf(c, leaf);
-      if (item != null) out.add(item);
+      final item = await _homeworkOfLeaf(
+        c,
+        leaf,
+        chapterDeadline: scan.deadlines[leaf.id],
+        hasChapterDeadline: scan.deadlines.containsKey(leaf.id),
+      );
+      if (item != null) {
+        out.add(item);
+      } else {
+        failedCount++;
+      }
       // 叶子间小间隔：单课作业叶子可能十来个，别贴脸连打
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+    for (final leaf in scan.examLeaves) {
+      final item = await _homeworkOfLeaf(
+        c,
+        leaf,
+        isExam: true,
+        chapterDeadline: scan.deadlines[leaf.id],
+        hasChapterDeadline: scan.deadlines.containsKey(leaf.id),
+      );
+      if (item != null) {
+        out.add(item);
+      } else {
+        failedCount++;
+      }
       await Future.delayed(const Duration(milliseconds: 300));
     }
     // 叶子存在却一条可用截止都没有：多半是截止字段名没对上（未抓包
     // 校准）。返回 null（不可信结果 → failedCount++）而不是权威空列表
     // ——空列表 + complete 守卫会把该课程旧条目整批清掉
-    if (scan.homeworkLeaves.isNotEmpty && out.isEmpty) return null;
+    if (scan.homeworkLeaves.isNotEmpty || scan.examLeaves.isNotEmpty) {
+      if (out.isEmpty) return null;
+    }
     return out;
   }
 
   Future<HomeworkItem?> _homeworkOfLeaf(
-      XtCourse c, ({String id, String name}) leaf) async {
-    DateTime? due;
+    XtCourse c,
+    ({String id, String name}) leaf, {
+    bool isExam = false,
+    DateTime? chapterDeadline,
+    bool hasChapterDeadline = false,
+  }) async {
+    DateTime? due = chapterDeadline;
     var title = leaf.name;
-    final li = await _get('$_base/mooc-api/v1/lms/learn/leaf_info/'
-        '${Uri.encodeQueryComponent(c.cid)}/${Uri.encodeQueryComponent(leaf.id)}/'
-        '?sign=${Uri.encodeQueryComponent(c.sign)}&term=latest&uv_id=0');
+    final li = hasChapterDeadline
+        ? null
+        : await _get(
+            '$_base/mooc-api/v1/lms/learn/leaf_info/'
+            '${Uri.encodeQueryComponent(c.cid)}/${Uri.encodeQueryComponent(leaf.id)}/'
+            '?sign=${Uri.encodeQueryComponent(c.sign)}&term=latest&uv_id=0',
+          );
     String? leafTypeId;
     if (li != null && li.statusCode == 200) {
       final data = _dataOf(li.body);
@@ -186,8 +261,11 @@ class XuetangxService {
       due ??= firstDue(data);
     }
     if (due == null && leafTypeId != null && leafTypeId != 'null') {
-      final ex = await _get('$_base/api/v1/lms/exercise/get_exercise_list/'
-          '${Uri.encodeQueryComponent(leafTypeId)}/');
+      final ex = await _get(
+        isExam
+            ? '$_base/api/v1/lms/exam/cover?exam_id=${Uri.encodeQueryComponent(leafTypeId)}'
+            : '$_base/api/v1/lms/exercise/get_exercise_list/${Uri.encodeQueryComponent(leafTypeId)}/',
+      );
       if (ex != null && ex.statusCode == 200) {
         final data = _dataOf(ex.body);
         final exName = _pickString(data, const ['name', 'title']);
@@ -195,16 +273,19 @@ class XuetangxService {
         due = firstDue(data);
       }
     }
-    if (due == null) return null; // 无截止无法排提醒，跳过（雷达核心原则）
+    if (due == null && !hasChapterDeadline) return null;
     return HomeworkItem(
       id: 'xtx_${stableHash(c.name)}_${leaf.id}',
       platform: PlatformKind.xuetangx,
       course: c.name,
-      title: title.isEmpty ? '作业 ${leaf.id}' : title,
+      title: title.isEmpty
+          ? (isExam ? '考试 ${leaf.id}' : '作业 ${leaf.id}')
+          : title,
       dueAt: due,
       // 练习链路没有可信的完成状态证据（user.answer 存在与否是猜测），
       // 恒 todo；合并层对 xuetangx 与 mooc 同款保留旧状态，不打回
       status: HwStatus.todo,
+      sourceKey: 'xtx|${c.cid}|${c.sign}|leaf|${leaf.id}',
     );
   }
 
@@ -213,7 +294,10 @@ class XuetangxService {
   Future<List<HomeworkItem>> allHomework({
     void Function(int done, int total)? onProgress,
   }) async {
-    if (await checkLogin() != XtSessionState.ok) return [];
+    if (await checkLogin() != XtSessionState.ok) {
+      listFailed = true;
+      return [];
+    }
     final cs = await courses();
     final out = <HomeworkItem>[];
     final queue = List<XtCourse>.of(cs);
@@ -253,6 +337,7 @@ class XuetangxService {
     } catch (_) {
       return null;
     }
+    if (json is Map && _envelopeRejected(json)) return null;
     if (json is Map && json['data'] != null) return json['data'];
     return json;
   }
@@ -267,8 +352,9 @@ class XuetangxService {
   }
 
   /// 章节树扫描：course_chapter[].section_leaf_list[].leaf_list[] 里收
-  /// leaf_type==6 的叶子。全树找不到任何带 leaf_type 的叶子 = 结构陌生
-  /// 返回 null（章节 API 改版/信封不同）；有类型字段但无 6 = 权威无作业。
+  /// leaf_type==6 作业、5 考试。全树找不到任何带 leaf_type 的叶子 =
+  /// 结构陌生返回 null（章节 API 改版/信封不同）；明确的空章节/空叶子，
+  /// 或有类型字段但无 6/7 = 权威无作业/考试。任一损坏叶子使整树不可信。
   static XtChapterScan? parseChapterScan(String body) {
     dynamic json;
     try {
@@ -276,10 +362,14 @@ class XuetangxService {
     } catch (_) {
       return null;
     }
-    if (json is! Map) return null;
+    if (json is! Map || _envelopeRejected(json)) return null;
     final payload = json['data'] ?? json;
     final leaves = <({String id, String name})>[];
+    final exams = <({String id, String name})>[];
+    final deadlines = <String, DateTime?>{};
     var sawTypedLeaf = false;
+    var sawEmptyStructure = false;
+    var malformed = false;
     void walkLeafLists(dynamic node) {
       if (node is List) {
         for (final e in node) {
@@ -288,21 +378,64 @@ class XuetangxService {
         return;
       }
       if (node is! Map) return;
+      for (final key in const [
+        'course_chapter',
+        'section_leaf_list',
+        'leaf_list',
+      ]) {
+        if (!node.containsKey(key)) continue;
+        final entries = node[key];
+        if (entries is! List || entries.any((e) => e is! Map)) {
+          malformed = true;
+        } else if (entries.isEmpty) {
+          sawEmptyStructure = true;
+        }
+      }
       final list = node['leaf_list'];
       if (list is List) {
         for (final e in list) {
-          if (e is! Map) continue;
-          final type = e['leaf_type'];
-          if (type == null) continue;
-          sawTypedLeaf = true;
-          if (type == 6 || type == '6') {
-            final id = e['id'];
-            if (id == null) continue;
-            final name = e['name'];
-            leaves.add((
-              id: '$id',
-              name: name is String ? name.trim() : '',
-            ));
+          if (e is! Map || e['leaf_type'] == null) {
+            malformed = true;
+          }
+        }
+      }
+      // The official renderer supports both direct section leaves and leaf_list.
+      if (node.containsKey('leaf_type')) {
+        final type = node['leaf_type'];
+        sawTypedLeaf = true;
+        final known = const [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          '0',
+          '1',
+          '2',
+          '3',
+          '4',
+          '5',
+          '6',
+        ].contains(type);
+        if (!known) malformed = true;
+        final work = type == 6 || type == '6';
+        final exam = type == 5 || type == '5';
+        if (work || exam) {
+          final id = node['id'];
+          if (id == null || '$id'.trim().isEmpty) {
+            malformed = true;
+          } else {
+            final name = node['name'];
+            final entry = (id: '$id', name: name is String ? name.trim() : '');
+            if (node.containsKey('score_deadline')) {
+              final value = node['score_deadline'];
+              final due = firstDue({'score_deadline': value});
+              if (value != null && value != 0 && due == null) malformed = true;
+              deadlines['$id'] = due;
+            }
+            (work ? leaves : exams).add(entry);
           }
         }
       }
@@ -312,15 +445,14 @@ class XuetangxService {
     }
 
     walkLeafLists(payload);
-    if (!sawTypedLeaf) return null;
-    return XtChapterScan(leaves);
+    if (malformed || (!sawTypedLeaf && !sawEmptyStructure)) return null;
+    return XtChapterScan(leaves, exams, deadlines);
   }
 
   /// 课程列表解析：在负载里递归收「有 cid 形状 + sign 形状」的对象为
   /// 课程（name 缺省用「课程 {cid}」）。product_list 条目的字段名口径
   /// 未抓包核实，cid/sign 两族键名都放宽（id/products_sign 等）；
-  /// 负载里连一个数组都没有 = 形状陌生返回 null；有数组但没课程对象
-  /// = 权威空列表（授权正常无课）。
+  /// 已识别的空 product_list/list 有效；陌生结构或损坏条目返回 null。
   static List<XtCourse>? parseCourseListJson(String body) {
     dynamic json;
     try {
@@ -328,21 +460,31 @@ class XuetangxService {
     } catch (_) {
       return null;
     }
+    if (json is Map && _envelopeRejected(json)) return null;
     var payload = json;
-    if (payload is Map) payload = payload['data'] ?? payload['result'] ?? payload;
-    var sawArray = false;
+    if (payload is Map) {
+      payload = payload['data'] ?? payload['result'] ?? payload;
+    }
+    var malformed = false;
     final found = <XtCourse>[];
     final seen = <String>{};
 
-    void walk(dynamic node) {
+    bool walk(dynamic node, {bool courseContainer = false}) {
       if (node is List) {
-        sawArray = true;
+        if (node.isEmpty) return courseContainer;
+        var recognized = false;
+        var unrecognized = false;
         for (final e in node) {
-          walk(e);
+          if (walk(e)) {
+            recognized = true;
+          } else {
+            unrecognized = true;
+          }
         }
-        return;
+        if (unrecognized && (courseContainer || recognized)) malformed = true;
+        return recognized;
       }
-      if (node is! Map) return;
+      if (node is! Map) return false;
       final cid = _pickString(node, const [
         'classroomid',
         'classroomId',
@@ -360,20 +502,36 @@ class XuetangxService {
       ]);
       if (cid != null && sign != null) {
         if (seen.add('$cid#$sign')) {
-          final name = _pickString(
-              node, const ['name', 'course_name', 'title', 'product_name']);
-          found.add(XtCourse(
-              (name == null || name.isEmpty) ? '课程 $cid' : name, cid, sign));
+          final name = _pickString(node, const [
+            'name',
+            'course_name',
+            'title',
+            'product_name',
+          ]);
+          found.add(
+            XtCourse(
+              (name == null || name.isEmpty) ? '课程 $cid' : name,
+              cid,
+              sign,
+            ),
+          );
         }
-        return;
+        return true;
       }
-      for (final v in node.values) {
-        walk(v);
+      var recognized = false;
+      for (final e in node.entries) {
+        final isCourseList = const ['product_list', 'list'].contains(e.key);
+        if (isCourseList && e.value is! List) malformed = true;
+        if (e.value is! Map && e.value is! List) continue;
+        if (walk(e.value, courseContainer: isCourseList)) {
+          recognized = true;
+        }
       }
+      return recognized;
     }
 
-    walk(payload);
-    if (!sawArray) return null;
+    final recognized = walk(payload, courseContainer: payload is List);
+    if (!recognized || malformed) return null;
     return found;
   }
 
@@ -386,7 +544,8 @@ class XuetangxService {
     if (node is Map) {
       for (final e in node.entries) {
         final k = '${e.key}'.toLowerCase();
-        final looksDue = k.contains('deadline') ||
+        final looksDue =
+            k.contains('deadline') ||
             k == 'endtime' ||
             k == 'end_time' ||
             k.contains('submit_end') ||
@@ -421,12 +580,18 @@ class XuetangxService {
     final iso = DateTime.tryParse(s);
     if (iso != null) return iso;
     // yyyy-MM-dd HH:mm(:ss)
-    final m = RegExp(r'^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$')
-        .firstMatch(s);
+    final m = RegExp(
+      r'^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$',
+    ).firstMatch(s);
     if (m != null) {
-      return DateTime(int.parse(m.group(1)!), int.parse(m.group(2)!),
-          int.parse(m.group(3)!), int.parse(m.group(4)!), int.parse(m.group(5)!),
-          m.group(6) != null ? int.parse(m.group(6)!) : 0);
+      return DateTime(
+        int.parse(m.group(1)!),
+        int.parse(m.group(2)!),
+        int.parse(m.group(3)!),
+        int.parse(m.group(4)!),
+        int.parse(m.group(5)!),
+        m.group(6) != null ? int.parse(m.group(6)!) : 0,
+      );
     }
     return null;
   }

@@ -5,22 +5,22 @@ enum PlatformKind { chaoxing, mooc, zhihuishu, xuetangx, yuketang, manual }
 
 extension PlatformKindX on PlatformKind {
   String get label => switch (this) {
-        PlatformKind.chaoxing => '学习通',
-        PlatformKind.mooc => '中国大学MOOC',
-        PlatformKind.zhihuishu => '智慧树',
-        PlatformKind.xuetangx => '学堂在线',
-        PlatformKind.yuketang => '雨课堂',
-        PlatformKind.manual => '自定义',
-      };
+    PlatformKind.chaoxing => '学习通',
+    PlatformKind.mooc => '中国大学MOOC',
+    PlatformKind.zhihuishu => '智慧树',
+    PlatformKind.xuetangx => '学堂在线',
+    PlatformKind.yuketang => '雨课堂',
+    PlatformKind.manual => '自定义',
+  };
 
   String get key => switch (this) {
-        PlatformKind.chaoxing => 'chaoxing',
-        PlatformKind.mooc => 'mooc',
-        PlatformKind.zhihuishu => 'zhihuishu',
-        PlatformKind.xuetangx => 'xuetangx',
-        PlatformKind.yuketang => 'yuketang',
-        PlatformKind.manual => 'manual',
-      };
+    PlatformKind.chaoxing => 'chaoxing',
+    PlatformKind.mooc => 'mooc',
+    PlatformKind.zhihuishu => 'zhihuishu',
+    PlatformKind.xuetangx => 'xuetangx',
+    PlatformKind.yuketang => 'yuketang',
+    PlatformKind.manual => 'manual',
+  };
 }
 
 /// 未完成/待批阅/已完成 等，由各平台解析后归一化。
@@ -37,6 +37,7 @@ class HomeworkItem {
     this.url,
     this.score,
     this.note,
+    this.sourceKey,
   });
 
   /// 平台内唯一：platform + courseId + workId。
@@ -57,6 +58,9 @@ class HomeworkItem {
 
   /// 用户备注（如「需交纸质版」）
   final String? note;
+
+  /// 平台的课程/任务真实标识，独立于可变课程名。旧版本记录可为空。
+  final String? sourceKey;
 
   bool get isOverdue =>
       status != HwStatus.done &&
@@ -92,11 +96,11 @@ class HomeworkItem {
   /// 备份/落库用的稳定状态键。此前按枚举 index 序列化，枚举成员一旦
   /// 插入/重排，存量数据会被静默错译（done 读成 submitted 等）。
   String get statusKey => switch (status) {
-        HwStatus.todo => 'todo',
-        HwStatus.submitted => 'submitted',
-        HwStatus.done => 'done',
-        HwStatus.unknown => 'unknown',
-      };
+    HwStatus.todo => 'todo',
+    HwStatus.submitted => 'submitted',
+    HwStatus.done => 'done',
+    HwStatus.unknown => 'unknown',
+  };
 
   static HwStatus _statusFromJson(dynamic v) {
     if (v is String) {
@@ -123,17 +127,23 @@ class HomeworkItem {
   static String formatDueTime(DateTime d) => _fmt(d);
 
   /// 改备注/回填备注走 copyWith，别再手抄九个字段。
-  HomeworkItem copyWith({String? note, HwStatus? status}) => HomeworkItem(
-        id: id,
-        platform: platform,
-        course: course,
-        title: title,
-        dueAt: dueAt,
-        status: status ?? this.status,
-        url: url,
-        score: score,
-        note: note ?? this.note,
-      );
+  HomeworkItem copyWith({
+    String? id,
+    String? note,
+    HwStatus? status,
+    String? sourceKey,
+  }) => HomeworkItem(
+    id: id ?? this.id,
+    platform: platform,
+    course: course,
+    title: title,
+    dueAt: dueAt,
+    status: status ?? this.status,
+    url: url,
+    score: score,
+    note: note ?? this.note,
+    sourceKey: sourceKey ?? this.sourceKey,
+  );
 
   String get countdownText {
     final d = dueAt;
@@ -156,16 +166,17 @@ class HomeworkItem {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'platform': platform.key,
-        'course': course,
-        'title': title,
-        'dueAt': dueAt?.millisecondsSinceEpoch,
-        'status': statusKey,
-        'url': url,
-        'score': score,
-        if (note != null && note!.isNotEmpty) 'note': note,
-      };
+    'id': id,
+    'platform': platform.key,
+    'course': course,
+    'title': title,
+    'dueAt': dueAt?.millisecondsSinceEpoch,
+    'status': statusKey,
+    'url': url,
+    'score': score,
+    if (note != null && note!.isNotEmpty) 'note': note,
+    if (sourceKey != null) 'sourceKey': sourceKey,
+  };
 
   static HomeworkItem fromJson(Map<String, dynamic> j) {
     final p = j['platform'] as String?;
@@ -191,6 +202,7 @@ class HomeworkItem {
       url: j['url'] as String?,
       score: (j['score'] as num?)?.toDouble(),
       note: j['note'] as String?,
+      sourceKey: j['sourceKey'] as String?,
     );
   }
 }

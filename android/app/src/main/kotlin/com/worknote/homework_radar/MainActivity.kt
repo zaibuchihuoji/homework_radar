@@ -1,10 +1,14 @@
 package com.worknote.homework_radar
 
 import android.content.Context
+import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -15,12 +19,40 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.security.KeyStore
+import java.util.concurrent.Executors
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import es.antonborri.home_widget.HomeWidgetLaunchIntent
 
 class MainActivity : FlutterActivity() {
+    companion object {
+        private val secureExecutor = Executors.newSingleThreadExecutor()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        // Android can recreate a killed activity from the task's old MAIN intent
+        // and deliver the widget click before Dart subscribes. Keep that newest
+        // intent available to initiallyLaunchedFromHomeWidget as well.
+        setIntent(intent)
+        super.onNewIntent(intent)
+    }
+
+    override fun shouldHandleDeeplinking(): Boolean =
+        intent?.action != HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION &&
+            super.shouldHandleDeeplinking()
+
+    private fun secureCall(result: MethodChannel.Result, operation: () -> Any?) {
+        secureExecutor.execute {
+            try {
+                val value = operation()
+                runOnUiThread { result.success(value) }
+            } catch (_: Exception) {
+                runOnUiThread { result.error("secure", "Secure storage operation failed", null) }
+            }
+        }
+    }
     // 首帧已可上屏（Dart 定妆页画好，或 4s 兜底）；通道回调与绘制线程都会碰
     @Volatile
     private var splashReady = false
@@ -80,9 +112,8 @@ class MainActivity : FlutterActivity() {
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         val iv = cipher.iv
         val enc = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        securePrefs().edit()
-            .putString(key, Base64.encodeToString(iv + enc, Base64.DEFAULT))
-            .apply()
+        DurablePreferences.commit(securePrefs().edit()
+            .putString(key, Base64.encodeToString(iv + enc, Base64.DEFAULT)))
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -90,6 +121,14 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "homework_radar/platform")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "openNotificationSettings" -> {
+                        val channel = call.argument<String>("channelId")
+                        if (channel != null && channel !in setOf("homework_due", "class_reminder")) {
+                            result.error("channel", "Unknown reminder channel", null)
+                        } else {
+                            result.success(openNotificationSettings(channel))
+                        }
+                    }
                     // CookieManager.getCookie 能返回包括 HttpOnly 在内的全部 Cookie
                     "getCookie" -> {
                         val url = call.argument<String>("url") ?: ""
@@ -101,6 +140,10 @@ class MainActivity : FlutterActivity() {
                             flush()
                         }
                         result.success(true)
+                    }
+                    "clearDomainCookies" -> {
+                        val origins = call.argument<List<String>>("origins") ?: emptyList()
+                        clearDomainCookies(origins) { result.success(true) }
                     }
                     // 按域回装单条 Cookie：退出任一平台时把其它平台的
                     // 会话备份装回，避免"全清"连坐销毁别的平台登录态
@@ -114,21 +157,15 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
                     "secureRead" -> {
-                        try {
-                            result.success(secureRead(call.argument<String>("key") ?: ""))
-                        } catch (e: Exception) {
-                            result.error("secure", e.message, null)
-                        }
+                        secureCall(result) { secureRead(call.argument<String>("key") ?: "") }
                     }
                     "secureWrite" -> {
-                        try {
+                        secureCall(result) {
                             secureWrite(
                                 call.argument<String>("key") ?: "",
                                 call.argument<String>("value") ?: "",
                             )
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.error("secure", e.message, null)
+                            true
                         }
                     }
                                         // Dart 定妆页已上屏，可以撤系统启动屏了
@@ -137,12 +174,82 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
                     "secureDelete" -> {
-                        securePrefs().edit()
-                            .remove(call.argument<String>("key") ?: "").apply()
-                        result.success(true)
+                        secureCall(result) {
+                            DurablePreferences.commit(securePrefs().edit()
+                                .remove(call.argument<String>("key") ?: ""))
+                            true
+                        }
                     }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun openNotificationSettings(channel: String?): Boolean {
+        val intents = mutableListOf<Intent>()
+        if (Build.VERSION.SDK_INT >= 26) {
+            if (channel != null) intents.add(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                .putExtra(Settings.EXTRA_CHANNEL_ID, channel))
+            intents.add(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+        }
+        intents.add(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.parse("package:$packageName")))
+        for (destination in intents) {
+            try {
+                startActivity(destination)
+                return true
+            } catch (_: ActivityNotFoundException) {
+                // Some vendor ROMs omit the channel-level screen.
+            } catch (_: SecurityException) {
+                // Fall back to the app's notification/details screen.
+            }
+        }
+        return false
+    }
+
+    /** Android exposes Cookie headers only. Expire visible names in the selected
+     * domain/path scopes; never clear or recreate another platform's cookies. */
+    private fun clearDomainCookies(origins: List<String>, done: () -> Unit) {
+        val manager = CookieManager.getInstance()
+        val removals = linkedSetOf<Pair<String, String>>()
+        for (origin in origins) {
+            val uri = Uri.parse(origin)
+            val host = uri.host ?: continue
+            if (uri.scheme != "http" && uri.scheme != "https") continue
+            val paths = linkedSetOf("/", "/login", "/sso/", "/jwglxt/", "/zftal-xgxt-web/")
+            var path = uri.path ?: "/"
+            while (path.length > 1) {
+                paths.add(path)
+                path = path.substringBeforeLast('/', "")
+            }
+            val domains = mutableListOf<String>()
+            var domain = host
+            while (domain.contains('.')) {
+                domains.add(domain)
+                domain = domain.substringAfter('.')
+            }
+            for (probePath in paths) {
+                val probe = "${uri.scheme}://$host$probePath"
+                val names = (manager.getCookie(probe) ?: "").split(';')
+                    .map { it.substringBefore('=').trim() }.filter { it.isNotEmpty() }
+                for (name in names) {
+                    val secure = if (uri.scheme == "https") "; Secure" else ""
+                    val expired = "$name=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=$probePath$secure"
+                    removals.add(probe to expired)
+                    for (scope in domains) removals.add(probe to "$expired; Domain=$scope")
+                }
+            }
+        }
+        // Wait for each native write; reporting success before callbacks races
+        // the next login request. Unknown cookie paths remain an API limitation.
+        val queue = removals.iterator()
+        fun next() {
+            if (!queue.hasNext()) { manager.flush(); done(); return }
+            val (url, cookie) = queue.next()
+            manager.setCookie(url, cookie) { next() }
+        }
+        next()
     }
 }

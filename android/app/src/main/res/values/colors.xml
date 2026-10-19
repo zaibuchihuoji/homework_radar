@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0F6B54</color>
-    <!-- 原生启动屏底色：与 App 内页面底色一致的白净浅灰（Tokens.bg）。
-         深浅色模式同色（启动页固定浅底，参考主流教务/学习类 App 的做法）；
-         内容（徽章/标语）由 Flutter 定妆页与 splash_badge 呈现。 -->
-    <color name="launch_bg">#F6F7F8</color>
+    <color name="ic_launcher_background">#FFE044</color>
+    <!-- 原生与 Flutter 启动页使用同一品牌黄，深浅模式同色。 -->
+    <color name="launch_bg">#FFE044</color>
 </resources>

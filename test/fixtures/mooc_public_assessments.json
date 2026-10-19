@@ -1,0 +1,1076 @@
+{
+  "code": 0,
+  "result": {
+    "id": 1488009446,
+    "courseId": 1001639002,
+    "chapters": [
+      {
+        "id": 1252522356,
+        "lessons": [
+          {
+            "id": 1278564748,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [],
+        "exam": null
+      },
+      {
+        "id": 1252522357,
+        "lessons": [
+          {
+            "id": 1278564749,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [],
+        "exam": null
+      },
+      {
+        "id": 1252522358,
+        "lessons": [
+          {
+            "id": 1278564750,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564751,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564752,
+            "test": {
+              "id": 1258590240,
+              "name": "Assessment 1258590240",
+              "type": 2,
+              "deadline": 1791900000000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522359,
+        "lessons": [
+          {
+            "id": 1278564753,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564754,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564755,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564756,
+            "test": {
+              "id": 1258594211,
+              "name": "Assessment 1258594211",
+              "type": 2,
+              "deadline": 1791900000000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522360,
+        "lessons": [
+          {
+            "id": 1278564757,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564758,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564759,
+            "test": {
+              "id": 1258592258,
+              "name": "Assessment 1258592258",
+              "type": 2,
+              "deadline": 1791900000000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522361,
+        "lessons": [
+          {
+            "id": 1278564760,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564761,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564763,
+            "test": {
+              "id": 1258591210,
+              "name": "Assessment 1258591210",
+              "type": 3,
+              "deadline": 1791900000000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564762,
+            "test": {
+              "id": 1258594213,
+              "name": "Assessment 1258594213",
+              "type": 2,
+              "deadline": 1792504800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522362,
+        "lessons": [
+          {
+            "id": 1278564764,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564765,
+            "test": {
+              "id": 1258590241,
+              "name": "Assessment 1258590241",
+              "type": 2,
+              "deadline": 1792504800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522363,
+        "lessons": [
+          {
+            "id": 1278564766,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564767,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564768,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564769,
+            "test": {
+              "id": 1258594215,
+              "name": "Assessment 1258594215",
+              "type": 2,
+              "deadline": 1792504800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522364,
+        "lessons": [
+          {
+            "id": 1278564770,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564771,
+            "test": {
+              "id": 1258590244,
+              "name": "Assessment 1258590244",
+              "type": 3,
+              "deadline": 1792504800000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [],
+        "exam": null
+      },
+      {
+        "id": 1252522365,
+        "lessons": [
+          {
+            "id": 1278564772,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564773,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564774,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564775,
+            "test": {
+              "id": 1258594216,
+              "name": "Assessment 1258594216",
+              "type": 2,
+              "deadline": 1793368800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522366,
+        "lessons": [
+          {
+            "id": 1278564776,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564777,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564778,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564779,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564780,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564781,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564783,
+            "test": {
+              "id": 1258593215,
+              "name": "Assessment 1258593215",
+              "type": 3,
+              "deadline": 1793023200000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564782,
+            "test": {
+              "id": 1258590246,
+              "name": "Assessment 1258590246",
+              "type": 2,
+              "deadline": 1793368800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522367,
+        "lessons": [
+          {
+            "id": 1278564784,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564785,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564786,
+            "test": {
+              "id": 1258591213,
+              "name": "Assessment 1258591213",
+              "type": 2,
+              "deadline": 1793368800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522368,
+        "lessons": [
+          {
+            "id": 1278564787,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564788,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564789,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564790,
+            "test": {
+              "id": 1258595138,
+              "name": "Assessment 1258595138",
+              "type": 2,
+              "deadline": 1794146400000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522369,
+        "lessons": [
+          {
+            "id": 1278564791,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564792,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564793,
+            "test": {
+              "id": 1258593217,
+              "name": "Assessment 1258593217",
+              "type": 2,
+              "deadline": 1794146400000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522370,
+        "lessons": [
+          {
+            "id": 1278564794,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564795,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564797,
+            "test": {
+              "id": 1258592262,
+              "name": "Assessment 1258592262",
+              "type": 3,
+              "deadline": 1794319200000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564796,
+            "test": {
+              "id": 1258593218,
+              "name": "Assessment 1258593218",
+              "type": 2,
+              "deadline": 1794146400000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522371,
+        "lessons": [
+          {
+            "id": 1278564798,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564799,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564800,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564801,
+            "test": {
+              "id": 1258591217,
+              "name": "Assessment 1258591217",
+              "type": 2,
+              "deadline": 1794751200000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522372,
+        "lessons": [
+          {
+            "id": 1278564802,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564803,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564804,
+            "test": {
+              "id": 1258594220,
+              "name": "Assessment 1258594220",
+              "type": 2,
+              "deadline": 1794751200000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522373,
+        "lessons": [
+          {
+            "id": 1278564805,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [],
+        "exam": null
+      },
+      {
+        "id": 1252522374,
+        "lessons": [
+          {
+            "id": 1278564806,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564807,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564809,
+            "test": {
+              "id": 1258595141,
+              "name": "Assessment 1258595141",
+              "type": 3,
+              "deadline": 1794751200000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564808,
+            "test": {
+              "id": 1258590249,
+              "name": "Assessment 1258590249",
+              "type": 2,
+              "deadline": 1794751200000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522375,
+        "lessons": [
+          {
+            "id": 1278564810,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564811,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564812,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564813,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564814,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564816,
+            "test": {
+              "id": 1258590251,
+              "name": "Assessment 1258590251",
+              "type": 3,
+              "deadline": 1796479200000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564815,
+            "test": {
+              "id": 1258592264,
+              "name": "Assessment 1258592264",
+              "type": 2,
+              "deadline": 1796392800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522376,
+        "lessons": [
+          {
+            "id": 1278564817,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564818,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564819,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564820,
+            "test": {
+              "id": 1258595143,
+              "name": "Assessment 1258595143",
+              "type": 2,
+              "deadline": 1796392800000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522377,
+        "lessons": [
+          {
+            "id": 1278564821,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564822,
+            "test": {
+              "id": 1258593220,
+              "name": "Assessment 1258593220",
+              "type": 2,
+              "deadline": 1796738400000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522378,
+        "lessons": [
+          {
+            "id": 1278564823,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564824,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564825,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564826,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564827,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564828,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564830,
+            "test": {
+              "id": 1258592268,
+              "name": "Assessment 1258592268",
+              "type": 3,
+              "deadline": 1796738400000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564829,
+            "test": {
+              "id": 1258592267,
+              "name": "Assessment 1258592267",
+              "type": 2,
+              "deadline": 1796738400000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522379,
+        "lessons": [
+          {
+            "id": 1278564831,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564832,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564833,
+            "test": {
+              "id": 1258592270,
+              "name": "Assessment 1258592270",
+              "type": 2,
+              "deadline": 1797084000000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522380,
+        "lessons": [
+          {
+            "id": 1278564834,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564835,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564836,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564837,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [],
+        "exam": null
+      },
+      {
+        "id": 1252522381,
+        "lessons": [
+          {
+            "id": 1278564838,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564840,
+            "test": {
+              "id": 1258593222,
+              "name": "Assessment 1258593222",
+              "type": 3,
+              "deadline": 1796911200000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564839,
+            "test": {
+              "id": 1258594227,
+              "name": "Assessment 1258594227",
+              "type": 2,
+              "deadline": 1797084000000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522382,
+        "lessons": [
+          {
+            "id": 1278564841,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564842,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564843,
+            "test": {
+              "id": 1258594228,
+              "name": "Assessment 1258594228",
+              "type": 2,
+              "deadline": 1797775200000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522383,
+        "lessons": [
+          {
+            "id": 1278564844,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564845,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564846,
+            "test": {
+              "id": 1258593223,
+              "name": "Assessment 1258593223",
+              "type": 2,
+              "deadline": 1797775200000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522384,
+        "lessons": [
+          {
+            "id": 1278564847,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564849,
+            "test": {
+              "id": 1258591224,
+              "name": "Assessment 1258591224",
+              "type": 3,
+              "deadline": 1797775200000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [
+          {
+            "id": 1278564848,
+            "test": {
+              "id": 1258592273,
+              "name": "Assessment 1258592273",
+              "type": 2,
+              "deadline": 1797775200000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522385,
+        "lessons": [
+          {
+            "id": 1278564850,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564851,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564852,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564853,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564854,
+            "test": {
+              "id": 1258591225,
+              "name": "Assessment 1258591225",
+              "type": 2,
+              "deadline": 1798380000000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522386,
+        "lessons": [
+          {
+            "id": 1278564855,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564856,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564857,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [],
+        "quizs": [
+          {
+            "id": 1278564858,
+            "test": {
+              "id": 1258590254,
+              "name": "Assessment 1258590254",
+              "type": 2,
+              "deadline": 1798380000000
+            },
+            "exam": null
+          }
+        ],
+        "exam": null
+      },
+      {
+        "id": 1252522387,
+        "lessons": [
+          {
+            "id": 1278564859,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564860,
+            "test": null,
+            "exam": null
+          },
+          {
+            "id": 1278564861,
+            "test": null,
+            "exam": null
+          }
+        ],
+        "homeworks": [
+          {
+            "id": 1278564862,
+            "test": {
+              "id": 1258594229,
+              "name": "Assessment 1258594229",
+              "type": 3,
+              "deadline": 1798207200000
+            },
+            "exam": null
+          }
+        ],
+        "quizs": [],
+        "exam": null
+      },
+      {
+        "id": 1252522388,
+        "lessons": null,
+        "homeworks": null,
+        "quizs": null,
+        "exam": {
+          "id": 1233323262,
+          "name": "Assessment 1233323262",
+          "type": 1,
+          "deadline": 1799330425496
+        }
+      }
+    ],
+    "exams": [
+      {
+        "id": 1233323262,
+        "name": "Assessment 1233323262",
+        "type": 1,
+        "deadline": 1799330425496
+      }
+    ]
+  }
+}

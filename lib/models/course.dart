@@ -62,12 +62,18 @@ class Course {
   /// 默认作息：每节的 (开始, 结束) 距 0 点的分钟数。
   /// 按河南高校常见作息（上午 8:00 起、下午 14:30 起、晚上 19:00 起）。
   static const List<(int, int)> sectionTimes = [
-    (8 * 60, 8 * 60 + 45), (8 * 60 + 55, 9 * 60 + 40),
-    (10 * 60, 10 * 60 + 45), (10 * 60 + 55, 11 * 60 + 40),
-    (14 * 60 + 30, 15 * 60 + 15), (15 * 60 + 25, 16 * 60 + 10),
-    (16 * 60 + 20, 17 * 60 + 5), (17 * 60 + 15, 18 * 60),
-    (19 * 60, 19 * 60 + 45), (19 * 60 + 55, 20 * 60 + 40),
-    (20 * 60 + 50, 21 * 60 + 35), (21 * 60 + 45, 22 * 60 + 30),
+    (8 * 60, 8 * 60 + 45),
+    (8 * 60 + 55, 9 * 60 + 40),
+    (10 * 60, 10 * 60 + 45),
+    (10 * 60 + 55, 11 * 60 + 40),
+    (14 * 60 + 30, 15 * 60 + 15),
+    (15 * 60 + 25, 16 * 60 + 10),
+    (16 * 60 + 20, 17 * 60 + 5),
+    (17 * 60 + 15, 18 * 60),
+    (19 * 60, 19 * 60 + 45),
+    (19 * 60 + 55, 20 * 60 + 40),
+    (20 * 60 + 50, 21 * 60 + 35),
+    (21 * 60 + 45, 22 * 60 + 30),
   ];
 
   /// 由学期第一周的周一推算 day 所在周次（1 起）。
@@ -107,8 +113,9 @@ class Course {
         runs.add([w]);
       }
     }
-    final text =
-        runs.map((r) => r.length == 1 ? '${r.first}' : '${r.first}-${r.last}').join(',');
+    final text = runs
+        .map((r) => r.length == 1 ? '${r.first}' : '${r.first}-${r.last}')
+        .join(',');
     return '$text周';
   }
 
@@ -161,17 +168,23 @@ class Course {
   static List<int> parseWeeks(String raw) {
     final s = raw.replaceAll(RegExp(r'\s'), '');
     if (s.isEmpty) return const [];
-    final globalOdd = RegExp(r'[(（]单[)）]').hasMatch(s);
-    final globalEven = RegExp(r'[(（]双[)）]').hasMatch(s);
-    final cleaned = s
-        .replaceAll(RegExp(r'[(（][单双][)）]'), '')
-        .replaceAll('第', '');
+    if (!RegExp(
+      r'^第?\d{1,2}(?:[-–—~]\d{1,2})?[单双]?周?'
+      r'(?:[,，、]第?\d{1,2}(?:[-–—~]\d{1,2})?[单双]?周?)*'
+      r'(?:[(（][单双]周?[)）])?$',
+    ).hasMatch(s)) {
+      return const [];
+    }
+    final globalOdd = RegExp(r'[(（]单周?[)）]').hasMatch(s);
+    final globalEven = RegExp(r'[(（]双周?[)）]').hasMatch(s);
+    final cleaned =
+        s.replaceAll(RegExp(r'[(（][单双]周?[)）]'), '').replaceAll('第', '');
     final out = <int>{};
     final segRe = RegExp(r'(\d+)(?:[-–—~](\d+))?(单|双)?');
     for (final m in segRe.allMatches(cleaned)) {
       final a = int.parse(m.group(1)!);
       final b = int.tryParse(m.group(2) ?? '') ?? a;
-      if (b < a || b > 30) continue;
+      if (a < 1 || b < a || b > 30) return const [];
       final odd = globalOdd || m.group(3) == '单';
       final even = globalEven || m.group(3) == '双';
       for (var w = a; w <= b; w++) {
@@ -184,7 +197,9 @@ class Course {
     return list;
   }
 
-  static final _sectionToken = RegExp(r'第?\s*(\d{1,2})\s*[-–—,，、~到]\s*(\d{1,2})\s*节');
+  static final _sectionToken = RegExp(
+    r'第?\s*(\d{1,2})\s*[-–—,，、~到]\s*(\d{1,2})\s*节',
+  );
   static final _sectionSingle = RegExp(r'第?\s*(\d{1,2})\s*节');
 
   /// 解析节次文本，返回 (start, end)；解析不到返回 null。

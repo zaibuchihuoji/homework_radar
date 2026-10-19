@@ -9,6 +9,7 @@ import '../app_state.dart';
 import '../models/course.dart';
 import '../services/timetable_text_parser.dart';
 import 'jw_preview_page.dart';
+import 'timetable_import_confirmation.dart';
 
 class JwTextImportPage extends StatefulWidget {
   const JwTextImportPage({super.key, required this.state});
@@ -58,8 +59,9 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
     List<Course> courses;
     String semesterText = '';
     try {
-      final parsed =
-          await Future(() => TimetableTextParser.parseWithSemester(text));
+      final parsed = await Future(
+        () => TimetableTextParser.parseWithSemester(text),
+      );
       courses = parsed.courses;
       semesterText = parsed.semesterText;
     } catch (e) {
@@ -73,28 +75,36 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
     if (!mounted) return;
     setState(() => _parsing = false);
     if (courses.isEmpty) {
-      setState(() => _error =
-          '没解析出课程。每门课至少要有名称和周次（如「1-16周」），'
-          '行首写「周一」这类星期更佳。');
+      setState(
+        () => _error = '没解析出课程。每门课至少要有名称和周次（如「1-16周」），'
+            '行首写「周一」这类星期更佳。',
+      );
       return;
     }
     final List<Course>? selected;
     try {
       selected = await Navigator.of(context).push<List<Course>>(
         MaterialPageRoute(
-          builder: (_) =>
-              JwPreviewPage(courses: courses, sourceLabel: '文本导入'),
+          builder: (_) => JwPreviewPage(courses: courses, sourceLabel: '文本导入'),
         ),
       );
       if (selected == null || selected.isEmpty || !mounted) return;
-      // semesterText 带上文本里扫出的学期：换学期贴整表时入库接口按
-      // 整体替换处理；partial 只贴几门课时解析不出学期仍为空串，保持
-      // 原有 union 合并语义（fullImport 由入库侧按需扩展，这里不传）
+      final replace = await confirmTimetableImport(
+        context,
+        selected: selected,
+        existing: widget.state.courses,
+        requiresReplacement: widget.state.timetableRequiresReplacement(semesterText: semesterText),
+        replacementPreview: widget.state.timetableReplacement(selected,semesterText: semesterText),
+        sourceLabel: '文本导入',
+      );
+      if (replace == null || !mounted) return;
+      // 学期归属由入库侧判断，是否替换由本次明确的导入方式决定。
       await widget.state.onTimetableCaptured(
         courses: selected,
         rawPage: '',
         semesterText: semesterText,
         source: '文本导入',
+        fullImport: replace,
       );
     } catch (e) {
       // 入库链路抛错此前零反馈、页面不返回
@@ -117,7 +127,11 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
             '① 块式 —— 「星期一」单独一行，其后贴上该天的课程行；\n'
             '② 行内式 —— 每行一门课，如：周一 1-2节 高等数学 王一 1-16周 3-301。\n'
             '从教务网页全选复制也可以，解析完在预览里核对。',
-            style: TextStyle(fontSize: 12.5, height: 1.7, color: Colors.grey.shade600),
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.7,
+              color: Colors.grey.shade600,
+            ),
           ),
           const SizedBox(height: 12),
           TextField(
@@ -146,7 +160,8 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
                       ? const SizedBox(
                           width: 14,
                           height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2))
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.manage_search_rounded, size: 18),
                   label: const Text('解析并预览'),
                 ),

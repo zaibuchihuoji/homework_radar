@@ -10,10 +10,9 @@
 /// - 网关挂 AppInterfaceSignInterceptor：明文参数直接被拒（真机日志实证
 ///   code=400「aes加密参数异常」/checkSecretStr），参数必须 AES-CBC 加密
 ///   成 secretStr 提交，密钥组在客户端 JS 里（逆向项目已公开）。
-/// 未验证：作业列表接口的具体路径与字段名——候选端点收敛在
-/// [homeworkEndpoints]（待真机抓包校准），逐个尝试 + 宽松形状匹配，
-/// 命中即锁定；全部失败返回 null 走 failedCount，绝不把失败当
-/// 「有效空结果」清库（sync 层 complete 守卫依赖这一点）。
+/// 当前课程、作业和考试优先采用官方 stuExamWeb 的动态密钥协议，见
+/// [ZhihuishuExamApi]。历史候选端点仅保留兼容输出，不提供完整性证据；
+/// 未识别开课批次或任一分页/考试分支失败，都保留旧记录。
 library;
 
 import 'dart:convert';
@@ -24,11 +23,14 @@ import 'package:http/http.dart' as http;
 import '../models/homework.dart';
 import 'safe_http.dart';
 import 'stable_hash.dart';
+import 'zhihuishu_exam_api.dart';
 
 class ZhsCourse {
   String name;
   String courseId;
-  ZhsCourse(this.name, this.courseId);
+  final String? recruitId;
+  final String? schoolId;
+  ZhsCourse(this.name, this.courseId, {this.recruitId, this.schoolId});
 }
 
 /// 会话检查结论的细化：
@@ -44,10 +46,12 @@ enum ZhsSessionState { ok, expired, signatureRejected, unknown }
 class ZhihuishuService {
   String? cookie;
 
-  ZhihuishuService({this.cookie});
+  ZhihuishuExamApi? _examApi;
+  ZhihuishuService({this.cookie, this._examApi});
 
   /// 课程列表网关（社区已验证存在；分页参数名/请求体编码形态待真机抓包校准）。
-  static const String _courseGateway = 'https://onlineservice-api.zhihuishu.com/'
+  static const String _courseGateway =
+      'https://onlineservice-api.zhihuishu.com/'
       'gateway/t/v1/student/course/share/queryShareCourseInfo';
 
   /// 作业列表候选端点（**待真机抓包校准**）：share=共享课网关（社区给出过
@@ -74,8 +78,7 @@ class ZhihuishuService {
   /// 课程列表每页条数（短页即停）。
   static const int _coursePageSize = 20;
 
-  /// 单门课程作业列表单页条数（不做作业翻页：作业数远小于课程数；
-  /// 真机校准若发现单课作业超此数再补）。
+  /// 单门课程作业列表单页条数；满页继续翻，失败/重复/上限不视为取全。
   static const int _workPageSize = 50;
 
   /// 课程列表最大翻页数（防御性上限，正常选课数远达不到）。
@@ -105,9 +108,9 @@ class ZhihuishuService {
   int? _secretKeyIndex;
 
   Map<String, String> get _headers => {
-        'Cookie': SafeHttp.cookieHeader(cookie),
-        'Referer': 'https://onlineweb.zhihuishu.com/',
-      };
+    'Cookie': SafeHttp.cookieHeader(cookie),
+    'Referer': 'https://onlineweb.zhihuishu.com/',
+  };
 
   /// 网关请求体的编码形态未核实：先按 JSON 体试（前端 axios 的常见形态），
   /// 非 200 再退回表单编码；两形态都失败才把结果交给调用方按失败处理。
@@ -119,7 +122,8 @@ class ZhihuishuService {
     if (i < 0) i = 0;
     if (i >= _secretKeys.length) i = _secretKeys.length - 1;
     final encrypter = enc.Encrypter(
-        enc.AES(enc.Key.fromUtf8(_secretKeys[i]), mode: enc.AESMode.cbc));
+      enc.AES(enc.Key.fromUtf8(_secretKeys[i]), mode: enc.AESMode.cbc),
+    );
     return encrypter.encrypt(plain, iv: enc.IV.fromUtf8(_secretIv)).base64;
   }
 
@@ -129,7 +133,8 @@ class ZhihuishuService {
     if (i < 0) i = 0;
     if (i >= _secretKeys.length) i = _secretKeys.length - 1;
     final encrypter = enc.Encrypter(
-        enc.AES(enc.Key.fromUtf8(_secretKeys[i]), mode: enc.AESMode.cbc));
+      enc.AES(enc.Key.fromUtf8(_secretKeys[i]), mode: enc.AESMode.cbc),
+    );
     return encrypter.decrypt64(cipherB64, iv: enc.IV.fromUtf8(_secretIv));
   }
 
@@ -140,7 +145,9 @@ class ZhihuishuService {
   /// （[_secretKeyIndex]）；401/403 是「带会话被明确拒绝」，换密钥/编码都
   /// 不会变好，直接返回。
   Future<http.Response?> _gatewayPost(
-      String url, Map<String, String> params) async {
+    String url,
+    Map<String, String> params,
+  ) async {
     http.Response? last;
     for (final useForm in const [true, false]) {
       for (final ki in endpointTryOrder(_secretKeyIndex)) {
@@ -152,9 +159,15 @@ class ZhihuishuService {
         final secret = encryptSecret(plain, ki);
         final resp = useForm
             ? await SafeHttp.postForm(
-                url, body: {'secretStr': secret}, headers: _headers)
+                url,
+                body: {'secretStr': secret},
+                headers: _headers,
+              )
             : await SafeHttp.postJson(
-                url, body: jsonEncode({'secretStr': secret}), headers: _headers);
+                url,
+                body: jsonEncode({'secretStr': secret}),
+                headers: _headers,
+              );
         if (resp == null) return null; // 网络失败，上层按 unknown 处理
         last = resp;
         if (resp.statusCode == 401 || resp.statusCode == 403) return resp;
@@ -170,8 +183,14 @@ class ZhihuishuService {
   /// Cookie 是否有效（问一次课程网关第 1 页），结论见 [ZhsSessionState]。
   Future<ZhsSessionState> checkLogin() async {
     if (cookie == null || cookie!.isEmpty) return ZhsSessionState.expired;
-    final resp =
-        await _gatewayPost(_courseGateway, {'pageIndex': '1', 'pageSize': '1'});
+    final current = _examApi ??= ZhihuishuExamApi(cookie: cookie);
+    final enrolled = await current.enrollments();
+    if (current.authRejected) return ZhsSessionState.expired;
+    if (enrolled.complete) return ZhsSessionState.ok;
+    final resp = await _gatewayPost(_courseGateway, {
+      'pageIndex': '1',
+      'pageSize': '1',
+    });
     if (resp == null) return ZhsSessionState.unknown; // 网络失败 ≠ 登录过期
     if (resp.statusCode == 401 || resp.statusCode == 403) {
       return ZhsSessionState.expired;
@@ -214,11 +233,46 @@ class ZhihuishuService {
   /// 我学的课程（翻页拉全：短页即停；若网关忽略分页参数，靠「整页全是
   /// 已见 id」兜底停翻，避免白打几十页重复请求）。
   Future<List<ZhsCourse>> courses() async {
+    // Resolve enrollment identities from the official exam client, never infer
+    // recruitId from courseId or courseOpenId. Unknown metadata stays partial.
+    final enrolled = await (_examApi ??= ZhihuishuExamApi(
+      cookie: cookie,
+    )).enrollments();
+    final out = <ZhsCourse>[
+      for (final c in enrolled.courses)
+        ZhsCourse(
+          c.name,
+          c.courseId,
+          recruitId: c.recruitId,
+          schoolId: c.schoolId,
+        ),
+    ];
+    if (enrolled.complete) {
+      listFailed = false;
+      return out;
+    }
+    final legacy = await _legacyCourses();
+    listFailed = true;
+    for (final old in legacy) {
+      if (!out.any(
+        (c) =>
+            c.courseId == old.courseId &&
+            (old.recruitId == null || c.recruitId == old.recruitId),
+      )) {
+        out.add(old);
+      }
+    }
+    return out;
+  }
+
+  Future<List<ZhsCourse>> _legacyCourses() async {
     final found = <ZhsCourse>[];
     final seen = <String>{};
     for (var page = 1; page <= _maxCoursePages; page++) {
-      final resp = await _gatewayPost(
-          _courseGateway, {'pageIndex': '$page', 'pageSize': '$_coursePageSize'});
+      final resp = await _gatewayPost(_courseGateway, {
+        'pageIndex': '$page',
+        'pageSize': '$_coursePageSize',
+      });
       if (resp == null || resp.statusCode != 200) {
         // 拿不到响应 ≠ 没有课程：置 listFailed，同步层据此放弃清理旧条目
         listFailed = true;
@@ -235,16 +289,21 @@ class ZhihuishuService {
       found.addAll(pageCourses);
       final before = seen.length;
       for (final c in pageCourses) {
-        seen.add(c.courseId);
+        seen.add('${c.courseId}|${c.recruitId}');
       }
       if (pageCourses.length < _coursePageSize) break; // 短页 = 最后一页
-      if (seen.length == before) break; // 整页重复 = 网关忽略分页
+      if (seen.length == before) {
+        listFailed =
+            true; // Ignored/repeated pagination cannot prove completeness.
+        break;
+      }
+      if (page == _maxCoursePages) listFailed = true;
     }
     // 解析较宽松，同一课程对象可能在不同嵌套层被收多次，按课去重
     final used = <String>{};
     return [
       for (final c in found)
-        if (used.add(c.courseId)) c,
+        if (used.add('${c.courseId}|${c.recruitId}')) c,
     ];
   }
 
@@ -265,20 +324,39 @@ class ZhihuishuService {
     }
     if (json is! Map || !_codeOk(json['code'])) return null;
     // 成功负载在 result（真机实证：result.totalCount + result.courseOpenDtos），
-    // 兼容 data；都没有视为「授权正常但没有列表」→ 空列表而非失败
+    // 兼容 data；缺少可识别列表时不具备完整性证据。
     final payload = json['data'] ?? json['result'];
-    if (payload == null) return const <ZhsCourse>[];
+    if (payload == null) return null;
+    if (payload is Map &&
+        payload['totalCount'] == 0 &&
+        payload.containsKey('courseOpenDtos') &&
+        payload['courseOpenDtos'] == null) {
+      return const <ZhsCourse>[]; // Captured real zero-course envelope.
+    }
     final out = <ZhsCourse>[];
-    _walkForCourses(payload, out);
+    if (!_walkForCourses(payload, out)) return null;
+    if (out.isEmpty && !_recognizedEmptyCourses(payload)) return null;
     return out;
   }
 
-  static void _walkForCourses(dynamic node, List<ZhsCourse> out) {
+  static bool _recognizedEmptyCourses(dynamic payload) {
+    if (payload is List) return payload.isEmpty;
+    if (payload is Map) {
+      for (final key in const ['courseOpenDtos', 'list', 'records', 'rows']) {
+        if (payload.containsKey(key)) {
+          return payload[key] is List && (payload[key] as List).isEmpty;
+        }
+      }
+    }
+    return false;
+  }
+
+  static bool _walkForCourses(dynamic node, List<ZhsCourse> out) {
     if (node is List) {
       for (final e in node) {
-        _walkForCourses(e, out);
+        if (!_walkForCourses(e, out)) return false;
       }
-      return;
+      return true;
     }
     if (node is Map) {
       final name = node['courseName'] ?? node['name'] ?? node['title'];
@@ -289,13 +367,34 @@ class ZhihuishuService {
           name.trim().isNotEmpty &&
           id != null &&
           '$id'.trim().isNotEmpty) {
-        out.add(ZhsCourse(name.trim(), '$id'.trim()));
-        return;
+        out.add(
+          ZhsCourse(
+            name.trim(),
+            '$id'.trim(),
+            recruitId: node['recruitId']?.toString(),
+            schoolId: node['schoolId']?.toString(),
+          ),
+        );
+        return true;
       }
-      for (final v in node.values) {
-        _walkForCourses(v, out);
+      var recognized = false;
+      for (final e in node.entries) {
+        if (e.value is! List && e.value is! Map) continue;
+        final valid = _walkForCourses(e.value, out);
+        if (!valid &&
+            const [
+              'courseOpenDtos',
+              'list',
+              'records',
+              'rows',
+            ].contains(e.key)) {
+          return false;
+        }
+        recognized = recognized || valid;
       }
+      return recognized;
     }
+    return false;
   }
 
   /// 候选端点尝试顺序（公开纯函数便于单测）：已锁定下标优先，其余按原序；
@@ -313,42 +412,83 @@ class ZhihuishuService {
   /// 与「拉到了但这门课没有作业」（空列表）区分——失败被当空的话，
   /// 同步层会把该课已入库作业连同提醒整课清掉（见 mooc_service 同名注释）。
   Future<List<HomeworkItem>?> homeworkOf(ZhsCourse c) async {
+    if (c.recruitId != null && c.recruitId!.isNotEmpty) {
+      final snapshot = await (_examApi ??= ZhihuishuExamApi(cookie: cookie))
+          .homeworkOf(
+            courseName: c.name,
+            courseId: c.courseId,
+            recruitId: c.recruitId!,
+            schoolId: c.schoolId,
+          );
+      if (!snapshot.complete) failedCount++;
+      return snapshot.items;
+    }
+    // Compatibility data without enrollment identity cannot establish that
+    // this course's exams were fetched. It must never authorize cleanup.
+    failedCount++;
     for (final i in endpointTryOrder(hitEndpointIndex)) {
-      final resp = await _gatewayPost(homeworkEndpoints[i], {
-        // 参数名双保险：课程 id 实际取自 courseOpenDtos（字段名
-        // courseOpenId），作业端点认哪个参数名未抓包核实——两个名都带上，
-        // 网关各取所需（整个参数包要 AES 加密成 secretStr，多余键无副作用）
-        'courseId': c.courseId,
-        'courseOpenId': c.courseId,
-        'pageIndex': '1',
-        'pageSize': '$_workPageSize',
-      });
-      if (resp == null || resp.statusCode != 200) continue; // 请求层失败：换候选
-      final items = parseWorkListJson(resp.body, courseName: c.name);
-      if (items != null) {
-        // 命中即锁定：本次会话内后续课程不再逐个试错
+      final out = <HomeworkItem>[];
+      final seen = <String>{};
+      for (var page = 1; page <= _maxCoursePages; page++) {
+        final resp = await _gatewayPost(homeworkEndpoints[i], {
+          // 参数名双保险：课程 id 实际取自 courseOpenDtos（字段名
+          // courseOpenId），作业端点认哪个参数名未抓包核实——两个名都带上，
+          // 网关各取所需（整个参数包要 AES 加密成 secretStr，多余键无副作用）
+          'courseId': c.courseId,
+          'courseOpenId': c.courseId,
+          'pageIndex': '$page',
+          'pageSize': '$_workPageSize',
+        });
+        if (resp == null || resp.statusCode != 200) {
+          if (page == 1) break;
+          return null;
+        }
+        final items = parseWorkListJson(
+          resp.body,
+          courseName: c.name,
+          courseId: c.courseId,
+        );
+        if (items == null) {
+          if (page == 1) break;
+          return null;
+        }
         hitEndpointIndex = i;
-        return items;
+        final envelope = jsonDecode(resp.body) as Map;
+        final rawCount = _extractEntries(
+          envelope['data'] ?? envelope['result'],
+        )!.length;
+        var added = 0;
+        for (final item in items) {
+          if (seen.add(item.id)) {
+            out.add(item);
+            added++;
+          }
+        }
+        if (rawCount < _workPageSize) return out;
+        if (added == 0 || page == _maxCoursePages) {
+          failedCount++;
+          return out;
+        }
       }
     }
     return null;
   }
 
   /// 作业列表解析（公开纯函数便于单测）。宽松形状匹配：
-  /// - 信封 code==0；data 直接是数组，或 data 是 Map 时取其值里第一个
-  ///   全对象数组（data.list / data.records / data.rows 等分页命名统统能接）；
+  /// - 成功信封；data/result 直接是数组，或优先取 list/records/rows；
+  ///   其他字段仅在存在唯一非空对象数组时兼容，避免元数据空数组遮住作业；
   /// - 条目字段：标题 title/workName/name、截止 endTime/submitEndTime/
   ///   deadline/limitTime（yyyy-MM-dd HH:mm 与 ISO 都认，兼容毫秒时间戳）、
   ///   标识 workId/homeworkId/id、完成状态（布尔/字符串可识别才算；
   ///   数值型 status 的语义各端点不一，未抓包核实前不猜——误标已交会把
   ///   作业从雷达里藏掉，宁可全按未完成展示）；
-  /// - 无截止时间的条目跳过：作业雷达以截止提醒为核心，无截止无法排提醒，
-  ///   也让错误端点的垃圾响应更难凑成「有效列表」。
+  /// - 任一条目截止解析失败都返回 null，避免半页结果被当作权威清理依据。
   /// 返回 null = 响应不是作业列表（code!=0 / 非 JSON / 无数组形状），
   /// 候选端点链据此换下一个；空列表 = 有效响应、无可展示条目。
   static List<HomeworkItem>? parseWorkListJson(
     String body, {
     required String courseName,
+    String? courseId,
   }) {
     dynamic json;
     try {
@@ -364,21 +504,35 @@ class ZhihuishuService {
     final seen = <String>{};
     for (final e in entries) {
       final due = _firstDue(e);
-      if (due == null) continue; // 无截止时间的条目跳过（理由见上）
-      final title = _firstString(
-          e, const ['title', 'workName', 'name', 'homeworkName', 'workTitle']);
-      final wid = _firstString(e, const ['workId', 'homeworkId', 'id']) ??
+      if (due == null) {
+        return null; // Partial parse failure cannot authorize cleanup.
+      }
+      final title = _firstString(e, const [
+        'title',
+        'workName',
+        'name',
+        'homeworkName',
+        'workTitle',
+      ]);
+      final sourceId = _firstString(e, const ['workId', 'homeworkId', 'id']);
+      final wid =
+          sourceId ??
           // 无显式 id：标题+截止的稳定哈希兜底（id 稳定性口径见 stable_hash）
           '${stableHash('$title|${due.millisecondsSinceEpoch}')}';
       if (!seen.add(wid)) continue; // 同课同 id 去重：重复条目会重复排提醒
-      out.add(HomeworkItem(
-        id: 'zhs_${stableHash(courseName)}_$wid',
-        platform: PlatformKind.zhihuishu,
-        course: courseName,
-        title: (title == null || title.isEmpty) ? '作业 $wid' : title,
-        dueAt: due,
-        status: _statusOf(e),
-      ));
+      out.add(
+        HomeworkItem(
+          id: 'zhs_${stableHash(courseName)}_$wid',
+          platform: PlatformKind.zhihuishu,
+          course: courseName,
+          title: (title == null || title.isEmpty) ? '作业 $wid' : title,
+          dueAt: due,
+          status: _statusOf(e),
+          sourceKey: courseId == null || sourceId == null
+              ? null
+              : 'zhs|$courseId|work|$sourceId',
+        ),
+      );
     }
     // 条目存在却一条可用截止都没有：多半是字段名没对上（候选端点与字段
     // 尚未抓包校准）。返回 null（不可信结果 → failedCount++）而不是权威
@@ -387,17 +541,26 @@ class ZhihuishuService {
     return out;
   }
 
-  /// 从 data 里取条目数组：data 本身是数组，或 data 是 Map 时其值里
-  /// 第一个「全对象数组」。数组元素混入非对象 → 形状陌生，返回 null。
+  /// 优先已支持的列表字段；陌生空数组或多个候选不能证明没有作业。
+  /// 数组元素混入非对象 → 形状陌生，返回 null。
   static List<Map<String, dynamic>>? _extractEntries(dynamic data) {
     if (data is List) return _asMaps(data);
     if (data is Map) {
-      for (final v in data.values) {
-        if (v is List) {
-          final maps = _asMaps(v);
-          if (maps != null) return maps;
+      for (final key in const ['list', 'records', 'rows']) {
+        if (data.containsKey(key)) {
+          return data[key] is List ? _asMaps(data[key]) : null;
         }
       }
+      // Keep existing nonempty alternate field names, but an arbitrary empty
+      // metadata array cannot prove there is no work. Multiple candidates are
+      // ambiguous and must not be selected by map iteration order.
+      final candidates = <List<Map<String, dynamic>>>[];
+      for (final value in data.values) {
+        if (value is! List || value.isEmpty) continue;
+        final maps = _asMaps(value);
+        if (maps != null) candidates.add(maps);
+      }
+      if (candidates.length == 1) return candidates.single;
     }
     return null;
   }
@@ -413,7 +576,12 @@ class ZhihuishuService {
   }
 
   static DateTime? _firstDue(Map<String, dynamic> e) {
-    for (final k in const ['endTime', 'submitEndTime', 'deadline', 'limitTime']) {
+    for (final k in const [
+      'endTime',
+      'submitEndTime',
+      'deadline',
+      'limitTime',
+    ]) {
       if (!e.containsKey(k)) continue;
       final d = _parseTime(e[k]);
       if (d != null) return d;
@@ -433,6 +601,8 @@ class ZhihuishuService {
     if (v is! String) return null;
     final s = v.trim();
     if (s.isEmpty) return null;
+    final epoch = int.tryParse(s);
+    if (epoch != null) return _parseTime(epoch);
     // ISO 8601（含带时区偏移的）交给 SDK 解析，Z 结尾归一到本地时区；
     // SDK 吃不下时再按「yyyy-MM-dd HH:mm」手工解（兜底主格式，
     // 不赌 SDK 对无秒时刻的语法容忍度）
@@ -467,7 +637,12 @@ class ZhihuishuService {
     for (final k in const ['submitted', 'isSubmit']) {
       if (_truthy(e[k])) return HwStatus.submitted;
     }
-    for (final k in const ['finished', 'isFinished', 'completed', 'isCompleted']) {
+    for (final k in const [
+      'finished',
+      'isFinished',
+      'completed',
+      'isCompleted',
+    ]) {
       if (_truthy(e[k])) return HwStatus.done;
     }
     final s = _firstString(e, const ['status', 'workStatus', 'submitStatus']);
@@ -476,6 +651,8 @@ class ZhihuishuService {
       // 方向性保护：unsubmitted / not_submitted 含 submit 子串，先判负向，
       // 否则会把「未提交」误标成已提交、把作业从雷达里藏掉
       if (lower.contains('unsubmit') ||
+          lower.contains('unfinished') ||
+          lower.contains('incomplete') ||
           lower.startsWith('not') ||
           lower.contains('未提交')) {
         return HwStatus.todo;
@@ -490,13 +667,17 @@ class ZhihuishuService {
     return HwStatus.todo;
   }
 
-  static bool _truthy(dynamic v) => v == true || v == 1 || v == '1' || v == 'true';
+  static bool _truthy(dynamic v) =>
+      v == true || v == 1 || v == '1' || v == 'true';
 
   /// 并发拉取全部课程作业（2 路，单路间隔 0.8s，避免触发风控；与 mooc 同款）。
   Future<List<HomeworkItem>> allHomework({
     void Function(int done, int total)? onProgress,
   }) async {
-    if (await checkLogin() != ZhsSessionState.ok) return [];
+    if (await checkLogin() != ZhsSessionState.ok) {
+      listFailed = true;
+      return [];
+    }
     final cs = await courses();
     final out = <HomeworkItem>[];
     final queue = List<ZhsCourse>.of(cs);

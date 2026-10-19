@@ -9,6 +9,7 @@ import 'package:home_widget/home_widget.dart';
 import '../models/homework.dart';
 import 'chaoxing_service.dart';
 import 'mooc_service.dart';
+import 'homework_widget_snapshot.dart';
 import 'notification_service.dart';
 import 'safe_http.dart';
 import 'storage.dart';
@@ -33,31 +34,86 @@ void mergePlatform(
   PlatformKind platform, {
   required bool complete,
 }) {
+  final bySource = <String, List<HomeworkItem>>{};
+  for (final item in merged.values) {
+    if (item.sourceKey != null) {
+      bySource.putIfAbsent(item.sourceKey!, () => []).add(item);
+    }
+  }
+  final seenIds = <String>{};
+  String? legacyZhsKey(String? key) {
+    if (platform != PlatformKind.zhihuishu || key == null) return null;
+    final parts = key.split('|');
+    return parts.length == 5 && parts.first == 'zhs'
+        ? 'zhs|${parts[1]}|${parts[3]}|${parts[4]}'
+        : null;
+  }
+
+  final incomingLegacy = <String, int>{};
+  for (final item in incoming) {
+    final key = legacyZhsKey(item.sourceKey);
+    if (key != null) incomingLegacy[key] = (incomingLegacy[key] ?? 0) + 1;
+  }
+  final ambiguous =
+      bySource.values.any((items) => items.length > 1) ||
+      incomingLegacy.values.any((count) => count > 1);
   for (final it in incoming) {
-    final old = merged[it.id];
+    var aliases = it.sourceKey == null ? null : bySource[it.sourceKey];
+    final legacy = legacyZhsKey(it.sourceKey);
+    if (aliases == null && legacy != null && incomingLegacy[legacy] == 1) {
+      aliases = bySource[legacy];
+    }
+    final linked = aliases != null && aliases.length == 1
+        ? aliases.single
+        : null;
+    final resolved = linked == null ? it : it.copyWith(id: linked.id);
+    seenIds.add(resolved.id);
+    final old = merged[resolved.id];
     final oldNote = old?.note;
     final oldStatus = old?.status;
-    final keepStatus = (platform == PlatformKind.mooc ||
+    final keepStatus =
+        (platform == PlatformKind.mooc ||
             platform == PlatformKind.xuetangx ||
             platform == PlatformKind.yuketang) &&
         (oldStatus == HwStatus.done || oldStatus == HwStatus.submitted) &&
         it.status == HwStatus.todo;
-    var item = it;
+    var item = resolved;
     if (keepStatus) item = item.copyWith(status: oldStatus);
     if (oldNote != null &&
         oldNote.isNotEmpty &&
         (it.note == null || it.note!.isEmpty)) {
       item = item.copyWith(note: oldNote);
     }
-    merged[it.id] = item;
+    merged[resolved.id] = item;
   }
-  if (complete && incoming.isNotEmpty) {
-    final seen = {for (final it in incoming) it.id};
-    merged.removeWhere((k, v) => v.platform == platform && !seen.contains(k));
+  if (complete && !ambiguous && incoming.isNotEmpty) {
+    merged.removeWhere(
+      (k, v) =>
+          v.platform == platform &&
+          !seenIds.contains(k) &&
+          // 存量名字ID在首次补齐稳定身份前不能可靠关联，至少保住用户备注。
+          !(v.sourceKey == null &&
+              (v.note?.isNotEmpty == true ||
+                  ((platform == PlatformKind.mooc ||
+                          platform == PlatformKind.xuetangx ||
+                          platform == PlatformKind.yuketang) &&
+                      (v.status == HwStatus.done ||
+                          v.status == HwStatus.submitted)))) &&
+          // Older ZHS records lack enrollment/type evidence. Unmapped records
+          // survive the identity upgrade instead of guessing which new row owns
+          // their notes or treating them as confirmed deletions.
+          !(platform == PlatformKind.zhihuishu &&
+              incomingLegacy.isNotEmpty &&
+              v.sourceKey?.startsWith('zhs|') == true &&
+              v.sourceKey!.split('|').length == 4),
+    );
   }
 }
 
 class SyncResult {
+  bool cancelled = false;
+  bool partial = false;
+  int generation = -1;
   List<HomeworkItem> items = [];
   bool chaoxingValid = false;
   bool moocValid = false;
@@ -69,6 +125,7 @@ class SyncResult {
   bool zhihuishuUnknown = false;
   bool xuetangxUnknown = false;
   bool yuketangUnknown = false;
+
   /// 网关签名校验拒收（密钥组/网关校验变化）：重登无效，账号卡不得把
   /// 用户标成「需重新登录」误导其反复重登，保持原状态即可
   bool zhihuishuSignatureRejected = false;
@@ -80,10 +137,34 @@ class SyncService {
   static Future<SyncResult> run({
     void Function(int done, int total)? onProgress,
   }) async {
+    await Storage.waitForBusinessTransaction();
     final result = SyncResult();
+    final epoch = Storage.syncEpoch;
+    result.generation = epoch;
+    SyncResult cancelled() {
+      result.cancelled = true;
+      result.items = Storage.homework()
+          .where((h) => !Storage.dismissedIds().contains(h.id))
+          .toList();
+      return result;
+    }
+
+    List<HomeworkItem> visible() => Storage.homework()
+        .where((h) => !Storage.dismissedIds().contains(h.id))
+        .toList();
     final merged = <String, HomeworkItem>{};
     for (final old in Storage.homework()) {
       merged[old.id] = old;
+    }
+    for (final raw in Storage.hiddenItems().values) {
+      try {
+        final item = HomeworkItem.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>,
+        );
+        merged.putIfAbsent(item.id, () => item);
+      } catch (_) {
+        /* 保留损坏副本，不阻断其他同步。 */
+      }
     }
     String? loginExpiredNotice; // 收着，等 reschedule 之后才弹（见 run 尾部）
     String? moocExpiredNotice;
@@ -94,6 +175,7 @@ class SyncService {
     final cx = ChaoxingService(cookie: Storage.chaoxingCookie());
     try {
       final cxOk = await cx.checkLogin();
+      if (epoch != Storage.syncEpoch) return cancelled();
       // 登录从有效变为失效时，发系统通知提醒重新登录（只提醒一次）。
       // 网络失败算「未知」：把网络抖动当登录过期会误发通知、误标失效，
       // 还会清掉 cx_ok 让真正的过期永远不再提醒。
@@ -109,8 +191,12 @@ class SyncService {
         if (cxOk) {
           result.chaoxingValid = true;
           final list = await cx.allHomework(onProgress: onProgress);
-          mergePlatform(merged, list, PlatformKind.chaoxing,
-              complete: !cx.listFailed && cx.failedCount == 0);
+          mergePlatform(
+            merged,
+            list,
+            PlatformKind.chaoxing,
+            complete: !cx.listFailed && cx.failedCount == 0,
+          );
         }
       }
     } catch (e) {
@@ -123,6 +209,7 @@ class SyncService {
     );
     try {
       final moocOk = await mooc.checkLogin();
+      if (epoch != Storage.syncEpoch) return cancelled();
       if (moocOk == null) {
         result.moocUnknown = true;
       } else if (moocOk) {
@@ -139,8 +226,12 @@ class SyncService {
         } else {
           result.moocValid = true;
           await Storage.setFlag('mooc_ok', true);
-          mergePlatform(merged, list, PlatformKind.mooc,
-              complete: !mooc.listFailed && mooc.failedCount == 0);
+          mergePlatform(
+            merged,
+            list,
+            PlatformKind.mooc,
+            complete: !mooc.listFailed && mooc.failedCount == 0,
+          );
         }
       }
     } catch (e) {
@@ -152,6 +243,7 @@ class SyncService {
     final zhs = ZhihuishuService(cookie: Storage.zhihuishuCookie());
     try {
       final zhsState = await zhs.checkLogin();
+      if (epoch != Storage.syncEpoch) return cancelled();
       // 网络失败算「未知」：把网络抖动当登录过期会误发通知、误标失效，
       // 还会清掉 zhs_ok 让真正的过期永远不再提醒（与学习通/MOOC 同款）
       if (zhsState == ZhsSessionState.unknown) {
@@ -177,8 +269,12 @@ class SyncService {
           final list = await zhs.allHomework(onProgress: onProgress);
           // complete 守卫语义不可动：课程/作业没拉全（候选端点全失败、
           // 网关抖动）绝不能把旧条目当「确认消失」清库
-          mergePlatform(merged, list, PlatformKind.zhihuishu,
-              complete: !zhs.listFailed && zhs.failedCount == 0);
+          mergePlatform(
+            merged,
+            list,
+            PlatformKind.zhihuishu,
+            complete: !zhs.listFailed && zhs.failedCount == 0,
+          );
         }
       }
     } catch (e) {
@@ -190,6 +286,7 @@ class SyncService {
     final xt = XuetangxService(cookie: Storage.xuetangxCookie());
     try {
       final xtState = await xt.checkLogin();
+      if (epoch != Storage.syncEpoch) return cancelled();
       if (xtState == XtSessionState.unknown) {
         result.xuetangxUnknown = true;
       } else {
@@ -204,8 +301,12 @@ class SyncService {
           final list = await xt.allHomework(onProgress: onProgress);
           // complete 守卫语义不可动：课程列表候选端点未校准/章节树失败
           // （listFailed）或单课失败时，绝不能把旧条目当「确认消失」清库
-          mergePlatform(merged, list, PlatformKind.xuetangx,
-              complete: !xt.listFailed && xt.failedCount == 0);
+          mergePlatform(
+            merged,
+            list,
+            PlatformKind.xuetangx,
+            complete: !xt.listFailed && xt.failedCount == 0,
+          );
         }
       }
     } catch (e) {
@@ -216,6 +317,7 @@ class SyncService {
     final ykt = YuketangService(cookie: Storage.yuketangCookie());
     try {
       final yktState = await ykt.checkLogin();
+      if (epoch != Storage.syncEpoch) return cancelled();
       if (yktState == YktSessionState.unknown) {
         result.yuketangUnknown = true;
       } else {
@@ -230,8 +332,12 @@ class SyncService {
           final list = await ykt.allHomework(onProgress: onProgress);
           // complete 守卫语义不可动：origin 全挂/单课失败时绝不能把旧
           // 条目当「确认消失」清库
-          mergePlatform(merged, list, PlatformKind.yuketang,
-              complete: !ykt.listFailed && ykt.failedCount == 0);
+          mergePlatform(
+            merged,
+            list,
+            PlatformKind.yuketang,
+            complete: !ykt.listFailed && ykt.failedCount == 0,
+          );
         }
       }
     } catch (e) {
@@ -241,11 +347,41 @@ class SyncService {
     // 落库前重读一遍磁盘：同步可达数十秒，期间用户的手动增删改与备注编辑
     // 已直接落库，不能被开始时的快照合并结果覆盖回滚（manual_ 条目仅存
     // 本地，被覆盖即永久丢失）。
+    if (epoch != Storage.syncEpoch) return cancelled();
+    final cxDetails = cx.failureDetails;
+    if (cxDetails.isNotEmpty) {
+      final remaining = cxDetails.length > 3 ? '；等共 ${cxDetails.length} 处' : '';
+      result.message +=
+          '学习通未完整同步：${cxDetails.take(3).join('；')}$remaining。已保留旧记录。\n';
+    }
+    final warnings = <String>[
+      if (cxDetails.isEmpty &&
+          (result.chaoxingUnknown || cx.listFailed || cx.failedCount > 0))
+        '学习通',
+      if (result.moocUnknown || mooc.listFailed || mooc.failedCount > 0) 'MOOC',
+      if (result.zhihuishuUnknown || zhs.listFailed || zhs.failedCount > 0)
+        '智慧树',
+      if (result.xuetangxUnknown || xt.listFailed || xt.failedCount > 0) '学堂在线',
+      if (result.yuketangUnknown || ykt.listFailed || ykt.failedCount > 0)
+        '雨课堂',
+    ];
+    result.partial = warnings.isNotEmpty || result.message.isNotEmpty;
+    if (warnings.isNotEmpty) {
+      result.message += '${warnings.join('、')}未完整同步，已保留旧记录，请稍后重试。\n';
+    }
     final fresh = {for (final h in Storage.homework()) h.id: h};
 
     // 手动隐藏过的条目不再入库（下次同步也不会回来）。快照放到重读磁盘
     // 之后取：dismissed 读得越晚，同步窗口内「恢复隐藏」被开始时的旧状态
     // 当成仍隐藏而丢弃的窗口越小。
+    final hidden = Storage.hiddenItems();
+    for (final id in hidden.keys) {
+      final item = merged[id];
+      if (item != null && item.sourceKey != null) {
+        await Storage.updateHiddenBody(id, item);
+        if (epoch != Storage.syncEpoch) return cancelled();
+      }
+    }
     final dismissed = Storage.dismissedIds();
     merged.removeWhere((k, _) => dismissed.contains(k));
 
@@ -273,6 +409,7 @@ class SyncService {
           url: m.url,
           score: m.score,
           note: f.note,
+          sourceKey: m.sourceKey,
         );
       }
     }
@@ -297,218 +434,106 @@ class SyncService {
         return ad.compareTo(bd);
       });
 
-    await Storage.saveHomework(result.items);
+    if (epoch != Storage.syncEpoch) return cancelled();
+    await Storage.saveHomework(result.items, fromSync: true);
     await Storage.saveDebugLog(SafeHttp.log);
     // 上课提醒要一并重排：reschedule 会先 cancelAll，漏掉 courses 就会把
     // 课前 15 分钟提醒清光（每次打开 App 都同步，等于提醒常灭）
-    await NotificationService.reschedule(result.items, courses: Storage.courses());
+    await NotificationService.reschedule(visible(), courses: Storage.courses());
+    if (epoch != Storage.syncEpoch) return cancelled();
     // 过期通知必须在 reschedule 之后弹：reschedule 先 cancelAll，先弹会被
     // 自己清掉，而且去重标志已置位、永远不会再补发
     if (loginExpiredNotice != null) {
       await NotificationService.showSimple(
-          loginExpiredNotice, '作业没法同步了，点开作业通重新登录一下');
+        loginExpiredNotice,
+        '作业没法同步了，点开作业通重新登录一下',
+      );
     }
     if (moocExpiredNotice != null) {
       await NotificationService.showSimple(
-          moocExpiredNotice, 'MOOC作业没法同步了，点开作业通重新登录一下');
+        moocExpiredNotice,
+        'MOOC作业没法同步了，点开作业通重新登录一下',
+      );
     }
     if (zhsExpiredNotice != null) {
       await NotificationService.showSimple(
-          zhsExpiredNotice, '智慧树作业没法同步了，点开作业通重新登录一下');
+        zhsExpiredNotice,
+        '智慧树作业没法同步了，点开作业通重新登录一下',
+      );
     }
     if (xtxExpiredNotice != null) {
       await NotificationService.showSimple(
-          xtxExpiredNotice, '学堂在线作业没法同步了，点开作业通重新登录一下');
+        xtxExpiredNotice,
+        '学堂在线作业没法同步了，点开作业通重新登录一下',
+      );
     }
     if (yktExpiredNotice != null) {
       await NotificationService.showSimple(
-          yktExpiredNotice, '雨课堂作业没法同步了，点开作业通重新登录一下');
+        yktExpiredNotice,
+        '雨课堂作业没法同步了，点开作业通重新登录一下',
+      );
     }
-    await updateHomeWidget(result.items);
+    await updateHomeWidget(visible());
+    if (epoch != Storage.syncEpoch) result.cancelled = true;
     return result;
   }
 
-  /// 把最近截止的未完成作业写给桌面小组件（结构化 JSON，原生侧按紧急度着色）。
-  static Future<void> updateHomeWidget(List<HomeworkItem> items) async {
+  /// Export every visible unfinished item, including overdue / undated records.
+  /// The versioned cache is committed as one value; old cache keys remain readable.
+  static Future<void> _widgetExports = Future<void>.value();
+
+  static Future<void> updateHomeWidget(List<HomeworkItem> items) {
+    final snapshot = homeworkWidgetSnapshot(items);
+    // Edits, logout and synchronization may export concurrently. Preserve call
+    // order so an older cache write cannot overtake the latest visible account.
+    final write = _widgetExports.then((_) => _publishWidgetSnapshot(snapshot));
+    _widgetExports = write;
+    return write;
+  }
+
+  static Future<void> _publishWidgetSnapshot(
+    Map<String, Object> snapshot,
+  ) async {
+    // Current Android providers read this single authoritative value. Publish
+    // and repaint it before optional compatibility keys, whose failures must
+    // never keep a hidden/deleted row visible in the current widget.
+    var committed = false;
+    for (var attempt = 0; attempt < 2 && !committed; attempt++) {
+      try {
+        committed =
+            await HomeWidget.saveWidgetData<String>(
+              'homework_snapshot',
+              jsonEncode(snapshot),
+            ) !=
+            false;
+      } catch (_) {
+        // Retry a transient native channel/commit failure once, in call order.
+      }
+    }
+    if (!committed) return;
     try {
-      final now = DateTime.now();
-      final todo = items
-          .where((h) =>
-              h.status != HwStatus.done &&
-              h.status != HwStatus.submitted &&
-              h.dueAt != null &&
-              h.dueAt!.isAfter(now))
-          .toList()
-        ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));
-
-      String shortCountdown(HomeworkItem hw) {
-        final diff = hw.dueAt!.difference(now);
-        // 48 小时内用倒计时（24 小时内带分秒），更远按天；口径与应用内一致
-        if (diff.inMinutes < 60) return '${diff.inMinutes}分钟';
-        if (diff.inHours < 24) {
-          final h = diff.inHours;
-          final m = diff.inMinutes % 60;
-          final s = diff.inSeconds % 60;
-          return '$h小时$m分$s秒';
-        }
-        if (diff.inHours < 48) return '${diff.inHours}小时';
-        return '${diff.inDays}天';
-      }
-
-      // 0=一天内(红) 1=三天内(琥珀) 2=更远(主题绿) 3=已完成/已提交(灰)
-      int urgency(HomeworkItem hw) {
-        final diff = hw.dueAt!.difference(now);
-        if (diff.inHours <= 24) return 0;
-        if (diff.inDays <= 3) return 1;
-        return 2;
-      }
-
-      // 大尺寸小组件最多显示 12 条：待办在前（有截止的按时间升序，无截止的随后），
-      // 不足时已提交/完成的按截止时间倒序灰色补位
-      final undated = items
-          .where((h) =>
-              h.status != HwStatus.done &&
-              h.status != HwStatus.submitted &&
-              h.dueAt == null &&
-              h.inCurrentSemester)
-          .toList();
-      final finished = items
-          .where((h) =>
-              (h.status == HwStatus.done || h.status == HwStatus.submitted) &&
-              h.inCurrentSemester)
-          .toList()
-        ..sort((a, b) =>
-            (b.dueAt ?? DateTime(1970)).compareTo(a.dueAt ?? DateTime(1970)));
-      final rows = [...todo.take(20), ...undated];
-      final filler = finished.take(20 - rows.length.clamp(0, 20)).toList();
-
-      String shortStatus(HomeworkItem hw) =>
-          hw.status == HwStatus.done ? '完成' : '已交';
-
-      final data = [
-        for (final hw in todo.take(20))
-          {
-            'count': shortCountdown(hw),
-            // 原生重绘时按 due 里程碑重算倒计时/颜色，否则截止后组件
-            // 仍显示同步时刻的「未来」倒计时
-            'd': hw.dueAt!.millisecondsSinceEpoch,
-            'title': hw.title,
-            'due': '${hw.dueAt!.month}/${hw.dueAt!.day} 截止',
-            'u': urgency(hw),
-          },
-        for (final hw in undated)
-          {
-            'count': '未设',
-            'title': hw.title,
-            'due': '',
-            'u': 2,
-          },
-        for (final hw in filler)
-          {
-            'count': shortStatus(hw),
-            'title': hw.title,
-            'due': hw.dueAt == null
-                ? ''
-                : '${hw.dueAt!.month}/${hw.dueAt!.day}',
-            'u': 3,
-          },
-      ];
-      await HomeWidget.saveWidgetData<String>('items_json', jsonEncode(data));
-
-      // 学期统计：供小组件汇总文案与进度条使用
-      final semester = items.where((h) => h.inCurrentSemester).toList();
-      final doneCount = semester
-          .where((h) => h.status == HwStatus.done || h.status == HwStatus.submitted)
-          .length;
-      final todoAll = semester
-          .where((h) => h.status != HwStatus.done && h.status != HwStatus.submitted)
-          .toList();
-      final overdue = todoAll
-          .where((h) => h.dueAt != null && h.dueAt!.isBefore(now))
-          .length;
-
-      // 紧急焦点横幅：今天 > 明天 > 最近一条
-      final today0 = DateTime(now.year, now.month, now.day);
-      final dueToday = todo
-          .where((h) =>
-              h.dueAt!.year == today0.year &&
-              h.dueAt!.month == today0.month &&
-              h.dueAt!.day == today0.day)
-          .toList();
-      final tomorrow = today0.add(const Duration(days: 1));
-      final dueTomorrow = todo
-          .where((h) =>
-              h.dueAt!.year == tomorrow.year &&
-              h.dueAt!.month == tomorrow.month &&
-              h.dueAt!.day == tomorrow.day)
-          .toList();
-      String bannerText;
-      int bannerU;
-      int? bannerD; // 横幅焦点条目的截止里程碑（epoch ms），供原生按当前时间重算
-      if (dueToday.isNotEmpty) {
-        bannerText =
-            '今天截止 ${dueToday.length} 件 · ${dueToday.first.title}';
-        bannerU = 0;
-        bannerD = dueToday.first.dueAt!.millisecondsSinceEpoch;
-      } else if (dueTomorrow.isNotEmpty) {
-        bannerText = '明天截止 · ${dueTomorrow.first.title}';
-        bannerU = 1;
-        bannerD = dueTomorrow.first.dueAt!.millisecondsSinceEpoch;
-      } else if (todo.isNotEmpty) {
-        bannerText =
-            '最近 ${shortCountdown(todo.first)} · ${todo.first.title}';
-        bannerU = 2;
-        bannerD = todo.first.dueAt!.millisecondsSinceEpoch;
-      } else {
-        bannerText = '';
-        bannerU = 2;
-      }
-
-      // 课程待办分布（取前 4 门，按数量降序）
-      final byCourse = <String, int>{};
-      for (final h in todoAll) {
-        final c = h.course.trim();
-        if (c.isEmpty) continue;
-        byCourse[c] = (byCourse[c] ?? 0) + 1;
-      }
-      final courseEntries = byCourse.entries.toList()
-        ..sort((a, b) => b.value.compareTo(a.value));
-
+      await HomeWidget.updateWidget(androidName: 'HomeworkWidgetProvider');
+    } catch (_) {
+      // Retain the latest committed cache for the next host/app refresh.
+    }
+    try {
       await HomeWidget.saveWidgetData<String>(
-          'stats',
-          jsonEncode({
-            'todo': todoAll.length,
-            'overdue': overdue,
-            'done': doneCount,
-            'total': semester.length,
-            'banner': {
-              'text': bannerText,
-              'u': bannerU,
-              // 截止里程碑：横幅文本是同步瞬间的快照，小组件 30 分钟重绘
-              // 只回放文本的话，截止后仍显示「未来X小时」；原生按 d 重算
-              // 相对文案，缺失时回退快照（旧数据向后兼容）
-              'd': ?bannerD,
-            },
-            'courses': [
-              for (final e in courseEntries.take(4))
-                {
-                  // 按 UTF-16 码元 substring 会劈开代理对（emoji 课名等）
-                  'c': String.fromCharCode(e.key.trim().runes.first),
-                  'n': e.value
-                },
-            ],
-          }));
-
-      final n = DateTime.now();
+        'items_json',
+        jsonEncode(snapshot['items']),
+      );
       await HomeWidget.saveWidgetData<String>(
-          'updated',
-          '更新 ${n.hour.toString().padLeft(2, '0')}:'
-          '${n.minute.toString().padLeft(2, '0')}');
-      await HomeWidget.updateWidget(
-        androidName: 'HomeworkWidgetProvider',
+        'stats',
+        jsonEncode(snapshot['stats']),
+      );
+      final at = DateTime.fromMillisecondsSinceEpoch(
+        snapshot['updatedAt'] as int,
+      );
+      await HomeWidget.saveWidgetData<String>(
+        'updated',
+        '更新 ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}',
       );
     } catch (_) {
-      // 小组件更新失败不影响同步
+      // Compatibility data never changes business records or gates repainting.
     }
   }
 }

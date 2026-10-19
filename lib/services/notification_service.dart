@@ -2,6 +2,8 @@
 /// 点击通知可携带 payload（作业 id）跳转到详情页。
 library;
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -13,12 +15,68 @@ import 'stable_hash.dart';
 import 'storage.dart';
 
 class NotificationService {
+  static const _platform = MethodChannel('homework_radar/platform');
+  // Keep these IDs stable: Android retains the user's channel preferences.
+  static const androidReminderChannels = [
+    AndroidNotificationChannel(
+      'homework_due',
+      '作业截止提醒',
+      description: '作业截止前的倒计时提醒（作业通）',
+      importance: Importance.high,
+    ),
+    AndroidNotificationChannel(
+      'class_reminder',
+      '上课提醒',
+      importance: Importance.high,
+    ),
+  ];
+
+  static AndroidNotificationChannel _reminderChannel(String id) =>
+      androidReminderChannels.firstWhere(
+        (channel) => channel.id == id,
+        orElse: () => throw ArgumentError.value(id, 'channelId'),
+      );
+
+  /// Inspect saved settings; never infer banner permission from app permission.
+  static Future<List<AndroidNotificationChannel>?>
+  androidChannelSettings() async {
+    await init();
+    return _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.getNotificationChannels();
+  }
+
+  static Future<bool> openAndroidNotificationSettings({
+    String? channelId,
+  }) async {
+    final channel = channelId == null ? null : _reminderChannel(channelId);
+    await init();
+    if (channel != null) {
+      // Create only if absent so a device with no future reminders can open it.
+      // Re-registering never overrides saved importance/sound/user choices.
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.createNotificationChannel(channel);
+    }
+    return await _platform.invokeMethod<bool>('openNotificationSettings', {
+          'channelId': channelId,
+        }) ??
+        false;
+  }
+
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
+  static Future<void>? _initializing;
 
   /// 通知权限是否被授予（init 时采样；null = 还没查过/平台不支持）。
   /// 此前请求结果直接丢弃、从不检查，Android 13+ 拒绝后全部提醒静默失效。
-  static bool? notificationsEnabled;
+  static final permission = ValueNotifier<bool?>(null);
+  static bool? get notificationsEnabled => permission.value;
+  static final scheduleError = ValueNotifier<String?>(null);
 
   /// 点击通知的回调（payload 为作业 id）
   static void Function(String payload)? onSelect;
@@ -27,37 +85,73 @@ class NotificationService {
   /// 各自的「清待排 → 重排」两步会互相交错清场，留下过期/已删作业的提醒。
   static Future<void> _rescheduleQueue = Future.value();
 
-  static Future<void> init() async {
-    if (_ready) return;
+  static Future<void> init() {
+    if (_ready) return Future.value();
+    return _initializing ??= _initialize().whenComplete(
+      () => _initializing = null,
+    );
+  }
+
+  static Future<void> _initialize() async {
     tzdata.initializeTimeZones();
     tz.setLocalLocation(tz.getLocation('Asia/Shanghai'));
-    const settings = InitializationSettings(
-      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS: DarwinInitializationSettings(),
-    );
     await _plugin.initialize(
-      settings,
+      const InitializationSettings(
+        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        iOS: DarwinInitializationSettings(
+          requestAlertPermission: false,
+          requestBadgePermission: false,
+          requestSoundPermission: false,
+        ),
+      ),
       onDidReceiveNotificationResponse: (resp) {
         final p = resp.payload;
         if (p != null && p.isNotEmpty) onSelect?.call(p);
       },
     );
-    final impl = _plugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
-    await impl?.requestNotificationsPermission();
-    notificationsEnabled = await impl?.areNotificationsEnabled();
     _ready = true;
+    try {
+      await refreshPermission();
+    } catch (_) {
+      permission.value = null;
+    }
   }
 
-  /// 通知权限被拒后引导重开：再次拉起系统授权弹窗并刷新状态。
-  /// 永久拒绝时系统不再弹窗，用户需去系统设置——此时提醒静默失效的
-  /// 状态至少在设置页可见（notificationsEnabled == false）。
+  static Future<void> refreshPermission() async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      permission.value = await _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.areNotificationsEnabled();
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      permission.value =
+          (await _plugin
+                  .resolvePlatformSpecificImplementation<
+                    IOSFlutterLocalNotificationsPlugin
+                  >()
+                  ?.checkPermissions())
+              ?.isEnabled;
+    }
+  }
+
+  /// 权限请求不进入冷启动深链关键路径。
   static Future<void> rerequestPermission() async {
-    final impl = _plugin.resolvePlatformSpecificImplementation<
-        AndroidFlutterLocalNotificationsPlugin>();
-    await impl?.requestNotificationsPermission();
-    notificationsEnabled = await impl?.areNotificationsEnabled();
+    await init();
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.requestNotificationsPermission();
+    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+    }
+    await refreshPermission();
   }
 
   /// App 冷启动时若由通知拉起，返回其 payload。
@@ -72,7 +166,11 @@ class NotificationService {
     List<HomeworkItem> items, {
     List<Course> courses = const [],
   }) {
-    final task = _rescheduleQueue.then((_) => _rescheduleNow(items, courses: courses));
+    final snapshot = List<HomeworkItem>.of(items);
+    final courseSnapshot = List<Course>.of(courses);
+    final task = _rescheduleQueue.then(
+      (_) => _rescheduleNow(snapshot, courses: courseSnapshot),
+    );
     // 队列吞掉单次失败，别让一次排期异常卡死后续所有重排
     _rescheduleQueue = task.catchError((_) {});
     return task;
@@ -83,142 +181,142 @@ class NotificationService {
     List<Course> courses = const [],
   }) async {
     await init();
-    // 只清「待排」、不清已弹出：cancelAll 会把刚弹出的测试通知/课前提醒
-    // 一并灭掉（用户正看着通知它就消失了）；flutter_local_notifications
-    // 19.x 起提供 cancelAllPendingNotifications，精确只重置待排队列。
-    await _plugin.cancelAllPendingNotifications();
-    final r = Storage.reminders();
+    // 完整候选按真实触发时间共同分配预算，远期课程不能挤掉近期作业。
     final now = DateTime.now();
-    // 排近截止的优先：总量封顶时牺牲的是更远的提醒
-    final sorted = [...items]
-      ..sort((a, b) {
-        final ad = a.dueAt, bd = b.dueAt;
-        if (ad == null && bd == null) return 0;
-        if (ad == null) return 1;
-        if (bd == null) return -1;
-        return ad.compareTo(bd);
-      });
-    int id = 1;
-    // 上课提醒另占至多 400 个 id；作业提醒封顶 100，总量留在系统
-    // 单应用 500 闹钟上限之内，触顶静默丢失的只会是最远的作业提醒。
-    const maxHomeworkScheduled = 100;
-    var scheduled = 0;
-    for (final hw in sorted) {
-      if (scheduled >= maxHomeworkScheduled) break;
-      // 已提交 = 已交，与卡片/小组件的完结口径一致，不再提醒
+    final candidates = <_Reminder>[];
+    for (final hw in items) {
       if (hw.status == HwStatus.done || hw.status == HwStatus.submitted) {
         continue;
       }
       final due = hw.dueAt;
-      if (due == null || due.isBefore(now)) continue;
-      for (final h in r.enabledHours) {
+      if (due == null) continue;
+      for (final h in Storage.reminders().enabledHours) {
         final fire = due.subtract(Duration(hours: h));
         if (!fire.isAfter(now)) continue;
-        final details = NotificationDetails(
-          android: const AndroidNotificationDetails(
-            'homework_due',
-            '作业截止提醒',
-            channelDescription: '作业截止前的倒计时提醒（作业通）',
-            importance: Importance.high,
-            priority: Priority.high,
-          ),
-          iOS: const DarwinNotificationDetails(),
-        );
-        try {
-          await _plugin.zonedSchedule(
-            id++,
+        candidates.add(
+          _Reminder(
+            stableHash('hw#${hw.id}#$h') & 0x3fffffff,
+            fire,
             '作业即将截止：${hw.course}',
             '「${hw.title}」$h小时后截止',
-            tz.TZDateTime.from(fire, tz.local),
-            details,
             payload: hw.id,
-            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-          );
-          scheduled++;
-        } catch (_) {
-          // 单条排期失败不阻塞其余提醒
-        }
+          ),
+        );
       }
     }
-    await _scheduleClassReminders(courses, now);
-  }
-
-  /// 未来 8 周有课的，提前 15 分钟提醒（可在设置里关）。
-  static Future<void> _scheduleClassReminders(
-      List<Course> courses, DateTime now) async {
-    if (courses.isEmpty || !Storage.classReminder()) return;
     final start = Storage.semesterStart();
-    // 无后台同步，提醒只能趁打开 App 时排远：一次排 8 周（约大半个学期），
-    // 总量封顶，防止极端课表把系统通知排爆。
-    const horizonDays = 56;
-    const maxScheduled = 400;
-    final channel = NotificationDetails(
-      android: const AndroidNotificationDetails(
-        'class_reminder',
-        '上课提醒',
-        channelDescription: '课前 15 分钟的上课提醒（作业通）',
-        importance: Importance.high,
-        priority: Priority.high,
-      ),
-      iOS: const DarwinNotificationDetails(),
-    );
-    var scheduled = 0;
-    for (var d = 0; d < horizonDays && scheduled < maxScheduled; d++) {
-      final day = DateTime(now.year, now.month, now.day + d);
-      final week = start == null
-          ? null
-          : Course.weekNumberOf(start, day);
-      if (week == null) continue;
-      for (final c in courses) {
-        if (c.weekday != day.weekday || !c.inWeek(week)) continue;
-        // 作息表没配到该节次时取时刻函数返回 null：此刻不存在真实上课
-        // 时间，跳过这节课的提醒排期——绝不能钳到末节（21:45）后
-        // 按错误时刻每晚误报
-        final lessonStart = SectionTimes.startOfDay(day, c.startSection);
-        if (lessonStart == null) continue;
-        final fire = lessonStart.subtract(const Duration(minutes: 15));
-        if (!fire.isAfter(now)) continue;
-        final place = c.room.isEmpty ? '' : ' @${c.room}';
-        try {
-          await _plugin.zonedSchedule(
-            // 同日同起始节次的两门课也要不同 ID，否则后者覆盖前者；
-            // 用稳定哈希而非 String.hashCode（跨执行无契约保证）
-            0x40000000 |
-                (stableHash(
-                        '${c.id}#${day.year * 10000 + day.month * 100 + day.day}') &
-                    0x3FFFFFFF),
-            '15分钟后上课：${c.name}',
-            '第${c.startSection}节$place',
-            tz.TZDateTime.from(fire, tz.local),
-            channel,
-            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+    if (start != null && Storage.classReminder()) {
+      for (var d = 0; d < 56; d++) {
+        final day = DateTime(now.year, now.month, now.day + d);
+        final week = Course.weekNumberOf(start, day);
+        if (week < 1) continue;
+        for (final c in courses) {
+          if (c.weekday != day.weekday || !c.inWeek(week)) continue;
+          final lesson = SectionTimes.startOfDay(day, c.startSection);
+          if (lesson == null) continue;
+          final fire = lesson.subtract(const Duration(minutes: 15));
+          if (!fire.isAfter(now)) continue;
+          final place = c.room.isEmpty ? '' : ' @${c.room}';
+          candidates.add(
+            _Reminder(
+              0x40000000 |
+                  (stableHash('${c.id}#${day.year}-${day.month}-${day.day}') &
+                      0x3fffffff),
+              fire,
+              '15分钟后上课：${c.name}',
+              '第${c.startSection}节$place',
+              isClass: true,
+            ),
           );
-          scheduled++;
-        } catch (_) {
-          // 单条失败不阻塞
         }
       }
     }
+    candidates.sort((a, b) {
+      final cmp = a.fire.compareTo(b.fire);
+      return cmp != 0 ? cmp : a.id.compareTo(b.id);
+    });
+    final budget = defaultTargetPlatform == TargetPlatform.iOS ? 64 : 500;
+    var homeworkCount = 0, classCount = 0, total = 0, failed = 0;
+    await _plugin.cancelAllPendingNotifications();
+    final usedIds = <int>{};
+    for (final item in candidates) {
+      if (total >= budget) break;
+      if (item.isClass ? classCount >= 400 : homeworkCount >= 100) continue;
+      var id = item.id;
+      while (!usedIds.add(id)) {
+        id = (id + 1) & 0x7fffffff;
+      }
+      try {
+        await _plugin.zonedSchedule(
+          id,
+          item.title,
+          item.body,
+          tz.TZDateTime.from(item.fire, tz.local),
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              item.isClass ? 'class_reminder' : 'homework_due',
+              item.isClass ? '上课提醒' : '作业截止提醒',
+              importance: Importance.high,
+              priority: Priority.high,
+            ),
+            iOS: const DarwinNotificationDetails(),
+          ),
+          payload: item.payload,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        );
+        total++;
+        if (item.isClass) {
+          classCount++;
+        } else {
+          homeworkCount++;
+        }
+      } catch (_) {
+        failed++;
+      }
+    }
+    scheduleError.value = failed == 0 ? null : '$failed 条提醒排期失败，请检查系统通知设置后重试';
   }
 
-  static Future<void> showSimple(String title, String body,
-      {String? payload}) async {
+  static Future<void> showSimple(
+    String title,
+    String body, {
+    String? payload,
+    String channelId = 'homework_due',
+  }) async {
+    final channel = _reminderChannel(channelId);
     await init();
     await _plugin.show(
       DateTime.now().millisecondsSinceEpoch & 0x7fffffff,
       title,
       body,
-      const NotificationDetails(
+      NotificationDetails(
         android: AndroidNotificationDetails(
-          'homework_due',
-          '作业截止提醒',
-          channelDescription: '作业截止前的倒计时提醒（作业通）',
+          channel.id,
+          channel.name,
+          channelDescription: channel.description,
           importance: Importance.high,
           priority: Priority.high,
         ),
-        iOS: DarwinNotificationDetails(),
+        iOS: const DarwinNotificationDetails(),
       ),
       payload: payload,
     );
   }
+}
+
+class _Reminder {
+  const _Reminder(
+    this.id,
+    this.fire,
+    this.title,
+    this.body, {
+    this.payload,
+    this.isClass = false,
+  });
+  final int id;
+  final DateTime fire;
+  final String title;
+  final String body;
+  final String? payload;
+  final bool isClass;
 }

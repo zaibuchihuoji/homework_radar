@@ -10,7 +10,7 @@ import java.io.File
 
 /// 液态玻璃小组件的底材选择与加工。
 ///
-/// 默认材质：纯半透玻璃 drawable（widget_glass_dark / widget_glass_light）。
+/// 默认材质由 WidgetThemePanel 保持透明，仅绘制主题细节。
 /// 不合成任何"壁纸色渐变"——API 33+ 三方应用拿不到壁纸位图，合成色和
 /// 组件背后的真实像素永远对不上，一眼就是假玻璃。半透像素让真实壁纸
 /// 透出来，材料均匀所以永远成立。
@@ -35,6 +35,44 @@ object GlassWallpaperRenderer {
         }
     }
     private val cacheLock = Any()
+    private val colorCache = object : LinkedHashMap<String, Int>(12, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>) = size > 12
+    }
+
+    private fun imageFile(context: Context): File? {
+        val path = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
+            .getString("glass_bg_path", null)?.takeIf { it.isNotEmpty() } ?: return null
+        return File(path).takeIf { it.exists() }
+    }
+
+    fun backdropColor(context: Context, width: Int, height: Int): Int? {
+        val file = imageFile(context) ?: return null
+        val key = "${file.absolutePath}:${file.lastModified()}:${file.length()}:$width:$height"
+        return synchronized(colorCache) {
+            colorCache[key]?.let { return@synchronized it }
+            // Sampling owns its small bitmaps. It must not evict/recycle the
+            // panel renderer's shared materials while another widget uses them.
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 128) sample *= 2
+            val source = BitmapFactory.decodeFile(file.absolutePath,
+                BitmapFactory.Options().apply { inSampleSize = sample }) ?: return@synchronized null
+            val bitmap = try { render(source, width, height) } finally { source.recycle() }
+            val color = try {
+                val pixels = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                var red = 0L; var green = 0L; var blue = 0L
+                for (pixel in pixels) {
+                    red += pixel ushr 16 and 255; green += pixel ushr 8 and 255; blue += pixel and 255
+                }
+                0xFF000000.toInt() or ((red / pixels.size).toInt() shl 16) or
+                    ((green / pixels.size).toInt() shl 8) or (blue / pixels.size).toInt()
+            } finally { bitmap.recycle() }
+            colorCache[key] = color
+            color
+        }
+    }
 
     /// 取加工好的玻璃底位图；仅当用户选了素材图时返回，否则回退 drawable 玻璃
     fun glassBackdrop(context: Context, widthPx: Int, heightPx: Int): Bitmap? {
@@ -42,9 +80,7 @@ object GlassWallpaperRenderer {
             android.util.Log.d(TAG, "glass skip: bad size ${widthPx}x$heightPx")
             return null
         }
-        val prefs = context.getSharedPreferences("HomeWidgetPreferences", Context.MODE_PRIVATE)
-        val imgPath = prefs.getString("glass_bg_path", null)?.takeIf { it.isNotEmpty() }
-        val imgFile = imgPath?.let { File(it) }?.takeIf { it.exists() } ?: return null
+        val imgFile = imageFile(context) ?: return null
 
         val key = "img:${imgFile.lastModified()}:${imgFile.length()}:$widthPx x $heightPx"
         synchronized(cacheLock) {

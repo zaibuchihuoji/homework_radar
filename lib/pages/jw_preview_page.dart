@@ -33,28 +33,26 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
   late final List<_Row> _rows;
   String _filter = '';
 
+  bool _selectable(Course c) =>
+      c.weekday >= 1 &&
+      c.weekday <= 7 &&
+      c.weeks.isNotEmpty &&
+      c.weeks.every((w) => w >= 1 && w <= 30) &&
+      !c.sectionsProvisional &&
+      c.startSection >= 1 &&
+      c.endSection >= c.startSection &&
+      c.endSection <= 16;
+
   @override
   void initState() {
     super.initState();
-    _rows = [
-      for (final c in widget.courses)
-        _Row(
-            c,
-            checked: c.weekday >= 1 &&
-                c.weeks.isNotEmpty &&
-                !c.sectionsProvisional),
-    ];
+    _rows = [for (final c in widget.courses) _Row(c, checked: _selectable(c))];
   }
 
   int get _checkedCount => _rows.where((r) => r.checked).length;
 
   /// 可勾选的行数（星期未知/节次待定的行复选框是禁用的，永远选不上）
-  int get _selectableCount => _rows
-      .where((r) =>
-          r.course.weekday >= 1 &&
-          r.course.weeks.isNotEmpty &&
-          !r.course.sectionsProvisional)
-      .length;
+  int get _selectableCount => _rows.where((r) => _selectable(r.course)).length;
 
   Future<void> _editRow(int index) async {
     final row = _rows[index];
@@ -62,11 +60,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
     if (!mounted || updated == null) return;
     setState(() {
       row.course = updated;
-      if (updated.weekday >= 1 &&
-          updated.weeks.isNotEmpty &&
-          !updated.sectionsProvisional) {
-        row.checked = true;
-      }
+      row.checked = _selectable(updated);
     });
   }
 
@@ -106,7 +100,9 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
                     '解析出 ${_rows.length} 条，已选 $_checkedCount 条'
                     '${weekdayUnknown > 0 ? '；$weekdayUnknown 条星期未知，点开可修正' : ''}',
                     style: TextStyle(
-                        fontSize: 12.5, color: textSecondary(context)),
+                      fontSize: 12.5,
+                      color: textSecondary(context),
+                    ),
                   ),
                 ),
                 TextButton(
@@ -116,9 +112,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
                     final target = _checkedCount < _selectableCount;
                     setState(() {
                       for (final r in _rows) {
-                        r.checked = target &&
-                            r.course.weekday >= 1 &&
-                            !r.course.sectionsProvisional;
+                        r.checked = target && _selectable(r.course);
                       }
                     });
                   },
@@ -180,7 +174,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
     ].where((s) => s.isNotEmpty).join(' · ');
     return CheckboxListTile(
       value: row.checked,
-      onChanged: c.weekday < 1 || c.sectionsProvisional
+      onChanged: !_selectable(c)
           ? null
           : (v) => setState(() => row.checked = v ?? false),
       controlAffinity: ListTileControlAffinity.leading,
@@ -203,7 +197,10 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
         child: Text(
           '$time\n$detail',
           style: TextStyle(
-              fontSize: 12, height: 1.5, color: textSecondary(context)),
+            fontSize: 12,
+            height: 1.5,
+            color: textSecondary(context),
+          ),
         ),
       ),
       isThreeLine: true,
@@ -218,7 +215,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
   Future<void> _save() async {
     final selected = [
       for (final r in _rows)
-        if (r.checked) r.course,
+        if (r.checked && _selectable(r.course)) r.course,
     ];
     Navigator.of(context).pop(selected);
   }

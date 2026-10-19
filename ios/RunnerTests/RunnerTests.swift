@@ -1,12 +1,19 @@
 import Flutter
 import UIKit
 import XCTest
+@testable import Runner
 
 class RunnerTests: XCTestCase {
 
-  func testExample() {
-    // If you add code to the Runner application, consider adding tests here.
-    // See https://developer.apple.com/documentation/xctest for more information about using XCTest.
+  func testKeychainRoundTripAndDelete() throws {
+    let key = "test-" + UUID().uuidString
+    defer { SecureBox.delete(key) }
+    XCTAssertTrue(SecureBox.write(key, "synthetic-test-value"))
+    XCTAssertEqual(try SecureBox.read(key), "synthetic-test-value")
+    XCTAssertTrue(SecureBox.write(key, "replacement-test-value"))
+    XCTAssertEqual(try SecureBox.read(key), "replacement-test-value")
+    SecureBox.delete(key)
+    XCTAssertNil(try SecureBox.read(key))
   }
 
 }

@@ -13,6 +13,7 @@ import '../app_state.dart';
 import '../models/course.dart';
 import '../services/timetable_ocr.dart';
 import 'jw_preview_page.dart';
+import 'timetable_import_confirmation.dart';
 
 class JwOcrImportPage extends StatefulWidget {
   const JwOcrImportPage({super.key, required this.state});
@@ -66,7 +67,8 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       f.image.dispose();
       if (data == null) return path;
       final out = File(
-          '${Directory.systemTemp.path}/ocr_scale_${DateTime.now().millisecondsSinceEpoch}.png');
+        '${Directory.systemTemp.path}/ocr_scale_${DateTime.now().millisecondsSinceEpoch}.png',
+      );
       await out.writeAsBytes(data.buffer.asUint8List());
       return out.path;
     } catch (_) {
@@ -105,8 +107,7 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       setState(() => _status = '正在识别截图文字…');
       prepared = await _prepareImage(picked.path);
       final input = InputImage.fromFilePath(prepared);
-      final recognizer =
-          TextRecognizer(script: TextRecognitionScript.chinese);
+      final recognizer = TextRecognizer(script: TextRecognitionScript.chinese);
       try {
         result = await recognizer.processImage(input);
       } finally {
@@ -170,13 +171,29 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       });
       return;
     }
+    final replace = await confirmTimetableImport(
+      context,
+      selected: selected,
+      existing: widget.state.courses,
+      requiresReplacement: widget.state.timetableRequiresReplacement(),
+      replacementPreview: widget.state.timetableReplacement(selected),
+      sourceLabel: '截图导入',
+    );
+    if (!mounted) return;
+    if (replace == null) {
+      setState(() {
+        _busy = false;
+        _status = '';
+      });
+      return;
+    }
     try {
       await widget.state.onTimetableCaptured(
         courses: selected,
         rawPage: '',
         source: '截图导入',
-        // 截图导入的是整张课表：走整表替换语义，不做补课式 union 合并
-        fullImport: true,
+        // OCR可能缺列/缺字；默认合并，整表替换必须明确确认。
+        fullImport: replace,
       );
     } catch (e) {
       if (!mounted) return;
@@ -203,7 +220,11 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
               '① 在教务里打开课表页面，整屏截图；\n'
               '② 回到这里选截图，离线识别后确认导入。\n\n'
               '要求：截图里有完整的「星期一 ~ 星期日」表头，文字清晰不缩放。',
-              style: TextStyle(fontSize: 13, height: 1.8, color: Colors.grey.shade600),
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.8,
+                color: Colors.grey.shade600,
+              ),
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
@@ -212,7 +233,8 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
                   ? const SizedBox(
                       width: 14,
                       height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2))
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
                   : const Icon(Icons.photo_outlined),
               label: Text(_busy ? '处理中…' : '选择课表截图'),
             ),
@@ -220,7 +242,11 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
               const SizedBox(height: 16),
               Text(
                 _status,
-                style: TextStyle(fontSize: 12.5, height: 1.6, color: Colors.grey.shade700),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.6,
+                  color: Colors.grey.shade700,
+                ),
               ),
             ],
           ],

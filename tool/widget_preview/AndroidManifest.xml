@@ -1,0 +1,7 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.worknote.widgetpreview">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="36" />
+    <queries><package android:name="com.worknote.homework_radar" /></queries>
+    <application android:label="Widget preview verifier" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".PreviewActivity" android:exported="true" />
+    </application>
+</manifest>

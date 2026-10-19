@@ -10,12 +10,16 @@
 
     <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <!-- Android 12+ 系统启动屏：品牌绿底 + 徽章图（LOGO+应用名，
+        <!-- Android 12+ 系统启动屏：品牌黄底 + 徽章图（LOGO+应用名，
              splash_badge，构图在圆形裁切安全区内）。引擎加载期间就展示
              完整内容；Flutter 首帧同一张图（splash_page.dart），配合
              MainActivity 的压屏逻辑，撤屏零跳变。 -->
         <item name="android:windowSplashScreenBackground">@color/launch_bg</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_badge</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:statusBarColor">@color/launch_bg</item>
+        <item name="android:navigationBarColor">@color/launch_bg</item>
     </style>
     <!-- Theme applied to the Android Window as soon as the process has started.
          This theme determines the color of the Android Window while your
@@ -27,7 +31,7 @@
         <!-- 小组件的系统垫底色取自 colorBackground：设为全透明，
              透明模式不再有系统垫底的浅色"幽灵边" -->
         <item name="android:colorBackground">@android:color/transparent</item>
-        <!-- 窗口底色与启动屏同款品牌绿：引擎初始化期间不闪白 -->
+        <!-- 窗口底色与启动屏同款品牌黄：引擎初始化期间不闪白 -->
         <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
 </resources>

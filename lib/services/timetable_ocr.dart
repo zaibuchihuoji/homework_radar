@@ -66,16 +66,32 @@ class _RLine {
 class TimetableOcrParser {
   TimetableOcrParser._();
 
-  static final _dayText =
-      RegExp(r'^[（(]?\s*星期\s*([一二三四五六日天])\s*[)）]?$');
+  static final _dayText = RegExp(r'^[（(]?\s*星期\s*([一二三四五六日天])\s*[)）]?$');
   static final _rulerText = RegExp(r'^[一二三四五六七八九十\d]{1,2}$');
   static const _cnDigits = {
-    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+    '一': 1,
+    '二': 2,
+    '三': 3,
+    '四': 4,
+    '五': 5,
+    '六': 6,
+    '七': 7,
+    '八': 8,
+    '九': 9,
+    '十': 10,
   };
 
   static int _dayNum(String cn) {
-    const map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7, '天': 7};
+    const map = {
+      '一': 1,
+      '二': 2,
+      '三': 3,
+      '四': 4,
+      '五': 5,
+      '六': 6,
+      '日': 7,
+      '天': 7,
+    };
     return map[cn] ?? 0;
   }
 
@@ -94,7 +110,10 @@ class TimetableOcrParser {
     if (diffs.isEmpty) return 0;
     final s = [...diffs]..sort();
     final med = s[(s.length - 1) ~/ 2]; // 下中位
-    final kept = [for (final d in s) if (d <= med * 1.5) d];
+    final kept = [
+      for (final d in s)
+        if (d <= med * 1.5) d,
+    ];
     return kept[kept.length ~/ 2]; // 上中位（kept 至少含 med 自身，非空）
   }
 
@@ -190,15 +209,21 @@ class TimetableOcrParser {
 
     // 缺列补齐：「星期一」最易被识别拆碎漏检——左侧外推一天；
     // 中间的按天序线性插值
-    final byDay = <int, double>{for (final e in headerDays.entries) e.value: e.key};
+    final byDay = <int, double>{
+      for (final e in headerDays.entries) e.value: e.key,
+    };
     var minDay = 9;
     var maxDay = 0;
     byDay.forEach((d, _) {
       if (d < minDay) minDay = d;
       if (d > maxDay) maxDay = d;
     });
-    if (!byDay.containsKey(1) && byDay.containsKey(2)) {
-      byDay[1] = byDay[2]! - pitch;
+    for (var d = minDay - 1; d >= 1; d--) {
+      byDay[d] = byDay[minDay]! - pitch * (minDay - d);
+    }
+    // 末端表头漏识别时仍保留该列的课程；仅有空白不会生成课程。
+    for (var d = maxDay + 1; d <= 7; d++) {
+      byDay[d] = byDay[maxDay]! + pitch * (d - maxDay);
     }
     for (var d = 2; d < maxDay; d++) {
       if (byDay.containsKey(d)) continue;
@@ -221,7 +246,8 @@ class TimetableOcrParser {
             byDay[lo]! + (byDay[hi]! - byDay[lo]!) * (d - lo) / (hi - lo);
       }
     }
-    final anchors = byDay.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final anchors = byDay.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
     final firstX = anchors.first.value;
     final leftEdge = firstX - pitch * 0.75;
 
@@ -249,10 +275,12 @@ class TimetableOcrParser {
       final day = a.key;
       final ax = a.value;
       final colAtoms = atoms
-          .where((b) =>
+          .where(
+            (b) =>
               b.cx >= ax - pitch * 0.45 &&
               b.cx <= ax + pitch * 0.45 &&
-              b.top >= headerBottom - 2)
+                b.top >= headerBottom - 2,
+          )
           .toList();
       if (colAtoms.isEmpty) continue;
       final colLines = _reassembleLines(colAtoms)
@@ -318,7 +346,8 @@ class TimetableOcrParser {
         // 截图导入保留无周次条目，交给预览页人工补
         final entries = TimetableParser.parseCellLines(
             g.map((e) => e.$1.text).join('\n'),
-            keepWeekless: true);
+          keepWeekless: true,
+        );
         // 组内行带的最小/最大号 → 首带起始 ~ 末带结束（带1+带2 →
         // 1-4 节）。此前按组中心找单一最近带、写单带 2 节区间，
         // rowspan 连堂（真实占 4 节）的节次被塌缩掉一半
@@ -329,6 +358,7 @@ class TimetableOcrParser {
           if (e.$2 > maxBand) maxBand = e.$2;
         }
         for (final en in entries) {
+          final provisionalSections = en.start <= 0 && ruler.length < 2;
           if (en.start <= 0 && minBand > 0) {
             en
               ..start = minBand * 2 - 1
@@ -344,7 +374,11 @@ class TimetableOcrParser {
               ..start = s
               ..end = (gi * 2 + 2).clamp(s, 16);
           }
-          final c = TimetableParser.entryToCourse(en, day);
+          final c = TimetableParser.entryToCourse(
+            en,
+            day,
+            provisionalSections: provisionalSections,
+          );
           out.add(c);
         }
       }
@@ -365,7 +399,8 @@ class TimetableOcrParser {
       // 勾选无周次条目，交人工补即可
       final entries = TimetableParser.parseCellLines(
           cur.map((l) => l.text).join('\n'),
-          keepWeekless: true);
+        keepWeekless: true,
+      );
       for (final e in entries) {
         if (e.start <= 0) {
           e

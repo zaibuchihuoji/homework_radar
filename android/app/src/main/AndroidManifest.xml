@@ -35,6 +35,7 @@
         <!-- 桌面小组件：最近截止 -->
         <receiver
             android:name=".HomeworkWidgetProvider"
+            android:label="@string/homework_widget_label"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
@@ -51,6 +52,7 @@
         <!-- 桌面小组件：今日课表 -->
         <receiver
             android:name=".TimetableWidgetProvider"
+            android:label="@string/timetable_widget_label"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>

@@ -14,6 +14,7 @@ import 'package:homework_radar/ui/tokens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
@@ -46,15 +47,25 @@ void main() {
   test('存量坏数据按索引自愈：污染节替换为默认表，其余保留并写回', () async {
     // 模拟器里的真实存量：第7节被改成 [270,1035]（4:30-17:15）
     final raw = <(int, int)>[
-      (480, 525), (535, 580), (600, 645), (655, 700),
-      (870, 915), (925, 970),
+      (480, 525),
+      (535, 580),
+      (600, 645),
+      (655, 700),
+      (870, 915),
+      (925, 970),
       (270, 1035),
-      (1045, 1090), (1140, 1185), (1195, 1240), (1250, 1295), (1305, 1350),
+      (1045, 1090),
+      (1140, 1185),
+      (1195, 1240),
+      (1250, 1295),
+      (1305, 1350),
     ];
     await Storage.saveSectionTimes(raw);
     final t = Storage.sectionTimes()!;
-    expect(t[6], (16 * 60 + 20, 17 * 60 + 5),
-        reason: '坏的第7节应原地替换为默认 16:20-17:05');
+    expect(t[6], (
+      16 * 60 + 20,
+      17 * 60 + 5,
+    ), reason: '坏的第7节应原地替换为默认 16:20-17:05');
     expect(t[0], (480, 525), reason: '正常节保留，节次映射零错位');
     expect(t[7], (1045, 1090), reason: '后续正常节不受牵连');
     expect(t.length, 12);
@@ -69,9 +80,18 @@ void main() {
 
   test('首尾相接不算重叠，不触发自愈', () async {
     final raw = <(int, int)>[
-      (480, 525), (525, 570), (600, 645), (655, 700),
-      (870, 915), (925, 970), (980, 1025), (1035, 1080),
-      (1140, 1185), (1195, 1240), (1250, 1295), (1305, 1350),
+      (480, 525),
+      (525, 570),
+      (600, 645),
+      (655, 700),
+      (870, 915),
+      (925, 970),
+      (980, 1025),
+      (1035, 1080),
+      (1140, 1185),
+      (1195, 1240),
+      (1250, 1295),
+      (1305, 1350),
     ];
     await Storage.saveSectionTimes(raw);
     final t = Storage.sectionTimes()!;
@@ -80,9 +100,18 @@ void main() {
 
   test('非法区间（start>=end）同样自愈', () async {
     final raw = <(int, int)>[
-      (480, 525), (535, 580), (600, 645), (655, 700),
-      (870, 915), (925, 970), (500, 500), (1035, 1080),
-      (1140, 1185), (1195, 1240), (1250, 1295), (1305, 1350),
+      (480, 525),
+      (535, 580),
+      (600, 645),
+      (655, 700),
+      (870, 915),
+      (925, 970),
+      (500, 500),
+      (1035, 1080),
+      (1140, 1185),
+      (1195, 1240),
+      (1250, 1295),
+      (1305, 1350),
     ];
     await Storage.saveSectionTimes(raw);
     final t = Storage.sectionTimes()!;
@@ -128,11 +157,9 @@ void main() {
     raw[13] = (2000, 1195); // 第 14 节坏数据：start >= end
     await Storage.saveSectionTimes(raw);
     final t = Storage.sectionTimes()!;
-    expect(t, hasLength(16),
-        reason: '超出默认表的坏节不再触发整表回退——那会把前 12 节自定义时刻全灭');
+    expect(t, hasLength(16), reason: '超出默认表的坏节不再触发整表回退——那会把前 12 节自定义时刻全灭');
     expect(t[12], (1140, 1185), reason: '坏节前的合法节原样保留');
-    expect(t[13], (1185, 1230),
-        reason: '合成占位 = (前节下课 1185, min(+45, 23:59))');
+    expect(t[13], (1185, 1230), reason: '合成占位 = (前节下课 1185, min(+45, 23:59))');
     expect(t[14], (1250, 1295), reason: '坏节后的合法节不受牵连');
     expect(t[15], (1305, 1350));
     // 自愈结果写回 prefs（表长保持 16，一次性洗净存量）
@@ -150,8 +177,11 @@ void main() {
     expect(Storage.homework(), isEmpty);
     await Future<void>.delayed(const Duration(milliseconds: 100));
     final sp = await SharedPreferences.getInstance();
-    expect(sp.getString('homework_json_corrupt_bak'), corrupt,
-        reason: '下一次同步回写空列表前，唯一可恢复副本必须先落到独立键');
+    expect(
+      sp.getString('homework_json_corrupt_bak'),
+      corrupt,
+      reason: '下一次同步回写空列表前，唯一可恢复副本必须先落到独立键',
+    );
   });
 
   test('作业列表 raw 为空时不产生损坏备份', () async {
@@ -181,7 +211,8 @@ void main() {
   double wcagLinear(double c) =>
       c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4).toDouble();
 
-  double wcagLuminance(Color c) => 0.2126 * wcagLinear(c.r) +
+  double wcagLuminance(Color c) =>
+      0.2126 * wcagLinear(c.r) +
       0.7152 * wcagLinear(c.g) +
       0.0722 * wcagLinear(c.b);
 
@@ -192,20 +223,26 @@ void main() {
 
   test('coursePalette 12 色互不重复，白底白字对比度全部 ≥4.5:1', () {
     expect(Tokens.coursePalette, hasLength(12));
-    expect(Tokens.coursePalette.toSet(), hasLength(12),
-        reason: '两门课撞默认色就无法区分');
+    expect(Tokens.coursePalette.toSet(), hasLength(12), reason: '两门课撞默认色就无法区分');
     for (final c in Tokens.coursePalette) {
-      expect(wcagContrast(c, Colors.white), greaterThanOrEqualTo(4.5),
-          reason: '课程卡整块铺 $c，白字必须可读');
+      expect(
+        wcagContrast(c, Colors.white),
+        greaterThanOrEqualTo(4.5),
+        reason: '课程卡整块铺 $c，白字必须可读',
+      );
     }
   });
 
   test('tertiary 文本色（ink3/ink3Dark）在浅深两种背景上对比度都 ≥4.5:1', () {
     expect(wcagContrast(Tokens.ink3, Tokens.card), greaterThanOrEqualTo(4.5));
     expect(wcagContrast(Tokens.ink3, Tokens.bg), greaterThanOrEqualTo(4.5));
-    expect(wcagContrast(Tokens.ink3Dark, Tokens.cardDark),
-        greaterThanOrEqualTo(4.5));
-    expect(wcagContrast(Tokens.ink3Dark, Tokens.bgDark),
-        greaterThanOrEqualTo(4.5));
+    expect(
+      wcagContrast(Tokens.ink3Dark, Tokens.cardDark),
+      greaterThanOrEqualTo(4.5),
+    );
+    expect(
+      wcagContrast(Tokens.ink3Dark, Tokens.bgDark),
+      greaterThanOrEqualTo(4.5),
+    );
   });
 }

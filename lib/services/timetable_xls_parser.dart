@@ -10,8 +10,10 @@ library;
 
 import 'dart:convert';
 
+import 'package:archive/archive.dart';
 import 'package:fast_gbk/fast_gbk.dart';
 import 'package:spreadsheet_decoder/spreadsheet_decoder.dart';
+import 'package:xml/xml.dart';
 
 import '../models/course.dart';
 import 'timetable_parser.dart';
@@ -30,7 +32,8 @@ class TimetableXlsParser {
       // 让用户在教务/Office 里另存为 xlsx，或用截图/文本导入兜底
       throw const FormatException(
           '这是老版 .xls 二进制格式：请在电脑上用 Excel/WPS 另存为 .xlsx 再导入，'
-          '或改用「截图导入 / 粘贴文本导入」');
+        '或改用「截图导入 / 粘贴文本导入」',
+      );
     }
     final head = asciiPrefix(bytes, 64).toLowerCase();
     // SpreadsheetML（Excel 2003 XML）探测：`<?xml` 声明必在文件最前面；
@@ -58,8 +61,10 @@ class TimetableXlsParser {
     if (text.contains(',') || text.contains('\t')) {
       return _fromDelimited(text);
     }
-    throw const FormatException('识别不了文件格式：请用 .xlsx 文件，'
-        '或改用「截图导入 / 粘贴文本导入」');
+    throw const FormatException(
+      '识别不了文件格式：请用 .xlsx 文件，'
+      '或改用「截图导入 / 粘贴文本导入」',
+    );
   }
 
   /// 文本解码：UTF-8 优先；出现替换符说明是 GBK 系编码
@@ -95,20 +100,38 @@ class TimetableXlsParser {
     } catch (_) {
       // openpyxl/WPS 导出的文件常见公式格无缓存值等形态，这里抛的
       // 各种类型异常统一转友好提示（外层只对 FormatException 给专门文案）
-      throw const FormatException('Excel 打不开（文件损坏或含不支持的内容）：'
+      throw const FormatException(
+        'Excel 打不开（文件损坏或含不支持的内容）：'
           '请在 Excel/WPS 里重新另存为 .xlsx 再导入，'
-          '或改用「截图导入 / 粘贴文本导入」');
+        '或改用「截图导入 / 粘贴文本导入」',
+      );
     }
+    final merges = _xlsxMerges(bytes);
     var best = const <Course>[];
     for (final name in decoder.tables.keys) {
       final sheet = decoder.tables[name]!;
       if (sheet.maxRows == 0 || sheet.maxCols == 0) continue;
       final html = StringBuffer('<table>');
+      final covered = <(int, int)>{};
       for (var r = 0; r < sheet.maxRows; r++) {
         html.write('<tr>');
         for (var c = 0; c < sheet.maxCols; c++) {
+          if (covered.contains((r, c))) continue;
+          final rawSpan = merges[name]?[(r, c)] ?? (1, 1);
+          final span = (
+            rawSpan.$1.clamp(1, sheet.maxRows - r),
+            rawSpan.$2.clamp(1, sheet.maxCols - c),
+          );
+          for (var dr = 0; dr < span.$1; dr++) {
+            for (var dc = 0; dc < span.$2; dc++) {
+              if (dr != 0 || dc != 0) covered.add((r + dr, c + dc));
+            }
+          }
           final v = sheet.rows[r][c]?.toString() ?? '';
-          html.write('<td>${_escape(v).replaceAll('\n', '<br>')}</td>');
+          html.write(
+            '<td rowspan="${span.$1}" colspan="${span.$2}">'
+            '${_escape(v).replaceAll('\n', '<br>')}</td>',
+          );
         }
         html.write('</tr>');
       }
@@ -119,17 +142,76 @@ class TimetableXlsParser {
       } catch (_) {}
     }
     if (best.isEmpty) {
-      throw const FormatException('Excel 里没认出课表：需要含「星期一~星期日」'
-          '表头的二维表（先在教务里切到「二维表」视图再导出）');
+      throw const FormatException(
+        'Excel 里没认出课表：需要含「星期一~星期日」'
+        '表头的二维表（先在教务里切到「二维表」视图再导出）',
+      );
     }
     return best;
+  }
+
+  /// spreadsheet_decoder 保留单元格坐标但不暴露 mergeCell，单独读取元数据。
+  static Map<String, Map<(int, int), (int, int)>> _xlsxMerges(List<int> bytes) {
+    final archive = ZipDecoder().decodeBytes(bytes);
+    XmlDocument? document(String path) {
+      final file = archive.findFile(path);
+      return file == null
+          ? null
+          : XmlDocument.parse(utf8.decode(file.content as List<int>));
+    }
+
+    final workbook = document('xl/workbook.xml');
+    final relations = document('xl/_rels/workbook.xml.rels');
+    if (workbook == null || relations == null) return {};
+    final targets = <String, String>{
+      for (final rel in relations.findAllElements('Relationship'))
+        if (rel.getAttribute('Id') != null &&
+            rel.getAttribute('Target') != null)
+          rel.getAttribute('Id')!: rel.getAttribute('Target')!,
+    };
+    final result = <String, Map<(int, int), (int, int)>>{};
+    for (final sheet in workbook.findAllElements('sheet')) {
+      final id = sheet.attributes
+          .where((a) => a.name.local == 'id')
+          .firstOrNull
+          ?.value;
+      final target = targets[id];
+      if (target == null) continue;
+      final path = Uri.parse('xl/workbook.xml')
+          .resolve(target)
+          .path
+          .replaceFirst(RegExp(r'^/'), '');
+      final doc = document(path);
+      final spans = <(int, int), (int, int)>{};
+      for (final merge in doc?.findAllElements('mergeCell') ?? <XmlElement>[]) {
+        final ref = merge.getAttribute('ref')?.split(':');
+        if (ref == null || ref.length != 2) continue;
+        (int, int)? coord(String cell) {
+          final m = RegExp(r'^([A-Z]+)(\d+)$').firstMatch(cell);
+          if (m == null) return null;
+          var col = 0;
+          for (final c in m.group(1)!.codeUnits) {
+            col = col * 26 + c - 64;
+          }
+          return (int.parse(m.group(2)!) - 1, col - 1);
+        }
+
+        final a = coord(ref[0]), b = coord(ref[1]);
+        if (a == null || b == null || b.$1 < a.$1 || b.$2 < a.$2) continue;
+        spans[a] = (b.$1 - a.$1 + 1, b.$2 - a.$2 + 1);
+      }
+      result[sheet.getAttribute('name') ?? ''] = spans;
+    }
+    return result;
   }
 
   static List<Course> _fromHtmlTable(String text) {
     final courses = TimetableParser.parseTimetableGrid(text);
     if (courses.isEmpty) {
-      throw const FormatException('HTML 表格里没认出课表（缺「星期一~星期日」表头）：'
-          '或改用「截图导入 / 粘贴文本导入」');
+      throw const FormatException(
+        'HTML 表格里没认出课表（缺「星期一~星期日」表头）：'
+        '或改用「截图导入 / 粘贴文本导入」',
+      );
     }
     return courses;
   }
@@ -137,11 +219,14 @@ class TimetableXlsParser {
   /// SpreadsheetML（Excel 2003 XML）→ 通用课表格子解析。
   /// 只关心 Row/Cell/Data 骨架，重建成 <table><tr><td> 复用 parseTimetableGrid。
   static List<Course> _fromSpreadsheetMl(String xml) {
-    final courses =
-        TimetableParser.parseTimetableGrid(_spreadsheetMlToHtml(xml));
+    final courses = TimetableParser.parseTimetableGrid(
+      _spreadsheetMlToHtml(xml),
+    );
     if (courses.isEmpty) {
-      throw const FormatException('Excel 2003 XML 里没认出课表'
-          '（缺「星期一~星期日」表头）：或改用「截图导入 / 粘贴文本导入」');
+      throw const FormatException(
+        'Excel 2003 XML 里没认出课表'
+        '（缺「星期一~星期日」表头）：或改用「截图导入 / 粘贴文本导入」',
+      );
     }
     return courses;
   }
@@ -155,11 +240,15 @@ class TimetableXlsParser {
     final cellRe = RegExp(r'<Cell\b([^>]*?)(?:/>|>(.*?)</Cell>)', dotAll: true);
     final dataRe = RegExp(r'<Data\b[^>]*>(.*?)</Data>', dotAll: true);
     final indexRe = RegExp(r'ss:Index\s*=\s*"(\d+)"');
+    final acrossRe = RegExp(r'ss:MergeAcross\s*=\s*"(\d+)"');
+    final downRe = RegExp(r'ss:MergeDown\s*=\s*"(\d+)"');
     // 先收集每行再统一输出：行尾缺格（无「节次」列的短行）必须补空 <td>
     // 对齐最长行——parseTimetableGrid 对「列数明显少于表头」的行按垃圾整行
     // 跳过，短行课程会静默丢失
     final grid = <List<String>>[];
     var maxCols = 0;
+    final spans = <(int, int), (int, int)>{};
+    final covered = <(int, int)>{};
     for (final rm in rowRe.allMatches(xml)) {
       final cells = <String>[];
       var col = 0;
@@ -168,6 +257,21 @@ class TimetableXlsParser {
         // 无 ss:Index 的格按顺序紧排；有则跳到声明列
         final target =
             int.tryParse(indexRe.firstMatch(attrs)?.group(1) ?? '') ?? col + 1;
+        final across =
+            ((int.tryParse(acrossRe.firstMatch(attrs)?.group(1) ?? '') ?? 0) +
+                    1)
+                .clamp(1, 12);
+        final down =
+            ((int.tryParse(downRe.firstMatch(attrs)?.group(1) ?? '') ?? 0) + 1)
+                .clamp(1, 20);
+        spans[(grid.length, target - 1)] = (down, across);
+        for (var dr = 0; dr < down; dr++) {
+          for (var dc = 0; dc < across; dc++) {
+            if (dr != 0 || dc != 0) {
+              covered.add((grid.length + dr, target - 1 + dc));
+            }
+          }
+        }
         while (cells.length < target - 1) {
           cells.add('');
         }
@@ -179,16 +283,25 @@ class TimetableXlsParser {
         } else {
           cells[target - 1] = data;
         }
-        col = target;
+        col = target + across - 1;
+        while (cells.length < col) {
+          cells.add('');
+        }
       }
       if (cells.length > maxCols) maxCols = cells.length;
       grid.add(cells);
     }
     final html = StringBuffer('<table>');
-    for (final cells in grid) {
+    for (var r = 0; r < grid.length; r++) {
+      final cells = grid[r];
       html.write('<tr>');
       for (var i = 0; i < maxCols; i++) {
-        html.write('<td>${i < cells.length ? cells[i] : ''}</td>');
+        if (covered.contains((r, i))) continue;
+        final span = spans[(r, i)] ?? (1, 1);
+        html.write(
+          '<td rowspan="${span.$1}" colspan="${span.$2}">'
+          '${i < cells.length ? cells[i] : ''}</td>',
+        );
       }
       html.write('</tr>');
     }
@@ -200,9 +313,23 @@ class TimetableXlsParser {
     // 带引号的 CSV/TSV 字段里可能含换行（多行单元格，Excel「文本(制表符
     // 分隔)」导出的标准行为），必须全文状态机切分，逐行 split 会把
     // 多行字段拦腰切断
-    final rows = text.contains('\t')
-        ? _splitCsv(text, '\t')
-        : _splitCsv(text, ',');
+    // 只比较首个逻辑行中引号外的分隔符，字段里的 tab 不改变CSV类型。
+    var quoted = false, commas = 0, tabs = 0;
+    for (var i = 0; i < text.length; i++) {
+      final c = text[i];
+      if (c == '"') {
+        if (quoted && i + 1 < text.length && text[i + 1] == '"') {
+          i++;
+          continue;
+        }
+        quoted = !quoted;
+      } else if (!quoted) {
+        if (c == '\n' || c == '\r') break;
+        if (c == ',') commas++;
+        if (c == '\t') tabs++;
+      }
+    }
+    final rows = _splitCsv(text, tabs > commas ? '\t' : ',');
     final html = StringBuffer('<table>');
     for (final cells in rows) {
       html.write('<tr>');
@@ -214,8 +341,10 @@ class TimetableXlsParser {
     html.write('</table>');
     final courses = TimetableParser.parseTimetableGrid(html.toString());
     if (courses.isEmpty) {
-      throw const FormatException('表格里没认出课表（缺「星期一~星期日」表头）：'
-          '或改用「截图导入 / 粘贴文本导入」');
+      throw const FormatException(
+        '表格里没认出课表（缺「星期一~星期日」表头）：'
+        '或改用「截图导入 / 粘贴文本导入」',
+      );
     }
     return courses;
   }

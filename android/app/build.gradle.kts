@@ -76,6 +76,8 @@ flutter {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     // google_mlkit_text_recognition 对中文识别器只声明了 compileOnly，
     // 不加这条 APK 里没有该类，调用即 NoClassDefFoundError 闪退

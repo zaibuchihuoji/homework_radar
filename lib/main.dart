@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:home_widget/home_widget.dart';
 
 import 'app_state.dart';
 import 'pages/accounts_page.dart';
@@ -16,7 +17,11 @@ import 'pages/timetable_page.dart';
 import 'services/notification_service.dart';
 import 'services/storage.dart';
 import 'services/timetable_widget.dart';
-import 'ui/adaptive.dart';
+import 'services/sync_service.dart';
+import 'services/widget_navigation.dart';
+import 'services/widget_theme.dart';
+import 'ui/themed_navigation.dart';
+import 'ui/theme_forms.dart';
 import 'ui/tokens.dart';
 
 final _navigatorKey = GlobalKey<NavigatorState>();
@@ -42,7 +47,7 @@ void _openDetail(String homeworkId) {
 VoidCallback? onSplashFinished;
 
 /// 冷启动深链交接通道：main() 拿到通知启动 payload 后 complete 它，
-/// 启动页撤除时等它（最多 3 秒）。不能让撤除回调直接读一个可能尚未
+/// 启动页撤除时等待它完成。不能让撤除回调直接读一个可能尚未
 /// 赋值的 onSplashFinished——通知 init 内含 Android 13+ 权限弹窗
 /// （必超启动页 1.2s 停留），先到点的 Timer/整屏点按会把深链读成
 /// null 而永久丢失；等待通道让「点按早到」只是晚几秒跳详情。
@@ -52,91 +57,172 @@ Future<void> main() async {
   // 启动关键路径此前全程裸奔：runApp 前任何一步抛错就是一块死屏
   // （原生 4 秒兜底后无内容），runApp 后抛错会静默砍掉深链/提醒重排/
   // 小组件推送/自动同步。统一挂上全局兜底，错误走 FlutterError 报告。
-  await runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    FlutterError.onError = (details) {
-      FlutterError.presentError(details);
-    };
-    ui.PlatformDispatcher.instance.onError = (e, st) {
-      return true; // 已由 zone 兜底记录，不交给默认处理器再炸一次
-    };
+  await runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
+      FlutterError.onError = (details) {
+        FlutterError.presentError(details);
+      };
+      ui.PlatformDispatcher.instance.onError = (e, st) {
+        return true; // 已由 zone 兜底记录，不交给默认处理器再炸一次
+      };
 
-    // 首帧路径上只留必要的本地读取：通知、小组件、同步全部让路到 runApp 之后。
-    // 系统启动屏会定格到首帧出现为止——之前这里串行等完五件事，开屏后半段
-    // 全是静止画面，是"启动墨迹"的主因。
-    await Storage.init();
-    final state = AppState();
-    appStateForHome = state;
-    // 先上屏本地已有数据（作业 + 课表），主页一出来就有内容
-    await state.loadLocal();
-    runApp(HomeworkRadarApp(state: state));
+      // 首帧路径上只留必要的本地读取：通知、小组件、同步全部让路到 runApp 之后。
+      // 系统启动屏会定格到首帧出现为止——之前这里串行等完五件事，开屏后半段
+      // 全是静止画面，是"启动墨迹"的主因。
+      await Storage.init();
+      final state = AppState();
+      appStateForHome = state;
+      // 先上屏本地已有数据（作业 + 课表），主页一出来就有内容
+      await state.loadLocal();
+      runApp(HomeworkRadarApp(state: state));
 
-    // ---- 以下都在首帧之后进行，不挡开屏 ----
-    // 深链交接先挂上：必须排在通知 init（内含权限弹窗，await 必超启动页
-    // 1.2s）与 initialPayload 之前——否则启动页撤除回调还是 null，深链必丢。
-    // 回调里等 launchPayloadReady（最多 3 秒）：点按/Timer 早到只是等
-    // payload，不会再读到空值。
-    onSplashFinished = () async {
-      final payload = await launchPayloadReady.future.timeout(
-        const Duration(seconds: 3),
-        onTimeout: () => null,
-      );
-      if (payload != null && payload.isNotEmpty) _openDetail(payload);
-    };
-    // 通知初始化失败（权限通道异常等）不能连坐深链交接与冷启动收尾：
-    // 补排/小组件/自动同步照常执行，payload 按没有拉起处理
-    String? launchPayload;
-    try {
-      await NotificationService.init();
+      // ---- 以下都在首帧之后进行，不挡开屏 ----
+      // 深链交接先挂上：必须排在通知 init（内含权限弹窗，await 必超启动页
+      // 1.2s）与 initialPayload 之前——否则启动页撤除回调还是 null，深链必丢。
+      // 回调里等 launchPayloadReady：点按/Timer 早到只是等
+      // payload，不会再读到空值。
+      onSplashFinished = () async {
+        final payload = await launchPayloadReady.future;
+        if (payload != null && payload.isNotEmpty) _openDetail(payload);
+      };
+      // 通知初始化失败（权限通道异常等）不能连坐深链交接与冷启动收尾：
+      // 补排/小组件/自动同步照常执行，payload 按没有拉起处理
+      String? launchPayload;
       NotificationService.onSelect = _openDetail;
-      launchPayload = await NotificationService.initialPayload();
-    } catch (e, st) {
-      debugPrint('notification init failed: $e\n$st');
-    }
-    // payload 就绪（含「没有通知拉起」的 null）：放行等待中的撤除回调
-    if (!launchPayloadReady.isCompleted) {
-      launchPayloadReady.complete(launchPayload);
-    }
-    // 提醒只会在打开 App 时重排：冷启动先按本地数据补排一次，
-    // 上次把上课提醒清掉的操作不会一直生效到下次同步
-    unawaited(
-      NotificationService.reschedule(state.homework, courses: state.courses),
-    );
-    unawaited(TimetableWidget.push(state.courses));
-    if (state.hasAnyAccount) {
-      Future.microtask(state.syncAll);
-    }
-  }, (e, st) {
-    // 同步/通知/小组件链路的未捕获异步异常：记到 debug 控制台即可，
-    // 不允许再向上炸穿（老实现会让 syncing 卡死、深链丢失）
-    debugPrint('uncaught zone error: $e\n$st');
-  });
+      try {
+        await NotificationService.init();
+        launchPayload = await NotificationService.initialPayload();
+      } catch (e, st) {
+        debugPrint('notification init failed: $e\n$st');
+      }
+      // payload 就绪（含「没有通知拉起」的 null）：放行等待中的撤除回调
+      if (!launchPayloadReady.isCompleted) {
+        launchPayloadReady.complete(launchPayload);
+      }
+      // 先消费通知启动信息，授权弹窗再异步进行，不设置丢弃迟到深链的超时。
+      unawaited(NotificationService.rerequestPermission());
+      // 提醒只会在打开 App 时重排：冷启动先按本地数据补排一次，
+      // 上次把上课提醒清掉的操作不会一直生效到下次同步
+      unawaited(
+        NotificationService.reschedule(state.homework, courses: state.courses),
+      );
+      unawaited(TimetableWidget.push(state.courses));
+      // Refresh pre-upgrade widget caches from the visible local records even
+      // without a logged-in platform. Export never edits the records themselves.
+      unawaited(SyncService.updateHomeWidget(state.homework));
+      if (state.hasAnyAccount) {
+        Future.microtask(state.syncAll);
+      }
+    },
+    (e, st) {
+      // 同步/通知/小组件链路的未捕获异步异常：记到 debug 控制台即可，
+      // 不允许再向上炸穿（老实现会让 syncing 卡死、深链丢失）
+      debugPrint('uncaught zone error: $e\n$st');
+    },
+  );
 }
 
 ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
   // 深色锁：只有清夏打磨过深色观感，其余主题统一钳回浅色——
   // 即便系统深色/用户选过深色，非清夏下深色调色板也不会生效
   //（设置页的主题模式行同步加锁说明）
-  if (style != ThemeStyle.clean && brightness == Brightness.dark) {
+  if (style != ThemeStyle.clean &&
+      style != ThemeStyle.green &&
+      brightness == Brightness.dark) {
     return buildTheme(Brightness.light, style);
   }
   final dark = brightness == Brightness.dark;
   final pal = stylePalette(style, brightness);
-  final scheme = ColorScheme.fromSeed(
-    seedColor: pal.accent,
-    brightness: brightness,
-  ).copyWith(
-    primary: pal.accent,
-    surface: pal.modal,
-    surfaceContainerLowest: pal.modal,
+  final formFont = pal.pixel || pal.terminal || pal.receipt
+      ? 'monospace'
+      : pal.paper || pal.journal || pal.inkWash
+      ? 'serif'
+      : null;
+  final controlShape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(
+      pal.clean
+          ? 12
+          : pal.morandi
+          ? 14
+          : pal.comic
+          ? 9
+          : pal.journal
+          ? 5
+          : pal.inkWash
+          ? 4
+          : 1,
+    ),
   );
+  final pickerHeader = pal.pixel || pal.terminal
+      ? pal.ink
+      : Color.alphaBlend(
+          pal.accentFill.withValues(alpha: pal.comic ? 0.09 : 0.035),
+          pal.modal,
+        );
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: pal.accent,
+        brightness: brightness,
+      ).copyWith(
+        primary: pal.accent,
+        onPrimary: pal.sunny ? (dark ? pal.onAccent : Colors.white) : null,
+        primaryContainer: pal.sunny
+            ? pal.accentFill.withValues(alpha: dark ? .18 : .32)
+            : null,
+        onPrimaryContainer: pal.sunny ? pal.ink : null,
+        secondaryContainer: pal.sunny ? pal.accentFill : null,
+        onSecondaryContainer: pal.sunny ? pal.onAccent : null,
+        surface: pal.modal,
+        surfaceContainerLowest: pal.modal,
+      );
 
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
     scaffoldBackgroundColor: pal.bg,
     extensions: [pal],
+    textSelectionTheme: pal.sunny
+        ? TextSelectionThemeData(
+            cursorColor: pal.accent,
+            selectionColor: pal.accentFill.withValues(alpha: .45),
+            selectionHandleColor: pal.accent,
+          )
+        : null,
+    switchTheme: pal.sunny
+        ? SwitchThemeData(
+            trackColor: WidgetStateProperty.resolveWith(
+              (s) => s.contains(WidgetState.disabled)
+                  ? null
+                  : s.contains(WidgetState.selected)
+                  ? pal.accentFill
+                  : null,
+            ),
+            thumbColor: WidgetStateProperty.resolveWith(
+              (s) => s.contains(WidgetState.disabled)
+                  ? null
+                  : s.contains(WidgetState.selected)
+                  ? pal.onAccent
+                  : null,
+            ),
+          )
+        : null,
+    checkboxTheme: pal.sunny
+        ? CheckboxThemeData(
+            fillColor: WidgetStateProperty.resolveWith(
+              (s) => s.contains(WidgetState.disabled)
+                  ? null
+                  : s.contains(WidgetState.selected)
+                  ? pal.accentFill
+                  : null,
+            ),
+            checkColor: WidgetStatePropertyAll(pal.onAccent),
+          )
+        : null,
     textTheme: TextTheme(
+      bodyLarge: pal.clean
+          ? null
+          : TextStyle(fontSize: 14, color: pal.ink, fontFamily: formFont),
       displayLarge: TextStyle(
         fontSize: 30,
         height: 1.1,
@@ -163,6 +249,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
     ),
     appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
       foregroundColor: pal.ink,
@@ -178,7 +265,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
       ),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: pal.accent,
+      backgroundColor: pal.accentFill,
       foregroundColor: pal.onAccent,
       elevation: 0,
       highlightElevation: 0,
@@ -187,36 +274,48 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
           // 莫兰迪的 FAB 是一颗奶油圆糖
           ? const CircleBorder()
           : RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(pal.inkWash ? 10 : pal.radius + 2),
-        side: pal.comic
-            ? BorderSide(color: pal.cardBorder, width: 2)
-            : pal.paper
-                // 暖纸的 FAB 是"印章"：方角 + 墨线描边
-                ? BorderSide(
-                    color: pal.ink.withValues(alpha: 0.65), width: 1.4)
-                : pal.inkWash
-                    // 水墨的 FAB 是"落款大印"：近方朱印 + 白文边栏
-                    ? BorderSide(
-                        color: Colors.white.withValues(alpha: 0.85),
-                        width: 1.8)
-                    : pal.pixel
-                        // 像素的 FAB 是"按键"：直角 + 勾线
-                        ? BorderSide(color: pal.cardBorder, width: 2)
-                        : pal.terminal
-                            // 终端的 FAB 是"窗格"：直角 + 1px 单线
-                            ? BorderSide(color: pal.cardBorder, width: 1)
-                            : BorderSide.none,
-      ),
+              borderRadius: BorderRadius.circular(
+                pal.inkWash ? 10 : pal.radius + 2,
+              ),
+              side: pal.comic
+                  ? BorderSide(color: pal.cardBorder, width: 2)
+                  : pal.paper
+                  // 暖纸的 FAB 是"印章"：方角 + 墨线描边
+                  ? BorderSide(
+                      color: pal.ink.withValues(alpha: 0.65),
+                      width: 1.4,
+                    )
+                  : pal.inkWash
+                  // 水墨的 FAB 是"落款大印"：近方朱印 + 白文边栏
+                  ? BorderSide(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      width: 1.8,
+                    )
+                  : pal.pixel
+                  // 像素的 FAB 是"按键"：直角 + 勾线
+                  ? BorderSide(color: pal.cardBorder, width: 2)
+                  : pal.terminal
+                  // 终端的 FAB 是"窗格"：直角 + 1px 单线
+                  ? BorderSide(color: pal.cardBorder, width: 1)
+                  : BorderSide.none,
+            ),
     ),
     // 次级按钮形状随样式走：票据/印刷/终端/像素都是方角，其余胶囊。
     // 只动 shape，side 留给组件级配置（账号页已登录态的描边色）。
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: ButtonStyle(
         shape: WidgetStateProperty.all(
-          pal.receipt || pal.terminal || pal.editorial || pal.pixel
+          pal.clean
+              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+              : pal.receipt || pal.terminal || pal.editorial || pal.pixel
               ? const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(2)))
-              : const StadiumBorder(),
+                  borderRadius: BorderRadius.all(Radius.circular(2)),
+                )
+              : pal.morandi
+              ? const StadiumBorder()
+              : RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(pal.comic ? 10 : 6),
+                ),
         ),
       ),
     ),
@@ -225,63 +324,258 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
     // 水墨例外：主按钮是"钤印"——近方朱印、落墨影（印章不发光），不是胶囊。
     filledButtonTheme: FilledButtonThemeData(
       style: ButtonStyle(
-        elevation: WidgetStateProperty.resolveWith((s) =>
-            s.contains(WidgetState.disabled) ? 0 : pal.inkWash ? 2 : 5),
-        shadowColor: WidgetStateProperty.all(pal.inkWash
-            ? Colors.black.withValues(alpha: dark ? 0 : 0.16)
-            : pal.accent.withValues(alpha: 0.55)),
-        backgroundColor: WidgetStateProperty.resolveWith((s) =>
-            s.contains(WidgetState.disabled)
-                ? (dark ? Colors.white.withValues(alpha: 0.07) : Colors.black.withValues(alpha: 0.05))
-                : pal.accent),
-        foregroundColor: WidgetStateProperty.resolveWith((s) =>
-            s.contains(WidgetState.disabled)
-                ? (dark ? Tokens.ink2Dark : Tokens.ink2)
-                : pal.onAccent),
+        elevation: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.disabled)
+              ? 0
+              : pal.clean ||
+                    pal.pixel ||
+                    pal.terminal ||
+                    pal.receipt ||
+                    pal.editorial ||
+                    pal.paper ||
+                    pal.journal
+              ? 0
+              : 2,
+        ),
+        shadowColor: WidgetStateProperty.all(
+          pal.inkWash || pal.comic
+              ? Colors.black.withValues(alpha: dark ? 0 : 0.16)
+              : pal.accentFill.withValues(alpha: 0.55),
+        ),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.disabled)
+              ? (dark
+                    ? Colors.white.withValues(alpha: 0.07)
+                    : Colors.black.withValues(alpha: 0.05))
+              : pal.accentFill,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.disabled)
+              ? (dark ? Tokens.ink2Dark : Tokens.ink2)
+              : pal.onAccent,
+        ),
         shape: WidgetStateProperty.all(
-          pal.pixel
+          pal.clean
+              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+              : pal.pixel
               ? RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(2),
                   side: BorderSide(color: pal.cardBorder, width: 2),
                 )
               : pal.terminal
-                  ? RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(2),
-                      side: BorderSide(color: pal.cardBorder, width: 1),
-                    )
-                  : pal.receipt || pal.editorial
-                      // 小票/杂志：票据与印刷品都不用胶囊，方角
-                      ? const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(2)))
-                      : pal.inkWash
-                          ? RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(9))
-                          : const RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.all(Radius.circular(999))),
+              ? RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(2),
+                  side: BorderSide(color: pal.cardBorder, width: 1),
+                )
+              : pal.receipt || pal.editorial
+              // 小票/杂志：票据与印刷品都不用胶囊，方角
+              ? const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(2)),
+                )
+              : pal.inkWash
+              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(9))
+              : pal.comic
+              ? RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: pal.cardBorder, width: 1.5),
+                )
+              : pal.paper || pal.journal
+              ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))
+              : const RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(999)),
+                ),
         ),
       ),
     ),
     dialogTheme: DialogThemeData(
       backgroundColor: pal.modal,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      shape: themeModalShape(pal),
+      surfaceTintColor: pal.clean ? null : Colors.transparent,
     ),
+    inputDecorationTheme: pal.clean && !pal.sunny
+        ? null
+        : themedInputTheme(pal),
+    popupMenuTheme: pal.clean && !pal.sunny
+        ? null
+        : PopupMenuThemeData(
+            color: pal.modal,
+            surfaceTintColor: Colors.transparent,
+            shape: themeModalShape(pal),
+            elevation: pal.pixel || pal.comic ? 3 : 6,
+            textStyle: TextStyle(
+              color: pal.ink,
+              fontSize: 13,
+              fontFamily: formFont,
+            ),
+          ),
+    chipTheme: pal.clean && !pal.sunny
+        ? null
+        : ChipThemeData(
+            backgroundColor: pal.modal,
+            selectedColor: Color.alphaBlend(
+              pal.accentFill.withValues(alpha: .12),
+              pal.modal,
+            ),
+            side: BorderSide(color: pal.cardBorder, width: pal.comic ? 1.5 : 1),
+            shape: controlShape,
+            checkmarkColor: pal.accent,
+            labelStyle: TextStyle(
+              color: pal.ink,
+              fontSize: 12,
+              fontFamily: formFont,
+            ),
+          ),
+    datePickerTheme: pal.clean && !pal.sunny
+        ? null
+        : DatePickerThemeData(
+            backgroundColor: pal.modal,
+            surfaceTintColor: Colors.transparent,
+            shape: themeModalShape(pal),
+            headerBackgroundColor: pickerHeader,
+            headerForegroundColor: pal.pixel || pal.terminal
+                ? pal.modal
+                : pal.ink,
+            headerHeadlineStyle: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w700,
+              fontFamily: formFont,
+            ),
+            headerHelpStyle: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              fontFamily: formFont,
+            ),
+            weekdayStyle: TextStyle(
+              color: pal.ink2,
+              fontSize: 12,
+              fontFamily: formFont,
+            ),
+            dayStyle: TextStyle(
+              fontSize: 13,
+              fontWeight: pal.editorial ? FontWeight.w700 : FontWeight.w500,
+              fontFamily: formFont,
+            ),
+            dayForegroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.disabled)
+                  ? pal.ink3.withValues(alpha: .45)
+                  : states.contains(WidgetState.selected)
+                  ? pal.onAccent
+                  : pal.ink,
+            ),
+            dayBackgroundColor: WidgetStateProperty.resolveWith(
+              (states) =>
+                  states.contains(WidgetState.selected) ? pal.accentFill : null,
+            ),
+            todayBackgroundColor: pal.sunny
+                ? WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? pal.accentFill
+                        : Colors.transparent,
+                  )
+                : null,
+            yearBackgroundColor: pal.sunny
+                ? WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? pal.accentFill
+                        : null,
+                  )
+                : null,
+            yearForegroundColor: pal.sunny
+                ? WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.disabled)
+                        ? pal.ink3.withValues(alpha: .45)
+                        : states.contains(WidgetState.selected)
+                        ? pal.onAccent
+                        : pal.ink,
+                  )
+                : null,
+            dayShape: WidgetStatePropertyAll(controlShape),
+            todayForegroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? pal.onAccent
+                  : pal.accent,
+            ),
+            todayBorder: BorderSide(
+              color: pal.accent,
+              width: pal.comic ? 2 : 1,
+            ),
+            dividerColor: pal.cardBorder,
+            inputDecorationTheme: themedInputTheme(pal),
+          ),
+    timePickerTheme: pal.clean && !pal.sunny
+        ? null
+        : TimePickerThemeData(
+            backgroundColor: pal.modal,
+            shape: themeModalShape(pal),
+            helpTextStyle: TextStyle(
+              color: pal.ink2,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              fontFamily: formFont,
+            ),
+            hourMinuteShape: controlShape,
+            hourMinuteColor: WidgetStateColor.resolveWith(
+              (states) => Color.alphaBlend(
+                pal.accentFill.withValues(
+                  alpha: states.contains(WidgetState.selected) ? .12 : .025,
+                ),
+                pal.modal,
+              ),
+            ),
+            hourMinuteTextColor: pal.ink,
+            hourMinuteTextStyle: TextStyle(
+              fontSize: 38,
+              fontWeight: FontWeight.w600,
+              fontFamily: formFont,
+            ),
+            dialBackgroundColor: Color.alphaBlend(
+              pal.accentFill.withValues(alpha: .04),
+              pal.modal,
+            ),
+            dialHandColor: pal.accentFill,
+            dialTextColor: WidgetStateColor.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? pal.onAccent
+                  : pal.ink,
+            ),
+            dialTextStyle: TextStyle(fontSize: 14, fontFamily: formFont),
+            dayPeriodShape: controlShape,
+            dayPeriodTextColor: pal.ink,
+            dayPeriodColor: Color.alphaBlend(
+              pal.accentFill.withValues(alpha: .08),
+              pal.modal,
+            ),
+            dayPeriodBorderSide: BorderSide(color: pal.cardBorder),
+            entryModeIconColor: pal.accent,
+            inputDecorationTheme: themedInputTheme(pal),
+          ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: pal.modal,
       modalBackgroundColor: pal.modal,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      shape: pal.clean
+          ? const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            )
+          : themeModalShape(pal),
       showDragHandle: true,
+      dragHandleColor: pal.clean ? null : pal.ink2,
+      dragHandleSize: pal.clean
+          ? null
+          : Size(
+              pal.pixel || pal.terminal ? 28 : 40,
+              pal.editorial || pal.terminal ? 2 : 4,
+            ),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      backgroundColor: pal.clean ? null : pal.modal,
+      contentTextStyle: pal.clean
+          ? null
+          : TextStyle(color: pal.ink, fontFamily: formFont, fontSize: 13),
+      actionTextColor: pal.clean ? null : pal.accent,
     ),
-    dividerTheme: DividerThemeData(
-      color: pal.hairline,
-      thickness: 0.8,
-    ),
+    dividerTheme: DividerThemeData(color: pal.hairline, thickness: 0.8),
   );
 }
 
@@ -309,21 +603,42 @@ class _HomeworkRadarAppState extends State<HomeworkRadarApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.state.addListener(_syncWidgetTheme);
+    _syncWidgetTheme();
     // 进程冷启动：首帧上屏后放行启动屏
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(milliseconds: 150), _notifySplashReady);
     });
   }
 
+  void _syncWidgetTheme() {
+    unawaited(WidgetTheme.push(widget.state.style, widget.state.themeMode));
+  }
+
+  @override
+  void didUpdateWidget(HomeworkRadarApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.state != widget.state) {
+      oldWidget.state.removeListener(_syncWidgetTheme);
+      widget.state.addListener(_syncWidgetTheme);
+      _syncWidgetTheme();
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 进程内重建 Activity 时补发一次，防止启动屏被压住不放
-    if (state == AppLifecycleState.resumed) _notifySplashReady();
+    if (state == AppLifecycleState.resumed) {
+      _syncWidgetTheme();
+      _notifySplashReady();
+      unawaited(NotificationService.refreshPermission());
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.state.removeListener(_syncWidgetTheme);
     super.dispose();
   }
 
@@ -398,7 +713,8 @@ class _SplashHomeState extends State<_SplashHome> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        if (_warmed) MainShell(state: appStateForHome!),
+        if (_warmed)
+          MainShell(state: appStateForHome!, widgetLaunchReady: _splashGone),
         if (!_splashGone)
           Positioned.fill(child: SplashPage(onFinished: _dismissSplash)),
       ],
@@ -407,82 +723,53 @@ class _SplashHomeState extends State<_SplashHome> {
 }
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key, required this.state});
+  const MainShell({
+    super.key,
+    required this.state,
+    this.widgetLaunchReady = true,
+  });
 
   final AppState state;
+  final bool widgetLaunchReady;
 
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell>
-    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   int _selected = 0;
   final _pageController = PageController();
+  late final WidgetNavigation _widgetNavigation;
+  int _widgetRouteVersion = 0;
 
-  // 底栏：检测滚动方向——向下滚动就隐藏，向上滚动就显示。
-  bool _navVisible = true;
-  double _lastScrollPixels = 0;
-
-  bool _onScrollNotification(ScrollNotification n) {
-    // 页面策略：
-    // - 作业页、设置页：内容可能超一屏 → 启用滚动隐藏（下滚藏并保持，上滚显）
-    // - 课表页：纵向表格滚不动，横滑是切周次（横向 PageView 的滚动通知会
-    //   冒泡上来且 metrics 是横向的，曾被误判成"向下滚动"触发隐藏）→ 常驻
-    // - 日历页、账号页：按约定常驻
-    if (_selected != 0 && _selected != 4) {
-      _lastScrollPixels = n.metrics.pixels;
-      if (!_navVisible) setState(() => _navVisible = true);
-      return false;
-    }
-    final metrics = n.metrics;
-    // 忽略横向滚动通知（PageView 横滑等）
-    if (metrics.axis == Axis.horizontal) {
-      _lastScrollPixels = metrics.pixels;
-      return false;
-    }
-    // 内容不足一屏（不可滚动）→ 始终显示
-    if (metrics.maxScrollExtent <= 0) {
-      _lastScrollPixels = metrics.pixels;
-      if (!_navVisible) setState(() => _navVisible = true);
-      return false;
-    }
-    // 回到顶部附近 → 显示（页面到头了，底栏没有遮挡意义）
-    if (metrics.pixels <= 24) {
-      _lastScrollPixels = metrics.pixels;
-      if (!_navVisible) setState(() => _navVisible = true);
-      return false;
-    }
-    final delta = metrics.pixels - _lastScrollPixels;
-    _lastScrollPixels = metrics.pixels;
-    if (delta > 2 && _navVisible) {
-      setState(() => _navVisible = false); // 向下滚动 → 隐藏并保持（悬停不恢复）
-    } else if (delta < -2 && !_navVisible) {
-      setState(() => _navVisible = true); // 向上滚动 → 显示
-    }
-    return false;
+  void _openWidgetDestination(WidgetDestination destination) {
+    final version = ++_widgetRouteVersion;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || version != _widgetRouteVersion) return;
+      final navigator = Navigator.of(context);
+      navigator.popUntil((route) => route.isFirst);
+      // Jump directly so warm launches do not leave the previous tab selected
+      // during a transition underneath an immediately opened homework detail.
+      _pageController.jumpToPage(destination.tab);
+      final id = destination.homeworkId;
+      if (id == null) return;
+      if (!widget.state.homework.any((h) => h.id == id)) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('该作业已移除或隐藏，请在列表中查看当前作业')));
+        return;
+      }
+      navigator.push(
+        MaterialPageRoute<void>(
+          builder: (_) => HomeworkDetailPage(homeworkId: id),
+        ),
+      );
+    });
+    WidgetsBinding.instance.scheduleFrame();
   }
-
-  // 液态玻璃胶囊：切换时整块玻璃像水滴一样流到目标标签上
-  late final AnimationController _flowCtrl;
-  bool _flowing = false;
-  double _lastPos = 0;
-
-  static const _labels = ['作业', '课表', '日历', '账号', '设置'];
-  static const _icons = <(IconData, IconData)>[
-    (Icons.assignment_outlined, Icons.assignment_rounded),
-    (Icons.bento_outlined, Icons.bento_rounded),
-    (Icons.calendar_month_outlined, Icons.calendar_month_rounded),
-    (Icons.person_outline, Icons.person_rounded),
-    (Icons.settings_outlined, Icons.settings_rounded),
-  ];
 
   void _go(int i) {
     if (i == _selected) return;
-    // 页面先落位：目标页首次构建的卡顿发生在玻璃流动之前，不会被看见；
-    // 然后玻璃整块从旧位置流到新标签上。
-    // 曲线必须出手快、落点缓（easeOutExpo 系）：跨页流动时玻璃在中间标签
-    // 只是一闪而过，绝不能让它在慢加速里在前排标签上逗留。
     if ((i - _selected).abs() == 1) {
       _pageController.animateToPage(
         i,
@@ -492,42 +779,38 @@ class _MainShellState extends State<MainShell>
     } else {
       _pageController.jumpToPage(i);
     }
-    setState(() => _flowing = true);
-    _flowCtrl
-        .animateTo(
-          i.toDouble(),
-          duration: const Duration(milliseconds: 420),
-          curve: const Cubic(0.22, 1.0, 0.36, 1.0),
-        )
-        .whenComplete(() => setState(() => _flowing = false));
   }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _flowCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 420),
-      // 值域必须是完整标签区间：控制器默认上限 1.0，会把 animateTo(4.0)
-      // 钳在第二个标签上，玻璃就永远"先停在第二个再瞬移"
-      lowerBound: 0,
-      upperBound: (_labels.length - 1).toDouble(),
+    _widgetNavigation = WidgetNavigation(onDestination: _openWidgetDestination);
+    if (widget.widgetLaunchReady) _widgetNavigation.setReady();
+    unawaited(
+      _widgetNavigation.bind(
+        HomeWidget.initiallyLaunchedFromHomeWidget(),
+        HomeWidget.widgetClicked,
+      ),
     );
+  }
+
+  @override
+  void didUpdateWidget(covariant MainShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.widgetLaunchReady) _widgetNavigation.setReady();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _flowCtrl.dispose();
+    unawaited(_widgetNavigation.dispose());
     _pageController.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 无后台同步，回到前台时补一次：有账号且超过 6 小时未同步就自动同步，
-    // 让提醒在用户日常使用中保持新鲜。
     if (state != AppLifecycleState.resumed) return;
     final s = widget.state;
     if (!s.hasAnyAccount || s.syncing) return;
@@ -540,26 +823,15 @@ class _MainShellState extends State<MainShell>
 
   @override
   Widget build(BuildContext context) {
-    final state = widget.state;
     final dark = Theme.of(context).brightness == Brightness.dark;
-    final brand = accentColor(context);
-    final ink3 = textFaint(context);
-
-    return Scaffold(
-      extendBody: true,
-      body: NotificationListener<ScrollNotification>(
-        onNotification: _onScrollNotification,
-        child: PageView(
+    final state = widget.state;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        body: PageView(
           controller: _pageController,
           allowImplicitScrolling: true,
-          onPageChanged: (i) {
-            setState(() => _selected = i);
-            // 切 tab 时底栏复位显示，并清掉跨页残留的滚动基准——
-            // 不清的话切回作业页的首个纵向 delta 会混入横向偏移，
-            // 方向误判导致上滚首帧误藏底栏（下一帧恢复，闪烁）
-            _lastScrollPixels = 0;
-            if (!_navVisible) setState(() => _navVisible = true);
-          },
+          onPageChanged: (i) => setState(() => _selected = i),
           children: [
             KeepAlivePage(
               child: HomePage(state: state, onGoAccounts: () => _go(3)),
@@ -570,187 +842,13 @@ class _MainShellState extends State<MainShell>
             KeepAlivePage(child: SettingsPage(state: state)),
           ],
         ),
-      ),
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: AnimatedSlide(
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-          offset: _navVisible ? Offset.zero : const Offset(0, 1.4),
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 180),
-            opacity: _navVisible ? 1 : 0,
-            child: Container(
-          // 液态玻璃悬浮栏：内容从底下穿过，实时毛玻璃 + 高光描边
-          margin: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(32),
-            // 描边画在最外层（与裁剪同半径），整圈均匀、不被 ClipRRect 裁掉半像素；
-            // 深色壁纸上去掉"白铁丝"感：亮度随明暗自适应且整体收敛
-            border: Border.all(
-              color: Colors.white.withValues(alpha: dark ? 0.10 : 0.55),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: dark ? 0.22 : 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(31),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-              child: Container(
-                height: 66,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.white.withValues(alpha: dark ? 0.14 : 0.72),
-                      Colors.white.withValues(alpha: dark ? 0.05 : 0.45),
-                    ],
-                  ),
-                ),
-                child: AnimatedBuilder(
-                  animation: Listenable.merge([_pageController, _flowCtrl]),
-                  builder: (context, _) {
-                    // 手指拖页时胶囊贴手；点按切换时玻璃整块流动过去
-                    final pos = _flowing
-                        ? _flowCtrl.value
-                        : (_pageController.hasClients
-                                  ? (_pageController.page ??
-                                        _selected.toDouble())
-                                  : _selected.toDouble())
-                              .clamp(0.0, (_labels.length - 1).toDouble());
-
-                    return LayoutBuilder(
-                      builder: (context, cons) {
-                        final itemW = cons.maxWidth / _labels.length;
-                        // 玻璃整块流过去：按移动速度横向拉伸（水滴感），落定恢复
-                        final v = (pos - _lastPos).abs();
-                        _lastPos = pos;
-                        final stretch = (1 + v * 6).clamp(1.0, 1.9);
-                        final pill = Positioned(
-                          left: (pos + 0.5) * itemW - 30 * stretch,
-                          top: 33 - 17 / stretch,
-                          width: 60 * stretch,
-                          height: 34 / stretch,
-                          child: Center(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: dark
-                                    ? Colors.white.withValues(alpha: 0.14)
-                                    : Colors.black.withValues(alpha: 0.045),
-                                borderRadius: BorderRadius.circular(17),
-                                border: Border.all(
-                                  color: Colors.white.withValues(
-                                    alpha: dark ? 0.18 : 0.85,
-                                  ),
-                                  width: 1,
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-
-                        return SizedBox(
-                          height: 66,
-                          child: Stack(
-                            children: [
-                              pill,
-                              Row(
-                                children: [
-                                  for (var i = 0; i < _labels.length; i++)
-                                    Expanded(
-                                      // tab 角色与选中态语义：裸 GestureDetector 下
-                                      // TalkBack 只能读到「未标记」，无法得知当前页
-                                      child: Semantics(
-                                        button: true,
-                                        selected: i == _selected,
-                                        label: '${_labels[i]}标签页',
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTap: () => _go(i),
-                                          child: Builder(
-                                          builder: (context) {
-                                            // 图标颜色随融合进度点亮/退灰
-                                            var color = Color.lerp(
-                                              ink3,
-                                              brand,
-                                              (1 - (pos - i).abs()).clamp(
-                                                0.0,
-                                                1.0,
-                                              ),
-                                            )!;
-                                            final lit =
-                                                (1 - (pos - i).abs()) > 0.5;
-                                            return Column(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.center,
-                                              children: [
-                                                Transform.scale(
-                                                  scale: lit ? 1.04 : 1.0,
-                                                  // 课表页签用手绘 mini 课程表：
-                                                  // 网格 + 一格实心"课程块"
-                                                  child: i == 1
-                                                      ? SizedBox(
-                                                          width: 23,
-                                                          height: 23,
-                                                          child: CustomPaint(
-                                                            painter:
-                                                                _TimetableGlyph(
-                                                              filled: lit,
-                                                              color: color,
-                                                            ),
-                                                          ),
-                                                        )
-                                                      : Icon(
-                                                          lit
-                                                              ? _icons[i].$2
-                                                              : _icons[i].$1,
-                                                          size: 23,
-                                                          color: color,
-                                                        ),
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  _labels[i],
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    fontWeight: lit
-                                                        ? FontWeight.w600
-                                                        : FontWeight.w500,
-                                                    color: lit ? brand : ink3,
-                                                  ),
-                                                ),
-                                              ],
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
+        bottomNavigationBar: ThemedNavigationBar(
+          selectedIndex: _selected,
+          onSelected: _go,
         ),
       ),
-        ),
-      ),
-    );  }
+    );
+  }
 }
 
 /// 让 PageView 里的页面常驻不销毁：切页保留各自状态（课表的周次选择等）。
@@ -773,50 +871,4 @@ class _KeepAlivePageState extends State<KeepAlivePage>
     super.build(context);
     return widget.child;
   }
-}
-
-/// 底栏"课表"页签的手绘图标：市面课程表 App 的经典"彩色格子"隐喻——
-/// 左边一块连堂长课，右边两节短课。选中态上课程色实心，
-/// 未选中态灰色描边，与其他页签的轮廓风格一致。
-class _TimetableGlyph extends CustomPainter {
-  _TimetableGlyph({required this.filled, required this.color});
-
-  final bool filled;
-  final Color color; // 未选中态的描边灰
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // Material 图标 23px 视口里墨迹只占 ~85%，按同比例内缩，
-    // 否则比旁边几个页签图标显大一圈
-    final s = size.shortestSide * 0.85;
-    canvas.translate((size.shortestSide - s) / 2, (size.shortestSide - s) / 2);
-    final gap = s * 0.10;
-    final rad = Radius.circular(s * 0.12);
-    final w = s * 0.42;
-    final x2 = w + gap;
-    final blocks = [
-      (Rect.fromLTWH(0, 0, w, s), const Color(0xFF2563EB)), // 连堂·蓝
-      (Rect.fromLTWH(x2, 0, s - x2, w), const Color(0xFFD97706)), // 短课·琥珀
-      (Rect.fromLTWH(x2, x2, s - x2, s - x2), const Color(0xFF0D9488)), // 短课·青
-    ];
-    if (filled) {
-      for (final (r, c) in blocks) {
-        canvas.drawRRect(RRect.fromRectAndRadius(r, rad), Paint()..color = c);
-      }
-    } else {
-      for (final (r, _) in blocks) {
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(r, rad),
-          Paint()
-            ..color = color
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = s * 0.09,
-        );
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_TimetableGlyph old) =>
-      old.filled != filled || old.color != color;
 }

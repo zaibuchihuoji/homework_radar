@@ -1,5 +1,5 @@
 /// 首页：作业列表。倒计时按紧迫度分级着色（红→橙→琥珀→灰），已完成绿色；
-/// 分段块以左侧色条标识。视图：按时间分段（默认）/ 按课程分组；
+/// 各样式保留自己的分组标题。视图：按时间分段（默认）/ 按课程分组；
 /// 支持搜索、学期范围切换、左滑隐藏。
 library;
 
@@ -9,6 +9,7 @@ import 'dart:async';
 
 import '../app_state.dart';
 import '../models/homework.dart';
+import '../models/homework_draft.dart';
 import '../services/stable_hash.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
@@ -17,7 +18,11 @@ import '../ui/ink_wash.dart';
 import '../ui/receipt_tear.dart';
 import '../ui/style_background.dart';
 import '../ui/tokens.dart';
+import '../ui/theme_forms.dart';
+import '../ui/themed_masthead.dart';
+import '../ui/study_overview.dart';
 import 'detail_page.dart';
+import 'homework_recognition_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.state, required this.onGoAccounts});
@@ -76,19 +81,6 @@ class _HomePageState extends State<HomePage> {
     return '${now.month}月${now.day}日 · 周${weeks[now.weekday - 1]}';
   }
 
-  /// 杂志主视觉：两位数的「今天」
-  String _heroDay() => DateTime.now().day.toString().padLeft(2, '0');
-
-  /// 杂志主视觉：日期数字旁边的小注
-  String _heroMonthWeek() {
-    final now = DateTime.now();
-    const weeks = ['一', '二', '三', '四', '五', '六', '日'];
-    return '${now.month}月 · 周${weeks[now.weekday - 1]}';
-  }
-
-  /// 杂志期号：当年第几天
-  int get _issueNo => DateTime.now().difference(DateTime(DateTime.now().year, 1, 1)).inDays + 1;
-
   /// 旧学期作业没有跟进意义，列表固定只看当前学期
   bool _inSemester(HomeworkItem hw) => hw.inCurrentSemester;
 
@@ -104,80 +96,108 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final state = widget.state;
     return StyleBackground(
-        // 带底衬的样式下透明化 Scaffold，露出主题底衬
-        //（2026-10-05 复盘：不透明底色曾把莫兰迪色雾/像素点阵整个盖住）
-        child: Scaffold(
-      backgroundColor: scaffoldBgOf(context),
-      floatingActionButton: state.hasAnyAccount
-          ? Padding(
-              // 液态玻璃底栏悬浮在内容之上，FAB 需抬到玻璃栏上方
-              padding: const EdgeInsets.only(bottom: 84),
-              child: DecoratedBox(
-                // 按钮落影随样式走：漫画=白边贴纸+硬投影，水墨=墨影（印章
-                // 不发光），其余=品牌光晕
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(isComicStyle(context)
-                      ? 18
-                      : (isEditorialStyle(context) || isTerminalStyle(context)
+      // 带底衬的样式下透明化 Scaffold，露出主题底衬
+      //（2026-10-05 复盘：不透明底色曾把莫兰迪色雾/像素点阵整个盖住）
+      child: Scaffold(
+        backgroundColor: scaffoldBgOf(context),
+        floatingActionButton: Padding(
+          // 液态玻璃底栏悬浮在内容之上，FAB 需抬到玻璃栏上方
+          padding: EdgeInsets.zero,
+          child: DecoratedBox(
+            // 按钮落影随样式走：漫画=白边贴纸+硬投影，水墨=墨影（印章
+            // 不发光），其余=品牌光晕
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(
+                isComicStyle(context)
+                    ? 18
+                    : (isEditorialStyle(context) || isTerminalStyle(context)
                           ? 4
-                          : 14)),
-                  border: isComicStyle(context)
-                      ? Border.all(color: Colors.white, width: 2)
-                      : isTerminalStyle(context)
-                          ? Border.all(
-                              color: cardBorderColor(context), width: 1)
-                          : null,
-                  boxShadow: primaryButtonShadow(context),
-                ),
-                child: FloatingActionButton(
-                  backgroundColor: accentColor(context),
-                  child: Icon(Icons.add_rounded, color: onAccentColor(context)),
-                  onPressed: () => _openManualEditor(context),
-                ),
+                          : 14),
               ),
-            )
-          : null,
-      body: SafeArea(
-        bottom: false,
-        child: RefreshIndicator(
-          color: accentColor(context),
-          backgroundColor: cardColor(context),
-          onRefresh: () => state.syncAll(),
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverToBoxAdapter(child: _buildHeader(state)),
-              if (_searching) SliverToBoxAdapter(child: _buildSearchBar()),
-              if (state.syncing)
-                SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const LinearProgressIndicator(minHeight: 2),
-                      if (state.syncProgress.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-                          child: Text(
-                            '正在同步课程 ${state.syncProgress}…',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: textSecondary(context),
+              border: isComicStyle(context)
+                  ? Border.all(color: Colors.white, width: 2)
+                  : isTerminalStyle(context)
+                  ? Border.all(color: cardBorderColor(context), width: 1)
+                  : null,
+              boxShadow: primaryButtonShadow(context),
+            ),
+            child: FloatingActionButton(
+              tooltip: '添加作业',
+              backgroundColor: paletteOf(context).accentFill,
+              child: Icon(Icons.add_rounded, color: onAccentColor(context)),
+              onPressed: () => _openAddMenu(context),
+            ),
+          ),
+        ),
+        body: SafeArea(
+          bottom: false,
+          child: RefreshIndicator(
+            color: accentColor(context),
+            backgroundColor: cardColor(context),
+            onRefresh: () => state.syncAll(),
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverToBoxAdapter(child: _buildHeader(state)),
+                SliverToBoxAdapter(child: _buildOverview(state)),
+                if (_searching) SliverToBoxAdapter(child: _buildSearchBar()),
+                if (state.syncing)
+                  SliverToBoxAdapter(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const LinearProgressIndicator(minHeight: 2),
+                        if (state.syncProgress.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                            child: Text(
+                              '正在同步课程 ${state.syncProgress}…',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: textSecondary(context),
+                              ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              if (state.hasAnyAccount)
-                SliverToBoxAdapter(child: _buildFilters()),
-              if (state.lastSyncMessage.isNotEmpty)
-                SliverToBoxAdapter(child: _warnBanner(state.lastSyncMessage)),
-              _buildList(context, state),
-            ],
+                if (state.hasAnyAccount || state.homework.isNotEmpty)
+                  SliverToBoxAdapter(child: _buildFilters()),
+                if (state.lastSyncMessage.isNotEmpty)
+                  SliverToBoxAdapter(child: _warnBanner(state.lastSyncMessage)),
+                _buildList(context, state),
+              ],
+            ),
           ),
         ),
       ),
-        ),
+    );
+  }
+
+  Decoration? _actionDecoration() {
+    final p = paletteOf(context);
+    if (p.clean) return null;
+    final square = p.pixel || p.editorial || p.terminal || p.receipt;
+    return BoxDecoration(
+      color: p.card,
+      borderRadius: BorderRadius.circular(
+        square
+            ? 2
+            : p.morandi
+            ? 22
+            : p.comic
+            ? 10
+            : 6,
+      ),
+      border: p.morandi
+          ? null
+          : Border.all(
+              color: p.inkWash ? p.ink.withValues(alpha: 0.12) : p.cardBorder,
+              width: p.comic || p.pixel ? 1.5 : 1,
+            ),
+      boxShadow: p.comic || p.pixel
+          ? [BoxShadow(color: p.cardBorder, offset: const Offset(2, 2))]
+          : null,
     );
   }
 
@@ -188,305 +208,113 @@ class _HomePageState extends State<HomePage> {
     Color? color,
     String? tooltip,
   }) {
-    final button = IconButton(
-      onPressed: onTap,
-      icon: child ?? Icon(icon, size: 22),
-      color: color,
-      tooltip: tooltip,
-    );
-    // 杂志/终端：方形按钮（印刷版块的直角 / 窗格的直角），无浮影
-    final square = isEditorialStyle(context) || isTerminalStyle(context);
     return Container(
-      decoration: BoxDecoration(
-        color: cardColor(context),
-        shape: square ? BoxShape.rectangle : BoxShape.circle,
-        borderRadius:
-            square ? BorderRadius.circular(isTerminalStyle(context) ? 3 : 0) : null,
-        border: isTerminalStyle(context)
-            ? Border.all(color: cardBorderColor(context), width: 1)
-            : null,
-        boxShadow: square
-            ? null
-            : const [
-                BoxShadow(
-                  color: Color(0x14101828),
-                  blurRadius: 10,
-                  offset: Offset(0, 3),
-                ),
-              ],
+      decoration: _actionDecoration(),
+      child: IconButton(
+        onPressed: onTap,
+        icon: child ?? Icon(icon, size: 21),
+        color: color,
+        tooltip: tooltip,
       ),
-      child: button,
     );
   }
 
   Widget _buildHeader(AppState state) {
-    final ink = isInkStyle(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-      // 水墨：标题后面铺一层远山淡墨+飞鸟（出血到屏幕边，雾脚漫进列表区，
-      // 被后面的卡片自然盖住，只留缝隙里的山影）
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          if (ink)
-            Positioned(
+          if (isInkStyle(context))
+            const Positioned(
               top: -14,
               left: -20,
               right: -20,
-              child: const InkMountains(height: 158),
+              child: InkMountains(height: 110),
             ),
           Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 终端：头部是一次命令执行——提示符命令行 + 输出标题 +
-                    // 光标块（方角色块，不用字符，零字形缺失风险）
-                    if (isTerminalStyle(context)) ...[
-                      Text('user@radar:~\$ today',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontFamily: 'monospace',
-                              color: textSecondary(context))),
-                      const SizedBox(height: 5),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Text(
-                            '作业通',
-                            style: TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.w800,
-                              fontFamily: 'monospace',
-                              letterSpacing: 2,
-                              color: textPrimary(context),
-                            ),
-                          ),
-                          const SizedBox(width: 7),
-                          Container(
-                              width: 10,
-                              height: 20, color: accentColor(context)),
-                        ],
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: ThemedMasthead(dateLine: _dateLine()),
+                  ),
+                ),
+              ),
+              _iconBtn(
+                icon: _searching
+                    ? Icons.search_off_rounded
+                    : Icons.search_rounded,
+                color: _searching
+                    ? accentColor(context)
+                    : textSecondary(context),
+                tooltip: _searching ? '关闭搜索' : '搜索作业',
+                onTap: () => setState(() {
+                  _searching = !_searching;
+                  if (!_searching) _searchCtrl.clear();
+                }),
+              ),
+              const SizedBox(width: 4),
+              Container(
+                decoration: _actionDecoration(),
+                child: PopupMenuButton<String>(
+                  tooltip: '排序方式',
+                  color: modalColor(context),
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  position: PopupMenuPosition.under,
+                  offset: const Offset(0, 8),
+                  icon: Icon(
+                    Icons.sort_rounded,
+                    size: 21,
+                    color: _sort == 'course'
+                        ? accentColor(context)
+                        : textSecondary(context),
+                  ),
+                  onSelected: (value) => setState(() {
+                    _sort = value;
+                    Storage.saveSortMode(value);
+                  }),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'time',
+                      child: _menuRow(
+                        icon: Icons.schedule_rounded,
+                        color: accentColor(context),
+                        title: '按截止时间',
+                        subtitle: '分成今天/本周等段落',
+                        value: 'time',
                       ),
-                      const SizedBox(height: 5),
-                      Text(_dateLine(),
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontFamily: 'monospace',
-                              color: textSecondary(context))),
-                    ] else if (isEditorialStyle(context)) ...[
-                      // 杂志：巨大日期数字是版面主视觉，刊名退成一条眉线；
-                      // 期号 = 当年第几天——期刊的身份签名
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.baseline,
-                        textBaseline: TextBaseline.alphabetic,
-                        children: [
-                          Text('作业通',
-                              style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 6,
-                                  color: textSecondary(context))),
-                          const SizedBox(width: 8),
-                          Text('· 第 $_issueNo 期',
-                              style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 2,
-                                  color: accentColor(context))),
-                        ],
+                    ),
+                    PopupMenuItem(
+                      value: 'course',
+                      child: _menuRow(
+                        icon: Icons.category_rounded,
+                        color: accentColor(context),
+                        title: '按课程分组',
+                        subtitle: '同一门课的作业放在一起',
+                        value: 'course',
                       ),
-                      const SizedBox(height: 2),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text(_heroDay(),
-                              style: TextStyle(
-                                  fontSize: 54,
-                                  height: 1.05,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -2,
-                                  color: textPrimary(context))),
-                          const SizedBox(width: 9),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                    width: 10,
-                                    height: 10, color: accentColor(context)),
-                                const SizedBox(height: 5),
-                                Text(_heroMonthWeek(),
-                                    style: TextStyle(
-                                        fontSize: 12.5,
-                                        fontWeight: FontWeight.w800,
-                                        color: textPrimary(context))),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ] else ...[
-                      // 水墨：题款式大标题（拉字距）+ 落款小印
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '作业通',
-                            style: inkTitle(
-                              context,
-                              serifTitle(
-                                context,
-                                TextStyle(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w800,
-                                  color: textPrimary(context),
-                                  height: 1.2,
-                                ),
-                              ),
-                            ),
-                          ),
-                          if (isInkStyle(context)) ...[
-                            const SizedBox(width: 7),
-                            const InkSealChip(),
-                          ],
-                        ],
-                      ),
-                      // 题字收笔：标题下一记横笔（水墨=飞白，黑板=粉笔）
-                      if (ink) ...[
-                        const SizedBox(height: 5),
-                        SizedBox(
-                          width: 132,
-                          child: BrushLine(
-                            color: textPrimary(context).withValues(alpha: 0.55),
-                            thickness: 3.0,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                      ] else
-                        const SizedBox(height: 4),
-                      Text(
-                        _dateLine(),
-                        style: monoText(
-                          context,
-                          TextStyle(
-                              fontSize: 13, color: textSecondary(context)),
-                        ),
-                      ),
-                      // 小票：抬头下一道双细线——收据的抬头分隔
-                      if (isReceiptStyle(context)) ...[
-                        const SizedBox(height: 7),
-                        SizedBox(
-                          width: 196,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                  height: 1,
-                                  width: double.infinity,
-                                  color: textPrimary(context)
-                                      .withValues(alpha: 0.45)),
-                              const SizedBox(height: 2.5),
-                              Container(
-                                  height: 1,
-                                  width: double.infinity,
-                                  color: textPrimary(context)
-                                      .withValues(alpha: 0.45)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ],
                 ),
               ),
-          _iconBtn(
-            icon: _searching ? Icons.search_off_rounded : Icons.search_rounded,
-            color: _searching ? accentColor(context) : textSecondary(context),
-            tooltip: _searching ? '关闭搜索' : '搜索作业',
-            onTap: () => setState(() {
-              _searching = !_searching;
-              if (!_searching) _searchCtrl.clear();
-            }),
-          ),
-          const SizedBox(width: 10),
-          // 排序按钮与左右两侧圆钮同一底妆：白圆+淡影——裸图标在浅色
-          // 水墨的远山上会融进背景（用户实测），三颗必须成排一致
-          Container(
-            decoration: BoxDecoration(
-              color: cardColor(context),
-              shape: BoxShape.circle,
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x14101828),
-                  blurRadius: 10,
-                  offset: Offset(0, 3),
-                ),
-              ],
-            ),
-            child: PopupMenuButton<String>(
-            tooltip: '排序方式',
-            color: modalColor(context),
-            elevation: 10,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            position: PopupMenuPosition.under,
-            offset: const Offset(0, 8),
-            icon: Icon(
-              Icons.sort_rounded,
-              size: 22,
-              color: _sort == 'course' ? accentColor(context) : textSecondary(context),
-            ),
-            onSelected: (value) {
-              setState(() {
-                _sort = value;
-                Storage.saveSortMode(value);
-              });
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'time',
-                child: _menuRow(
-                  icon: Icons.schedule_rounded,
-                  color: const Color(0xFF6366F1),
-                  title: '按截止时间',
-                  subtitle: '分成今天/本周等段落',
-                  value: 'time',
-                ),
-              ),
-              PopupMenuItem(
-                value: 'course',
-                child: _menuRow(
-                  icon: Icons.category_rounded,
-                  color: const Color(0xFF10B981),
-                  title: '按课程分组',
-                  subtitle: '同一门课的作业放在一起',
-                  value: 'course',
-                ),
+              const SizedBox(width: 4),
+              _iconBtn(
+                icon: Icons.refresh_rounded,
+                tooltip: '同步作业',
+                onTap: state.syncing ? null : () => state.syncAll(),
+                color: state.syncing
+                    ? textFaint(context)
+                    : accentColor(context),
               ),
             ],
           ),
-          ),
-          const SizedBox(width: 10),
-          // 同步进行中的进度统一显示在下拉刷新那条进度条上，按钮只置灰防重复触发
-          _iconBtn(
-            child: Icon(
-              Icons.refresh_rounded,
-              size: 22,
-              color: state.syncing ? Colors.grey : null,
-            ),
-            tooltip: '同步作业',
-            onTap: state.syncing ? null : () => state.syncAll(),
-            color: accentColor(context),
-          ),
-          ],
-        ),
         ],
       ),
     );
@@ -516,6 +344,21 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildOverview(AppState state) {
+    final now = DateTime.now();
+    final pending = state.homework
+        .where(_inSemester)
+        .where((hw) => !_isDone(hw));
+    final today = pending.where((hw) {
+      final d = hw.dueAt;
+      return d != null &&
+          d.year == now.year &&
+          d.month == now.month &&
+          d.day == now.day;
+    }).length;
+    return StudyOverview(pending: pending.length, today: today);
+  }
+
   Widget _buildFilters() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -536,74 +379,83 @@ class _HomePageState extends State<HomePage> {
 
   Widget _pill(String label, String value) {
     final selected = _filter == value;
-    // 每套样式的选中态有自己的语言：暖纸="章"（墨线描边+微墨染底，方角）；
-    // 水墨="朱笔圈阅"（透明底+朱砂描边+朱砂字）；
-    // 漫画=贴纸（白底/彩底方贴+剪影描边+硬投影+按压果冻）；
-    // 小票/杂志/终端=方角印刷片（票据和印刷品没有胶囊）。
-    final paper = isPaperStyle(context);
-    final ink = isInkStyle(context);
-    final comic = isComicStyle(context);
-    final square =
-        isReceiptStyle(context) || isEditorialStyle(context) || isTerminalStyle(context);
-    final outline = paletteOf(context).cardBorder;
-    return GestureDetector(
-      onTap: () => setState(() => _filter = value),
-      child: JellyPress(
-        enabled: comic,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    final p = paletteOf(context);
+    final square = p.pixel || p.terminal || p.receipt || p.editorial;
+    final radius = square
+        ? 2.0
+        : p.morandi
+        ? 18.0
+        : p.paper || p.journal
+        ? 6.0
+        : 10.0;
+    final filled =
+        selected &&
+        (p.sunny || p.comic || p.pixel || p.terminal || p.editorial);
+    final fill = filled
+        ? (p.terminal || p.editorial ? p.ink : p.accentFill)
+        : selected
+        ? p.card
+        : Colors.transparent;
+    final foreground = filled
+        ? (p.terminal || p.editorial ? p.card : p.onAccent)
+        : selected
+        ? p.accent
+        : p.ink2;
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: DecoratedBox(
           decoration: BoxDecoration(
-            color: selected
-                ? (paper
-                    ? textPrimary(context).withValues(alpha: 0.08)
-                    : ink
-                        ? Colors.transparent
-                        : accentColor(context))
-                : cardColor(context),
-            borderRadius: BorderRadius.circular(
-                comic ? 12 : square ? 2 : (paper ? 8 : 999)),
-            border: selected
-                ? (comic
-                    ? Border.all(color: outline, width: 1.4)
-                    : paper
-                        ? Border.all(
-                            color: textPrimary(context).withValues(alpha: 0.6),
-                            width: 1.2)
-                        : ink
-                            ? Border.all(
-                                color: accentColor(context), width: 1.3)
-                            : null)
-                : comic
-                    ? Border.all(
-                        color: outline.withValues(alpha: 0.75), width: 1.2)
-                    : Border.all(color: chipBorder(context)),
-          boxShadow: comic
-              ? [
-                  BoxShadow(
-                    color: outline.withValues(alpha: selected ? 1 : 0.5),
-                    blurRadius: 0,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              // 选中的筛选片也是"光源"：微微照亮邻近卡面（暖纸/水墨用描边说话，
-              // 方角印刷片不发滑光）
-              : selected && !paper && !ink && !square
-                  ? Tokens.glow(Tokens.brandOf(context), dark: isDark(context))
-                  : null,
+            color: fill,
+            borderRadius: BorderRadius.circular(radius),
+            border:
+                selected ||
+                    p.pixel ||
+                    p.comic ||
+                    p.paper ||
+                    p.receipt ||
+                    p.terminal
+                ? Border.all(
+                    color: p.comic || p.pixel
+                        ? p.cardBorder
+                        : selected && !p.clean
+                        ? p.accentFill.withValues(alpha: 0.6)
+                        : p.hairline,
+                    width: p.comic || p.pixel ? 1.5 : 1,
+                  )
+                : null,
+            boxShadow: selected && (p.comic || p.pixel)
+                ? [BoxShadow(color: p.cardBorder, offset: const Offset(2, 2))]
+                : null,
           ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: selected && comic ? FontWeight.w800 : FontWeight.w600,
-              color: selected
-                  ? (paper
-                      ? textPrimary(context)
-                      : ink
-                          ? accentColor(context)
-                          : onAccentColor(context))
-                  : textSecondary(context),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: () => setState(() => _filter = value),
+              borderRadius: BorderRadius.circular(radius),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontFamily: p.terminal || p.receipt || p.pixel
+                        ? 'monospace'
+                        : p.paper
+                        ? 'serif'
+                        : null,
+                    fontWeight: selected || p.comic
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                    color: foreground,
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -612,13 +464,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildList(BuildContext context, AppState state) {
-    if (!state.hasAnyAccount) {
+    if (!state.hasAnyAccount && state.homework.isEmpty) {
       return SliverFillRemaining(
         hasScrollBody: false,
         child: _empty(
           icon: Icons.link_rounded,
           title: '还没有绑定账号',
-          subtitle: '绑定学习通 / 中国大学MOOC / 智慧树\n作业截止时间一目了然',
+          subtitle: '右下角 + 可添加手动作业，也可绑定平台自动同步',
           action: FilledButton(
             style: FilledButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
@@ -693,9 +545,10 @@ class _HomePageState extends State<HomePage> {
       for (final (i, section) in _timeSections(filtered).indexed) {
         children.add(
           _sectionBlock(
-            color: isInkStyle(context) ? _inkSectionBar(section.$1) : section.$2,
-            header: _sectionHeader(section.$1, section.$3.length,
-                index: i),
+            color: isInkStyle(context)
+                ? _inkSectionBar(section.$1)
+                : section.$2,
+            header: _sectionHeader(section.$1, section.$3.length, index: i),
             rows: [for (final hw in section.$3) _hwRow(hw)],
           ),
         );
@@ -703,7 +556,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     return SliverPadding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 88),
+      padding: EdgeInsets.fromLTRB(20, 4, 20, 96),
       sliver: SliverList(delegate: SliverChildListDelegate(children)),
     );
   }
@@ -823,8 +676,10 @@ class _HomePageState extends State<HomePage> {
     // 小票：删除不走滑动——撕纸动画要当着面撕，入口在长按菜单
     //「撕掉这张小票」；句柄按作业 id 缓存，动画中列表重建不打断
     if (isReceiptStyle(context)) {
-      final tearKey =
-          _tearKeys.putIfAbsent(hw.id, () => GlobalKey<ReceiptTearOutState>());
+      final tearKey = _tearKeys.putIfAbsent(
+        hw.id,
+        () => GlobalKey<ReceiptTearOutState>(),
+      );
       return GestureDetector(
         onTap: () => _openHw(hw),
         onLongPress: () => _openHwOptions(hw),
@@ -877,103 +732,122 @@ class _HomePageState extends State<HomePage> {
   void _openHwOptions(HomeworkItem hw) {
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
+      builder: (dialogContext) => ThemedDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // 小票：撕是头号动作，摆在最上面
-                if (isReceiptStyle(context))
-                  ListTile(
-                    leading: const Icon(
+          constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 小票：撕是头号动作，摆在最上面
+                  if (isReceiptStyle(context))
+                    ListTile(
+                      leading: const Icon(
                         Icons.content_cut_rounded,
-                        color: Tokens.danger),
-                    title: const Text(
-                      '撕掉这张小票',
-                      style: TextStyle(color: Tokens.danger),
+                        color: Tokens.danger,
+                      ),
+                      title: const Text(
+                        '撕掉这张小票',
+                        style: TextStyle(color: Tokens.danger),
+                      ),
+                      onTap: () {
+                        Navigator.of(dialogContext).pop();
+                        _tearOff(hw);
+                      },
                     ),
+                  ListTile(
+                    leading: const Icon(Icons.open_in_new_rounded),
+                    title: const Text('打开作业'),
                     onTap: () {
                       Navigator.of(dialogContext).pop();
-                      _tearOff(hw);
+                      _openHw(hw);
                     },
                   ),
-                ListTile(
-                  leading: const Icon(Icons.open_in_new_rounded),
-                  title: const Text('打开作业'),
-                  onTap: () {
-                    Navigator.of(dialogContext).pop();
-                    _openHw(hw);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.sticky_note_2_outlined),
-                  title: Text(hw.note?.isNotEmpty == true ? '编辑备注' : '添加备注'),
-                  onTap: () {
-                    Navigator.of(dialogContext).pop();
-                    _openNoteEditor(hw);
-                  },
-                ),
-                if (hw.platform == PlatformKind.manual)
                   ListTile(
-                    leading: const Icon(Icons.edit_outlined),
-                    title: const Text('编辑作业'),
+                    leading: const Icon(Icons.sticky_note_2_outlined),
+                    title: Text(hw.note?.isNotEmpty == true ? '编辑备注' : '添加备注'),
                     onTap: () {
                       Navigator.of(dialogContext).pop();
-                      _openManualEditor(context, edit: hw);
+                      _openNoteEditor(hw);
                     },
                   ),
-                if (hw.platform == PlatformKind.manual)
-                  ListTile(
-                    leading: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: Tokens.danger,
+                  if (hw.platform == PlatformKind.manual)
+                    ListTile(
+                      leading: Icon(
+                        hwIsDone(hw)
+                            ? Icons.undo_rounded
+                            : Icons.check_circle_outline,
+                      ),
+                      title: Text(hwIsDone(hw) ? '标记未完成' : '标记完成'),
+                      onTap: () {
+                        Navigator.of(dialogContext).pop();
+                        widget.state.setHomeworkStatus(
+                          hw.id,
+                          hwIsDone(hw) ? HwStatus.todo : HwStatus.done,
+                        );
+                      },
                     ),
-                    title: const Text(
-                      '删除',
-                      style: TextStyle(color: Tokens.danger),
+                  if (hw.platform == PlatformKind.manual)
+                    ListTile(
+                      leading: const Icon(Icons.edit_outlined),
+                      title: const Text('编辑作业'),
+                      onTap: () {
+                        Navigator.of(dialogContext).pop();
+                        _openManualEditor(context, edit: hw);
+                      },
                     ),
-                    onTap: () async {
-                      Navigator.of(dialogContext).pop();
-                      // 无二次确认的删除是误触即永久丢失，手动作业没有平台源可回
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (confirmContext) => AlertDialog(
-                          title: const Text('删除这条作业？'),
-                          content: Text('「${hw.title}」删除后无法恢复。'),
-                          actions: [
-                            TextButton(
-                              onPressed: () =>
-                                  Navigator.of(confirmContext).pop(false),
-                              child: const Text('取消'),
-                            ),
-                            FilledButton(
-                              onPressed: () =>
-                                  Navigator.of(confirmContext).pop(true),
-                              child: const Text('删除'),
-                            ),
-                          ],
-                        ),
-                      );
-                      if (ok == true) {
-                        widget.state.deleteManualHomework(hw.id);
-                      }
-                    },
-                  )
-                else
-                  ListTile(
-                    leading: const Icon(Icons.visibility_off_outlined),
-                    title: const Text('隐藏这条作业'),
-                    subtitle: const Text('不再提醒，可在设置的「已隐藏」中恢复'),
-                    onTap: () {
-                      Navigator.of(dialogContext).pop();
-                      _dismissHw(hw);
-                    },
-                  ),
-              ],
+                  if (hw.platform == PlatformKind.manual)
+                    ListTile(
+                      leading: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Tokens.danger,
+                      ),
+                      title: const Text(
+                        '删除',
+                        style: TextStyle(color: Tokens.danger),
+                      ),
+                      onTap: () async {
+                        Navigator.of(dialogContext).pop();
+                        // 无二次确认的删除是误触即永久丢失，手动作业没有平台源可回
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (confirmContext) => ThemedAlertDialog(
+                            title: const Text('删除这条作业？'),
+                            content: Text('「${hw.title}」删除后无法恢复。'),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.of(confirmContext).pop(false),
+                                child: const Text('取消'),
+                              ),
+                              FilledButton(
+                                onPressed: () =>
+                                    Navigator.of(confirmContext).pop(true),
+                                child: const Text('删除'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (ok == true) {
+                          widget.state.deleteManualHomework(hw.id);
+                        }
+                      },
+                    )
+                  else
+                    ListTile(
+                      leading: const Icon(Icons.visibility_off_outlined),
+                      title: const Text('隐藏这条作业'),
+                      subtitle: const Text('不再提醒，可在设置的「已隐藏」中恢复'),
+                      onTap: () {
+                        Navigator.of(dialogContext).pop();
+                        _dismissHw(hw);
+                      },
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -985,28 +859,35 @@ class _HomePageState extends State<HomePage> {
     final ctrl = TextEditingController(text: hw.note ?? '');
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => ThemedAlertDialog(
         backgroundColor: cardColor(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Text(
-          '备注',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+        title: const ThemeEditorHeading(
+          title: '备注',
+          kicker: 'NOTE / 备忘',
+          icon: Icons.sticky_note_2_outlined,
         ),
+        scrollable: true,
         content: TextField(
           controller: ctrl,
           autofocus: true,
           maxLines: 3,
           style: TextStyle(fontSize: 14, color: textPrimary(context)),
-          decoration: InputDecoration(
-            hintText: '例如：需要交纸质版 / 小组作业',
-            hintStyle: TextStyle(fontSize: 13, color: textFaint(context)),
-            filled: true,
-            fillColor: bgColor(context),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-          ),
+          decoration: !isCleanStyle(dialogContext)
+              ? themedInputDecoration(
+                  dialogContext,
+                  hintText: '例如：需要交纸质版 / 小组作业',
+                )
+              : InputDecoration(
+                  hintText: '例如：需要交纸质版 / 小组作业',
+                  hintStyle: TextStyle(fontSize: 13, color: textFaint(context)),
+                  filled: true,
+                  fillColor: bgColor(context),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
         ),
         actions: [
           TextButton(
@@ -1028,6 +909,59 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<void> _openAddMenu(BuildContext context) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: cardColor(context),
+      shape: themeModalShape(paletteOf(context)),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                '添加作业',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('手动添加'),
+              subtitle: const Text('自己填写课程、标题和截止时间'),
+              onTap: () => Navigator.pop(context, 'manual'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('识别添加'),
+              subtitle: const Text('截图或粘贴文字，核对后勾选添加'),
+              onTap: () => Navigator.pop(context, 'recognition'),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (!context.mounted || choice == null) return;
+    if (choice == 'manual') {
+      _openManualEditor(context);
+      return;
+    }
+    final result = await Navigator.of(context).push<HomeworkImportResult>(
+      MaterialPageRoute(
+        builder: (_) => HomeworkRecognitionPage(state: widget.state),
+      ),
+    );
+    if (!context.mounted || result == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '已添加 ${result.count} 项作业${result.outputsDelayed ? '，提醒或小组件刷新稍有延迟，请勿重复添加' : ''}',
+        ),
+      ),
+    );
+  }
+
   void _openManualEditor(BuildContext context, {HomeworkItem? edit}) {
     final courseCtrl = TextEditingController(text: edit?.course ?? '');
     final titleCtrl = TextEditingController(text: edit?.title ?? '');
@@ -1042,7 +976,7 @@ class _HomePageState extends State<HomePage> {
     showDialog<void>(
       context: context,
       builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setSheet) => Dialog(
+        builder: (sheetContext, setSheet) => ThemedDialog(
           backgroundColor: cardColor(sheetContext),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
@@ -1055,22 +989,23 @@ class _HomePageState extends State<HomePage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    edit == null ? '添加作业' : '编辑作业',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      color: textPrimary(sheetContext),
-                    ),
+                  ThemeEditorHeading(
+                    title: edit == null ? '添加作业' : '编辑作业',
+                    kicker: 'HOMEWORK / 自定义',
+                    icon: Icons.edit_note_rounded,
                   ),
                   const SizedBox(height: 14),
-                  TextField(
-                    controller: courseCtrl,
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      color: textPrimary(sheetContext),
+                  ThemeFieldGroup(
+                    title: '所属课程',
+                    index: 1,
+                    child: TextField(
+                      controller: courseCtrl,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        color: textPrimary(sheetContext),
+                      ),
+                      decoration: _editorInput(sheetContext, '课程名称'),
                     ),
-                    decoration: _editorInput(sheetContext, '课程名称'),
                   ),
                   if (existingCourses.isNotEmpty) ...[
                     const SizedBox(height: 8),
@@ -1088,8 +1023,8 @@ class _HomePageState extends State<HomePage> {
                                   vertical: 5,
                                 ),
                                 decoration: BoxDecoration(
-                                  color:
-                                      accentColor(sheetContext).withValues(alpha: 0.08),
+                                  color: accentColor(sheetContext)
+                                      .withValues(alpha: 0.08),
                                   borderRadius: BorderRadius.circular(999),
                                 ),
                                 child: Text(
@@ -1106,23 +1041,31 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: titleCtrl,
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      color: textPrimary(sheetContext),
+                  ThemeFieldGroup(
+                    title: '作业内容',
+                    index: 2,
+                    child: TextField(
+                      controller: titleCtrl,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        color: textPrimary(sheetContext),
+                      ),
+                      decoration: _editorInput(sheetContext, '作业标题（必填）'),
                     ),
-                    decoration: _editorInput(sheetContext, '作业标题（必填）'),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: noteCtrl,
-                    style: TextStyle(
-                      fontSize: 14.5,
-                      color: textPrimary(sheetContext),
+                  ThemeFieldGroup(
+                    title: '补充备注',
+                    index: 3,
+                    child: TextField(
+                      controller: noteCtrl,
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        color: textPrimary(sheetContext),
+                      ),
+                      maxLines: 2,
+                      decoration: _editorInput(sheetContext, '备注（选填）：需要交纸质版等'),
                     ),
-                    maxLines: 2,
-                    decoration: _editorInput(sheetContext, '备注（选填）：需要交纸质版等'),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -1211,6 +1154,7 @@ class _HomePageState extends State<HomePage> {
                               url: edit.url,
                               score: edit.score,
                               note: note,
+                              sourceKey: edit.sourceKey,
                             ),
                           );
                         }
@@ -1236,21 +1180,23 @@ class _HomePageState extends State<HomePage> {
   }
 
   InputDecoration _editorInput(BuildContext sheetContext, String hint) =>
-      InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(fontSize: 13.5, color: textFaint(sheetContext)),
-        isDense: true,
-        filled: true,
-        fillColor: bgColor(sheetContext),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 12,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
-        ),
-      );
+      !isCleanStyle(sheetContext)
+      ? themedInputDecoration(sheetContext, hintText: hint)
+      : InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(fontSize: 13.5, color: textFaint(sheetContext)),
+          isDense: true,
+          filled: true,
+          fillColor: bgColor(sheetContext),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 12,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        );
 
   Future<void> _dismissHw(HomeworkItem hw) async {
     await widget.state.dismissHomework(hw);
@@ -1272,17 +1218,11 @@ class _HomePageState extends State<HomePage> {
     required Widget header,
     required List<Widget> rows,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(top: 14),
-      padding: const EdgeInsets.only(left: 10),
-      decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(color: color.withValues(alpha: 0.55), width: 3),
-        ),
-      ),
+    return Padding(
+      padding: EdgeInsets.only(top: isJournalStyle(context) ? 22 : 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 10,
+        spacing: isReceiptStyle(context) ? 12 : 10,
         children: [header, ...rows],
       ),
     );
@@ -1293,29 +1233,38 @@ class _HomePageState extends State<HomePage> {
     if (isTerminalStyle(context)) {
       return Row(
         children: [
-          Text('>',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  fontFamily: 'monospace',
-                  color: accentColor(context))),
+          Text(
+            '>',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              fontFamily: 'monospace',
+              color: accentColor(context),
+            ),
+          ),
           const SizedBox(width: 7),
           Expanded(
-            child: Text('ls $title/',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    fontFamily: 'monospace',
-                    letterSpacing: 0.5,
-                    color: textPrimary(context))),
-          ),
-          Text('$count item(s)',
+            child: Text(
+              'ls $title/',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  color: textFaint(context))),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'monospace',
+                letterSpacing: 0.5,
+                color: textPrimary(context),
+              ),
+            ),
+          ),
+          Text(
+            '$count item(s)',
+            style: TextStyle(
+              fontSize: 11,
+              fontFamily: 'monospace',
+              color: textFaint(context),
+            ),
+          ),
         ],
       );
     }
@@ -1330,30 +1279,40 @@ class _HomePageState extends State<HomePage> {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text((index + 1).toString().padLeft(2, '0'),
-                  style: TextStyle(
-                      fontSize: 27,
-                      height: 1,
-                      fontWeight: FontWeight.w900,
-                      color: accentColor(context))),
+              Text(
+                (index + 1).toString().padLeft(2, '0'),
+                style: TextStyle(
+                  fontSize: 27,
+                  height: 1,
+                  fontWeight: FontWeight.w900,
+                  color: accentColor(context),
+                ),
+              ),
               const SizedBox(width: 7),
-              Text(' / ',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: textSecondary(context))),
+              Text(
+                ' / ',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: textSecondary(context),
+                ),
+              ),
               const SizedBox(width: 7),
               Expanded(
-                child: Text(title,
-                    style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 2,
-                        color: textPrimary(context))),
-              ),
-              Text('$count 项',
+                child: Text(
+                  title,
                   style: TextStyle(
-                      fontSize: 11, color: textFaint(context))),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2,
+                    color: textPrimary(context),
+                  ),
+                ),
+              ),
+              Text(
+                '$count 项',
+                style: TextStyle(fontSize: 11, color: textFaint(context)),
+              ),
             ],
           ),
           const SizedBox(height: 5),
@@ -1363,59 +1322,68 @@ class _HomePageState extends State<HomePage> {
     }
     // 小票：段头是收据抬头——标题居中卡在两段双细线之间
     if (isReceiptStyle(context)) {
-      final rule =
-          textPrimary(context).withValues(alpha: 0.40);
+      final rule = textPrimary(context).withValues(alpha: 0.40);
       Widget rules() => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(height: 1, color: rule),
-              const SizedBox(height: 2),
-              Container(height: 1, color: rule),
-            ],
-          );
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(height: 1, color: rule),
+          const SizedBox(height: 2),
+          Container(height: 1, color: rule),
+        ],
+      );
       return Row(
         children: [
           Expanded(child: rules()),
           const SizedBox(width: 12),
-          Text(title,
-              style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 2.5,
-                  color: textPrimary(context))),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 2.5,
+              color: textPrimary(context),
+            ),
+          ),
           const SizedBox(width: 7),
-          Text('$count 件',
-              style: TextStyle(
-                  fontSize: 10.5,
-                  fontFamily: 'monospace',
-                  color: textFaint(context))),
+          Text(
+            '$count 件',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontFamily: 'monospace',
+              color: textFaint(context),
+            ),
+          ),
           const SizedBox(width: 12),
           Expanded(child: rules()),
         ],
       );
     }
-    // 手账：段头是贴了一截胶带的标签（胶带压在标题上方，微透）
+    // 胶带先绘制，文字最后绘制，保留拼贴感但不盖住字形。
     if (isJournalStyle(context)) {
       return Stack(
         clipBehavior: Clip.none,
         children: [
-          Row(
-            children: [
-              Text(title,
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: textPrimary(context))),
-              const Spacer(),
-              Text('$count 项',
-                  style: TextStyle(
-                      fontSize: 11.5, color: textFaint(context))),
-            ],
-          ),
           Positioned(
             top: -8,
             left: 22,
             child: journalTape(context, 'sec:$title', width: 46),
+          ),
+          Row(
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                  color: textPrimary(context),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$count 项',
+                style: TextStyle(fontSize: 11.5, color: textFaint(context)),
+              ),
+            ],
           ),
         ],
       );
@@ -1455,7 +1423,12 @@ class _HomePageState extends State<HomePage> {
       return Row(
         children: [
           Container(
-            padding: const EdgeInsets.only(left: 12, right: 12, top: 5, bottom: 5),
+            padding: const EdgeInsets.only(
+              left: 12,
+              right: 12,
+              top: 5,
+              bottom: 5,
+            ),
             decoration: BoxDecoration(
               color: paletteOf(context).hairline,
               borderRadius: BorderRadius.circular(12),
@@ -1517,13 +1490,14 @@ class _HomePageState extends State<HomePage> {
           Transform.rotate(
             angle: -0.014,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
               decoration: BoxDecoration(
                 color: cardColor(context),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                    color: paletteOf(context).cardBorder, width: 1.3),
+                  color: paletteOf(context).cardBorder,
+                  width: 1.3,
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: paletteOf(context).cardBorder,
@@ -1665,7 +1639,8 @@ class _HomePageState extends State<HomePage> {
         color: dark ? const Color(0xFF2A2313) : const Color(0xFFFFFBEB),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-            color: dark ? const Color(0xFF5C4A1A) : const Color(0xFFFDE68A)),
+          color: dark ? const Color(0xFF5C4A1A) : const Color(0xFFFDE68A),
+        ),
       ),
       child: Row(
         children: [
@@ -1679,8 +1654,9 @@ class _HomePageState extends State<HomePage> {
             child: Text(
               msg,
               style: TextStyle(
-                  fontSize: 12,
-                  color: dark ? const Color(0xFFE8C878) : const Color(0xFF92400E)),
+                fontSize: 12,
+                color: dark ? const Color(0xFFE8C878) : const Color(0xFF92400E),
+              ),
             ),
           ),
         ],
@@ -1694,50 +1670,53 @@ class _HomePageState extends State<HomePage> {
     String? subtitle,
     Widget? action,
   }) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 水墨：空态不画彩色圆图标，留白处挂一幅远山
-          if (isInkStyle(context))
-            const SizedBox(
-              width: 300,
-              height: 110,
-              child: InkMountains(height: 110),
-            )
-          else
-            Container(
-              width: 84,
-              height: 84,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: accentColor(context).withValues(alpha: 0.08),
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24, 24, 24, 100),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 水墨：空态不画彩色圆图标，留白处挂一幅远山
+            if (isInkStyle(context))
+              const SizedBox(
+                width: 300,
+                height: 110,
+                child: InkMountains(height: 110),
+              )
+            else
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accentColor(context).withValues(alpha: 0.08),
+                ),
+                child: Icon(icon, size: 28, color: accentColor(context)),
               ),
-              child: Icon(icon, size: 36, color: accentColor(context)),
-            ),
-          const SizedBox(height: 14),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: textPrimary(context),
-            ),
-          ),
-          if (subtitle != null) const SizedBox(height: 6),
-          if (subtitle != null)
+            const SizedBox(height: 14),
             Text(
-              subtitle,
-              textAlign: TextAlign.center,
+              title,
               style: TextStyle(
-                fontSize: 12.5,
-                color: textSecondary(context),
-                height: 1.5,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: textPrimary(context),
               ),
             ),
-          if (action != null) const SizedBox(height: 18),
-          ?action,
-        ],
+            if (subtitle != null) const SizedBox(height: 6),
+            if (subtitle != null)
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: textSecondary(context),
+                  height: 1.5,
+                ),
+              ),
+            if (action != null) const SizedBox(height: 18),
+            ?action,
+          ],
+        ),
       ),
     );
   }

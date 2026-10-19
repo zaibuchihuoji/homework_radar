@@ -21,10 +21,9 @@ internal object TimetableWidgetData {
         return if (dow == java.util.Calendar.SUNDAY) 7 else dow - 1
     }
 
-    fun read(prefs: SharedPreferences): Today {
+    fun read(prefs: SharedPreferences, cal: java.util.Calendar = java.util.Calendar.getInstance()): Today {
         // 单个 Calendar 实例同时供星期与日期串使用：两次独立 getInstance 在
         // 跨午夜瞬间可能取自相邻两天，拼出自相矛盾的「X月Y日 周Z」
-        val cal = java.util.Calendar.getInstance()
         val appDow = appWeekday(cal)
         val dateStr = run {
             val month = cal.get(java.util.Calendar.MONTH) + 1
@@ -34,7 +33,7 @@ internal object TimetableWidgetData {
         val root = try {
             JSONObject(prefs.getString("tt_json", "{}") ?: "{}")
         } catch (_: Exception) {
-            JSONObject()
+            return Today(dateStr, "", JSONArray(), hasSchedule = false, valid = false)
         }
         val days = root.optJSONObject("days")
         if (days != null) {
@@ -42,27 +41,30 @@ internal object TimetableWidgetData {
             var week = 0
             val startMs = root.optLong("start", 0L)
             if (startMs > 0L) {
-                val dayStart = cal.clone() as java.util.Calendar
-                dayStart.set(java.util.Calendar.HOUR_OF_DAY, 0)
-                dayStart.set(java.util.Calendar.MINUTE, 0)
-                dayStart.set(java.util.Calendar.SECOND, 0)
-                dayStart.set(java.util.Calendar.MILLISECOND, 0)
-                val daysFromStart =
-                    (dayStart.timeInMillis - startMs) / (24L * 60 * 60 * 1000)
-                week = (daysFromStart / 7).toInt() + 1
+                week = TimetableWeek.number(startMs, cal)
             }
             val weekLabel = when {
                 startMs <= 0L -> root.optString("week", "")
                 week < 1 -> "未开学"
                 else -> "第${week}周"
             }
-            return Today(dateStr, weekLabel, filterByWeek(days.optJSONArray("$appDow") ?: JSONArray(), week))
+            val items = days.optJSONArray("$appDow") ?: JSONArray()
+            return Today(dateStr, weekLabel, when {
+                startMs <= 0L -> items
+                week < 1 -> JSONArray()
+                else -> filterByWeek(items, week)
+            }, hasSchedule = (1..7).any { (days.optJSONArray("$it")?.length() ?: 0) > 0 })
         }
         val header = root.optJSONObject("header")
+        val legacyItems = root.optJSONArray("items")
         return Today(
             header?.optString("date", "") ?: "",
             header?.optString("week", "") ?: "",
-            root.optJSONArray("items") ?: JSONArray(),
+            legacyItems ?: JSONArray(),
+            // A v1 snapshot only describes today; do not infer that the entire
+            // timetable is unconfigured from an empty legacy day.
+            hasSchedule = legacyItems != null,
+            valid = legacyItems != null,
         )
     }
 
@@ -72,7 +74,8 @@ internal object TimetableWidgetData {
         val out = JSONArray()
         for (i in 0 until items.length()) {
             val o = items.optJSONObject(i) ?: continue
-            val weeks = o.optJSONArray("w") ?: continue // v2 条目无 w：不过滤
+            val weeks = o.optJSONArray("w")
+            if (weeks == null) { out.put(o); continue } // legacy snapshot
             for (k in 0 until weeks.length()) {
                 if (weeks.optInt(k, -1) == week) {
                     out.put(o)
@@ -83,5 +86,6 @@ internal object TimetableWidgetData {
         return out
     }
 
-    class Today(val date: String, val week: String, val items: JSONArray)
+    class Today(val date: String, val week: String, val items: JSONArray,
+        val hasSchedule: Boolean = true, val valid: Boolean = true)
 }

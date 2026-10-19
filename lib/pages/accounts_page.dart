@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../ui/theme_forms.dart';
 import '../models/course.dart';
 import '../models/homework.dart';
 import '../services/jw_config.dart';
@@ -14,8 +15,10 @@ import '../ui/adaptive.dart';
 import '../ui/dashed_line.dart';
 import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
+import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
 import 'jw_preview_page.dart';
+import 'timetable_import_confirmation.dart';
 import 'webview_login_page.dart';
 import 'zf_login_page.dart';
 
@@ -24,237 +27,708 @@ class AccountsPage extends StatelessWidget {
 
   final AppState state;
 
-  /// 各平台共用一个 WebView Cookie 罐：退出任一平台时把其它仍在登录中的
-  /// 平台会话备份并装回，只真正清掉自己这份。
-  /// [loggingOut] ∈ cx/mooc/zhs/xtx/ykt/zf。
   Future<void> _clearCookiesFor(String loggingOut) async {
-    final keep = <String>{};
-    if (loggingOut != 'cx') keep.add('https://www.chaoxing.com/');
-    if (loggingOut != 'mooc') keep.add('https://www.icourse163.org/');
-    if (loggingOut != 'ykt') {
-      // 雨课堂会话 Cookie 落 *.yuketang.cn（学校子域/pro/父域均可能），
-      // 主站与长江两个 origin 整串带回
-      keep.add('https://www.yuketang.cn/');
-      keep.add('https://pro.yuketang.cn/');
-    }
-    if (loggingOut != 'xtx') {
-      // 学堂在线会话 Cookie 落 .xuetangx.com 父域（www/裸域都可能），整串带回
-      keep.add('https://www.xuetangx.com/');
-      keep.add('https://xuetangx.com/');
-    }
-    if (loggingOut != 'zhs') {
-      // 智慧树会话 Cookie 的实际落域未经抓包确认（父域/host-only 均可能，
-      // 捕获 origin 是 onlineservice-api）：备份 CAS 入口、service 落点、
-      // API 网关与在线学堂四个 origin，整串带回不漏域
-      keep.add('https://passport.zhihuishu.com/');
-      keep.add('https://onlineservice.zhihuishu.com/');
-      keep.add('https://onlineservice-api.zhihuishu.com/');
-      keep.add('https://onlineweb.zhihuishu.com/');
-    }
-    if (loggingOut != 'zf') {
-      final zfConfig = JwStore.load();
-      final uri = zfConfig == null ? null : Uri.tryParse(zfConfig.url);
-      if (uri != null && uri.host.isNotEmpty) {
-        keep.add('${uri.scheme}://${uri.host}/');
-      }
-    }
-    await PlatformCookie.clearCookiesExcept(keep);
+    final config = loggingOut == 'zf' ? JwStore.load() : null;
+    await PlatformCookie.clearPlatformCookies(
+      loggingOut,
+      origins: config == null ? const [] : [config.url],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return StyleBackground(
-        // 玻璃样式下透明化 Scaffold，露出渐变磨砂底衬
-        child: Scaffold(
-      backgroundColor: scaffoldBgOf(context),
-      appBar: AppBar(title: appBarTitle(context, '账号')),
-      body: ListenableBuilder(
-        listenable: state,
-        builder: (context, _) => ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          children: [
-            if (state.lastSync != null)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 10),
-                child: Text(
-                  // 小票：同步时间就是收据的打印时间
-                  '${isReceiptStyle(context) ? '打印于' : '上次同步：'}'
-                  '${state.lastSync!.month}月${state.lastSync!.day}日 '
-                  '${state.lastSync!.hour.toString().padLeft(2, '0')}:'
-                  '${state.lastSync!.minute.toString().padLeft(2, '0')}',
-                  style: monoText(
-                    context,
-                    TextStyle(fontSize: 12, color: textFaint(context)),
-                  ),
+      // 玻璃样式下透明化 Scaffold，露出渐变磨砂底衬
+      child: Scaffold(
+        backgroundColor: scaffoldBgOf(context),
+        appBar: AppBar(title: appBarTitle(context, '账号')),
+        body: ListenableBuilder(
+          listenable: state,
+          builder: (context, _) => ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            children: [
+              if (!paletteOf(context).clean) ...[
+                ThemePageHeader(
+                  compact: true,
+                  title: '平台账号',
+                  kicker: 'ACCOUNTS / 06 PLATFORMS',
+                  summary: _connectionSummary,
+                  icon: Icons.link_rounded,
                 ),
-              ),
-            _accountCard(
-              context,
-              title: PlatformKind.chaoxing.label,
-              state: state.chaoxingState,
-              extra: Storage.chaoxingUid() == null ? null : 'UID ${Storage.chaoxingUid()}',
-              icon: Icons.school_rounded,
-              gradient: const [Color(0xFF3B82F6), Color(0xFF6366F1)],
-              onLogin: () => _openLogin(context, PlatformKind.chaoxing),
-              onLogout: () async {
-                await state.logoutChaoxing();
-                await _clearCookiesFor('cx');
-              },
-            ),
-            const SizedBox(height: 14),
-            _accountCard(
-              context,
-              title: PlatformKind.mooc.label,
-              state: state.moocState,
-              icon: Icons.menu_book_rounded,
-              gradient: const [Color(0xFFF43F5E), Color(0xFFF97316)],
-              onLogin: () => _openLogin(context, PlatformKind.mooc),
-              onLogout: () async {
-                await state.logoutMooc();
-                await _clearCookiesFor('mooc');
-              },
-            ),
-            const SizedBox(height: 14),
-            _accountCard(
-              context,
-              title: PlatformKind.zhihuishu.label,
-              state: state.zhihuishuState,
-              icon: Icons.park_rounded,
-              gradient: const [Color(0xFF16A34A), Color(0xFF22C55E)],
-              onLogin: () => _openLogin(context, PlatformKind.zhihuishu),
-              onLogout: () async {
-                await state.logoutZhihuishu();
-                await _clearCookiesFor('zhs');
-              },
-            ),
-            const SizedBox(height: 14),
-            _accountCard(
-              context,
-              title: PlatformKind.xuetangx.label,
-              state: state.xuetangxState,
-              icon: Icons.auto_stories_rounded,
-              gradient: const [Color(0xFF0EA5E9), Color(0xFF0284C7)],
-              onLogin: () => _openLogin(context, PlatformKind.xuetangx),
-              onLogout: () async {
-                await state.logoutXuetangx();
-                await _clearCookiesFor('xtx');
-              },
-            ),
-            const SizedBox(height: 14),
-            _accountCard(
-              context,
-              title: PlatformKind.yuketang.label,
-              state: state.yuketangState,
-              icon: Icons.cloud_rounded,
-              gradient: const [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-              onLogin: () => _openLogin(context, PlatformKind.yuketang),
-              onLogout: () async {
-                await state.logoutYuketang();
-                await _clearCookiesFor('ykt');
-              },
-            ),
-            const SizedBox(height: 14),
-            _accountCard(
-              context,
-              title: JwStore.hasConfig
-                  ? '教务系统 · ${JwStore.load()!.name}'
-                  : '教务系统',
-              state: state.zfState,
-              extra: Storage.zfXh() == null ? null : '学号 ${Storage.zfXh()}',
-              icon: Icons.view_timeline_rounded,
-              gradient: const [Color(0xFF0F6B54), Color(0xFF17997A)],
-              onLogin: () async {
-                // 接住抓取结果：此前 push 返回值被丢弃，登录+抓取全流程
-                // 走完 cookie 不落盘、课表不入库、卡片仍显示「未登录」
-                final result = await Navigator.of(context).push<Object?>(
-                  MaterialPageRoute(builder: (_) => const ZfLoginPage()),
-                );
-                if (result is! ZfCapture || !context.mounted) return;
-                final selected = await Navigator.of(context).push<List<Course>>(
-                  MaterialPageRoute(
-                    builder: (_) => JwPreviewPage(
-                      courses: result.parsed.courses,
-                      sourceLabel: result.sourceName,
+                const SizedBox(height: 20),
+              ],
+              if (state.lastSync != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, bottom: 10),
+                  child: Text(
+                    // 小票：同步时间就是收据的打印时间
+                    '${isReceiptStyle(context) ? '打印于' : '上次同步：'}'
+                    '${state.lastSync!.month}月${state.lastSync!.day}日 '
+                    '${state.lastSync!.hour.toString().padLeft(2, '0')}:'
+                    '${state.lastSync!.minute.toString().padLeft(2, '0')}',
+                    style: monoText(
+                      context,
+                      TextStyle(fontSize: 12, color: textFaint(context)),
                     ),
                   ),
-                );
-                if (selected == null || selected.isEmpty || !context.mounted) {
-                  return;
-                }
-                await state.onTimetableCaptured(
-                  cookie: result.cookie,
-                  xh: result.parsed.xh,
-                  courses: selected,
-                  rawPage: result.parsed.rawPage,
-                  semesterText: result.parsed.semesterText,
-                  detectedWeek: result.parsed.detectedWeek,
-                  source: result.sourceName,
-                  // 教务抓取是整表导入：整表替换而非同学期补课式合并
-                  //（文本/截图兜底导入才走 union）
-                  fullImport: true,
-                );
-              },
-              onLogout: () async {
-                // 退出会清掉整张课表，必须先确认（含手动课豁免说明）
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (dialogContext) => AlertDialog(
-                    title: const Text('退出教务系统'),
-                    content: const Text(
+                ),
+              _accountCard(
+                context,
+                index: 1,
+                title: PlatformKind.chaoxing.label,
+                state: state.chaoxingState,
+                extra: Storage.chaoxingUid() == null
+                    ? null
+                    : 'UID ${Storage.chaoxingUid()}',
+                icon: Icons.school_rounded,
+                gradient: const [Color(0xFF3B82F6), Color(0xFF6366F1)],
+                onLogin: () => _openLogin(context, PlatformKind.chaoxing),
+                onLogout: () async {
+                  await state.logoutChaoxing();
+                  await _clearCookiesFor('cx');
+                },
+              ),
+              const SizedBox(height: 14),
+              _accountCard(
+                context,
+                index: 2,
+                title: PlatformKind.mooc.label,
+                state: state.moocState,
+                icon: Icons.menu_book_rounded,
+                gradient: const [Color(0xFFF43F5E), Color(0xFFF97316)],
+                onLogin: () => _openLogin(context, PlatformKind.mooc),
+                onLogout: () async {
+                  await state.logoutMooc();
+                  await _clearCookiesFor('mooc');
+                },
+              ),
+              const SizedBox(height: 14),
+              _accountCard(
+                context,
+                index: 3,
+                title: PlatformKind.zhihuishu.label,
+                state: state.zhihuishuState,
+                icon: Icons.park_rounded,
+                gradient: const [Color(0xFF16A34A), Color(0xFF22C55E)],
+                onLogin: () => _openLogin(context, PlatformKind.zhihuishu),
+                onLogout: () async {
+                  await state.logoutZhihuishu();
+                  await _clearCookiesFor('zhs');
+                },
+              ),
+              const SizedBox(height: 14),
+              _accountCard(
+                context,
+                index: 4,
+                title: PlatformKind.xuetangx.label,
+                state: state.xuetangxState,
+                icon: Icons.auto_stories_rounded,
+                gradient: const [Color(0xFF0EA5E9), Color(0xFF0284C7)],
+                onLogin: () => _openLogin(context, PlatformKind.xuetangx),
+                onLogout: () async {
+                  await state.logoutXuetangx();
+                  await _clearCookiesFor('xtx');
+                },
+              ),
+              const SizedBox(height: 14),
+              _accountCard(
+                context,
+                index: 5,
+                title: PlatformKind.yuketang.label,
+                state: state.yuketangState,
+                icon: Icons.cloud_rounded,
+                gradient: const [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                onLogin: () => _openLogin(context, PlatformKind.yuketang),
+                onLogout: () async {
+                  await state.logoutYuketang();
+                  await _clearCookiesFor('ykt');
+                },
+              ),
+              const SizedBox(height: 14),
+              _accountCard(
+                context,
+                index: 6,
+                title: JwStore.hasConfig
+                    ? '教务系统 · ${JwStore.load()!.name}'
+                    : '教务系统',
+                state: state.zfState,
+                extra: Storage.zfXh() == null ? null : '学号 ${Storage.zfXh()}',
+                icon: Icons.view_timeline_rounded,
+                gradient: const [Color(0xFF0F6B54), Color(0xFF17997A)],
+                onLogin: () async {
+                  // 接住抓取结果：此前 push 返回值被丢弃，登录+抓取全流程
+                  // 走完 cookie 不落盘、课表不入库、卡片仍显示「未登录」
+                  final result = await Navigator.of(context).push<Object?>(
+                    MaterialPageRoute(builder: (_) => const ZfLoginPage()),
+                  );
+                  if (result is! ZfCapture || !context.mounted) return;
+                  final selected = await Navigator.of(context)
+                      .push<List<Course>>(
+                        MaterialPageRoute(
+                          builder: (_) => JwPreviewPage(
+                            courses: result.parsed.courses,
+                            sourceLabel: result.sourceName,
+                          ),
+                        ),
+                      );
+                  if (selected == null ||
+                      selected.isEmpty ||
+                      !context.mounted) {
+                    return;
+                  }
+                  final fullImport = await confirmTimetableImport(
+                    context,
+                    selected: selected,
+                    existing: Storage.courses(),
+                    sourceLabel: result.sourceName,
+                    requiresReplacement: state.timetableRequiresReplacement(
+                      xh: result.parsed.xh,
+                      semesterText: result.parsed.semesterText,
+                    ),
+                    replacementPreview: state.timetableReplacement(
+                      selected,
+                      xh: result.parsed.xh,
+                      semesterText: result.parsed.semesterText,
+                    ),
+                  );
+                  if (fullImport == null || !context.mounted) return;
+                  await state.onTimetableCaptured(
+                    cookie: result.cookie,
+                    xh: result.parsed.xh,
+                    courses: selected,
+                    rawPage: result.parsed.rawPage,
+                    semesterText: result.parsed.semesterText,
+                    detectedWeek: result.parsed.detectedWeek,
+                    source: result.sourceName,
+                    // 教务抓取是整表导入：整表替换而非同学期补课式合并
+                    //（文本/截图兜底导入才走 union）
+                    fullImport: fullImport,
+                  );
+                },
+                onLogout: () async {
+                  // 退出会清掉整张课表，必须先确认（含手动课豁免说明）
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (dialogContext) => ThemedAlertDialog(
+                      title: const Text('退出教务系统'),
+                      content: const Text(
                         '将清除教务登录状态、已导入的课表和开学日期校准；'
-                        '手动添加的课程会保留（颜色恢复默认）。确定退出？'),
-                    actions: [
-                      TextButton(
+                        '手动添加的课程会保留（颜色恢复默认）。确定退出？',
+                      ),
+                      actions: [
+                        TextButton(
                           onPressed: () =>
                               Navigator.of(dialogContext).pop(false),
-                          child: const Text('取消')),
-                      FilledButton(
+                          child: const Text('取消'),
+                        ),
+                        FilledButton(
                           onPressed: () =>
                               Navigator.of(dialogContext).pop(true),
-                          child: const Text('退出')),
-                    ],
+                          child: const Text('退出'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (ok != true) return;
+                  // logoutZf 清除配置前保留目标域，不能在退出后才查到空域。
+                  final targetUrl = JwStore.load()?.url;
+                  await state.logoutZf();
+                  await PlatformCookie.clearPlatformCookies(
+                    'zf',
+                    origins: targetUrl == null ? const [] : [targetUrl],
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+              // 水墨：卡列与落款之间一笔飞白收束
+              if (isInkStyle(context))
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
+                  child: BrushLine(
+                    color: textSecondary(context).withValues(alpha: 0.30),
+                    thickness: 2.4,
                   ),
-                );
-                if (ok != true) return;
-                await state.logoutZf();
-                await _clearCookiesFor('zf');
-              },
-            ),
-            const SizedBox(height: 20),
-            // 水墨：卡列与落款之间一笔飞白收束
-            if (isInkStyle(context))
-              Padding(
-                padding: const EdgeInsets.only(left: 4, right: 4, bottom: 14),
-                child: BrushLine(
-                  color: textSecondary(context).withValues(alpha: 0.30),
-                  thickness: 2.4,
+                ),
+              Text(
+                '登录在 App 内嵌的官方页面中完成，Cookie 仅保存在本机。\n'
+                '作业通只读取你自己账号的作业列表，不会提交任何数据。\n'
+                '教务系统需校园网或学校 VPN 环境。',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Colors.grey.shade500,
+                  height: 1.7,
                 ),
               ),
-            Text(
-              '登录在 App 内嵌的官方页面中完成，Cookie 仅保存在本机。\n'
-              '作业通只读取你自己账号的作业列表，不会提交任何数据。\n'
-              '教务系统需校园网或学校 VPN 环境。',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: Colors.grey.shade500,
-                height: 1.7,
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-        ),
     );
   }
 
   Future<void> _openLogin(BuildContext context, PlatformKind platform) async {
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => WebviewLoginPage(platform: platform, state: state),
-    ));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => WebviewLoginPage(platform: platform, state: state),
+      ),
+    );
+  }
+
+  String get _connectionSummary {
+    final accounts = [
+      state.chaoxingState,
+      state.moocState,
+      state.zhihuishuState,
+      state.xuetangxState,
+      state.yuketangState,
+      state.zfState,
+    ];
+    final connected = accounts.where((s) => s == AccountState.ok).length;
+    final expired = accounts.where((s) => s == AccountState.needRelogin).length;
+    return '已连接 $connected / 6 · 待重新登录 $expired';
+  }
+
+  Widget _themedAccountCard(
+    BuildContext context, {
+    required int index,
+    required String title,
+    required String label,
+    required Color statusColor,
+    required AccountState state,
+    required String? extra,
+    required IconData icon,
+    required VoidCallback onLogin,
+    required VoidCallback onLogout,
+  }) {
+    final pal = paletteOf(context);
+    final number = index.toString().padLeft(2, '0');
+    final swatch = Color.lerp(
+      pal.card,
+      Tokens.avatarSoftColor(title),
+      isDark(context) ? 0.24 : 0.16,
+    )!;
+    final titleStyle = TextStyle(
+      color: pal.ink,
+      fontWeight: FontWeight.w800,
+      fontSize: pal.editorial || pal.inkWash ? 22 : 18,
+      height: 1.4,
+      fontFamily: pal.paper || pal.inkWash ? 'serif' : null,
+    );
+    Widget caption(String value, {Color? color}) => Text(
+      value,
+      style: monoText(
+        context,
+        TextStyle(
+          color: color ?? pal.ink2,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.7,
+          height: 1.6,
+        ),
+      ),
+    );
+    Widget platform({bool centered = false, bool showIcon = true}) {
+      final name = Text(
+        title,
+        style: titleStyle,
+        textAlign: centered ? TextAlign.center : TextAlign.start,
+      );
+      if (centered) {
+        return Column(
+          children: [
+            if (showIcon) ...[
+              Icon(icon, size: 30, color: pal.ink),
+              const SizedBox(height: 8),
+            ],
+            name,
+          ],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showIcon) ...[
+            Icon(icon, size: 28, color: pal.ink),
+            const SizedBox(width: 12),
+          ],
+          Expanded(child: name),
+        ],
+      );
+    }
+
+    // A status always wraps independently from the identity. Long school names,
+    // UID values and an expired session must all stay readable at large text.
+    Widget status({bool centered = false, bool bracketed = false}) => Column(
+      crossAxisAlignment: centered
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
+      children: [
+        Text(
+          bracketed ? '[ $label ]' : label,
+          textAlign: centered ? TextAlign.center : TextAlign.start,
+          style: monoText(
+            context,
+            TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              height: 1.6,
+              color: statusColor,
+            ),
+          ),
+        ),
+        if (extra != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            extra,
+            textAlign: centered ? TextAlign.center : TextAlign.start,
+            style: monoText(
+              context,
+              TextStyle(fontSize: 12, height: 1.6, color: pal.ink2),
+            ),
+          ),
+        ],
+      ],
+    );
+
+    Widget actions() => Row(
+      children: [
+        Expanded(
+          child: state == AccountState.ok
+              ? OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                  onPressed: onLogin,
+                  child: const Text('重新登录'),
+                )
+              : FilledButton(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                  onPressed: onLogin,
+                  child: Text(
+                    state == AccountState.needRelogin ? '重新登录' : '登录',
+                  ),
+                ),
+        ),
+        if (state != AccountState.notLoggedIn) ...[
+          const SizedBox(width: 6),
+          TextButton(onPressed: onLogout, child: const Text('退出')),
+        ],
+      ],
+    );
+
+    Widget rule() => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Divider(height: 1, thickness: pal.editorial ? 2 : 1),
+    );
+    Widget dash() => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: DashedLine(color: pal.ink2.withValues(alpha: 0.5)),
+    );
+    Widget tag(String value, {bool solid = false}) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: solid ? pal.accentFill : null,
+        border: Border.all(color: pal.accent),
+        borderRadius: BorderRadius.circular(pal.morandi ? 20 : 1),
+      ),
+      child: caption(value, color: solid ? pal.onAccent : pal.accent),
+    );
+
+    late final Widget content;
+    if (pal.morandi) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: swatch,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                caption('PLATFORM $number / 06'),
+                const SizedBox(height: 14),
+                platform(),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            child: status(),
+          ),
+          actions(),
+        ],
+      );
+    } else if (pal.pixel) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            color: pal.ink,
+            padding: const EdgeInsets.all(9),
+            child: caption('ACCOUNT_$number.EXE  [ + ]', color: pal.card),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                color: swatch,
+                child: Icon(icon, color: pal.ink, size: 30),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    caption('PLAYER LINK $number'),
+                    platform(showIcon: false),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              border: Border.all(color: pal.ink, width: 2),
+            ),
+            child: status(bracketed: true),
+          ),
+          const SizedBox(height: 12),
+          actions(),
+        ],
+      );
+    } else if (pal.inkWash) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    caption('平台 · $number'),
+                    const SizedBox(height: 14),
+                    platform(showIcon: false),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              tag('账号\n$number', solid: true),
+            ],
+          ),
+          const SizedBox(height: 10),
+          BrushLine(color: pal.ink.withValues(alpha: 0.35), thickness: 2.3),
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, size: 24, color: pal.ink2),
+                const SizedBox(width: 14),
+                Expanded(child: status()),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          actions(),
+        ],
+      );
+    } else if (pal.paper) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          caption('账号档案  /  FILE $number'),
+          dash(),
+          platform(),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: pal.ink2, width: 2)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [caption('连接记录'), const SizedBox(height: 4), status()],
+            ),
+          ),
+          dash(),
+          actions(),
+        ],
+      );
+    } else if (pal.comic) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Align(alignment: Alignment.centerRight, child: tag('LINK!  $number')),
+          const SizedBox(height: 12),
+          platform(),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: swatch,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+                bottomRight: Radius.circular(18),
+              ),
+              border: Border.all(color: pal.cardBorder, width: 2),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [caption('连接小报'), status()],
+            ),
+          ),
+          const SizedBox(height: 12),
+          actions(),
+        ],
+      );
+    } else if (pal.receipt) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(child: caption('CONNECTION RECEIPT')),
+          const SizedBox(height: 6),
+          Center(child: caption('平台凭单 $number / 06')),
+          const SizedBox(height: 10),
+          platform(centered: true),
+          dash(),
+          Center(child: caption('连接状态 / STATUS')),
+          const SizedBox(height: 6),
+          status(centered: true),
+          dash(),
+          actions(),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 22,
+            child: CustomPaint(
+              painter: ReceiptBarcodePainter(
+                color: pal.ink,
+                seed: stableHash(title),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Center(child: caption('NO.${stableHash(title).abs() % 9000 + 1000}')),
+        ],
+      );
+    } else if (pal.editorial) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            number,
+            style: TextStyle(
+              fontSize: 42,
+              height: 1,
+              fontWeight: FontWeight.w900,
+              color: pal.ink,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.only(left: 12),
+            decoration: BoxDecoration(
+              border: Border(left: BorderSide(color: pal.accent, width: 4)),
+            ),
+            child: platform(showIcon: false),
+          ),
+          rule(),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 22, color: pal.ink2),
+              const SizedBox(width: 10),
+              Expanded(child: status()),
+            ],
+          ),
+          rule(),
+          actions(),
+        ],
+      );
+    } else if (pal.terminal) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.terminal, size: 16, color: pal.accent),
+              const SizedBox(width: 8),
+              Expanded(child: caption('account_$number.sh')),
+              caption('─ □ ×'),
+            ],
+          ),
+          rule(),
+          caption(r'$ connect --platform'),
+          const SizedBox(height: 10),
+          platform(),
+          const SizedBox(height: 10),
+          caption('> session.status'),
+          const SizedBox(height: 6),
+          status(bracketed: true),
+          const SizedBox(height: 12),
+          caption(r'$ action'),
+          const SizedBox(height: 8),
+          actions(),
+        ],
+      );
+    } else {
+      // Journal: tape, blue-ink ruling and paired stamps make each connection
+      // read as a notebook entry rather than another generic settings card.
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Align(
+            alignment: Alignment.center,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 5),
+              color: pal.accentFill.withValues(alpha: 0.12),
+              child: caption('账号手记 · $number'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          platform(),
+          rule(),
+          status(),
+          rule(),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [tag('平台 $number'), tag('本机保存')],
+          ),
+          const SizedBox(height: 10),
+          actions(),
+        ],
+      );
+    }
+    return ThemePanel(
+      key: ValueKey('account-$index'),
+      seed: 'account-$index',
+      padding: EdgeInsets.all(pal.morandi ? 12 : 14),
+      child: content,
+    );
   }
 
   Widget _accountCard(
     BuildContext context, {
+    required int index,
     required String title,
     required AccountState state,
     String? extra,
@@ -270,29 +744,44 @@ class AccountsPage extends StatelessWidget {
       AccountState.notLoggedIn => ('未登录', Colors.grey.shade500),
     };
 
+    if (!pal.clean) {
+      return _themedAccountCard(
+        context,
+        index: index,
+        title: title,
+        label: label,
+        statusColor: statusColor,
+        state: state,
+        extra: extra,
+        icon: icon,
+        onLogin: onLogin,
+        onLogout: onLogout,
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(18),
-      decoration: inkWashFill(context, cardRadius(context)) ??
+      decoration:
+          inkWashFill(context, cardRadius(context)) ??
           (pal.pixel
               // 像素：素面方形卡，勾线交给 pixelFrame 窗框
               ? BoxDecoration(color: cardColor(context))
               : pal.receipt
-                  // 小票：整卡是一张热敏收据（撕纸底边）
-                  ? receiptTear(context)
-                  : pal.editorial
-                      // 杂志：去盒化版块，规则线画在前景
-                      ? BoxDecoration(color: cardColor(context))
-                      : BoxDecoration(
-                          color: cardColor(context),
-                          borderRadius:
-                              BorderRadius.circular(cardRadius(context)),
-                          border: cardBorderOf(context),
-                        )),
+              // 小票：整卡是一张热敏收据（撕纸底边）
+              ? receiptTear(context)
+              : pal.editorial
+              // 杂志：去盒化版块，规则线画在前景
+              ? BoxDecoration(color: cardColor(context))
+              : BoxDecoration(
+                  color: cardColor(context),
+                  borderRadius: BorderRadius.circular(cardRadius(context)),
+                  border: cardBorderOf(context),
+                )),
       foregroundDecoration: pal.pixel
           ? pixelFrame(context, cardRadius(context))
           : paperInnerRing(context, cardRadius(context)) ??
-              morandiCream(context, cardRadius(context)) ??
-              editorialRules(context),
+                morandiCream(context, cardRadius(context)) ??
+                editorialRules(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -306,11 +795,12 @@ class AccountsPage extends StatelessWidget {
                 // 墨石不用笔锋圆角——对角大小圆在 46px 小盒+描边上读出来
                 // 是一片叶子（用户实测），笔锋只留给大卡面
                 decoration: BoxDecoration(
-                  borderRadius: (isPixelStyle(context) ||
-                          isReceiptStyle(context))
+                  borderRadius:
+                      (isPixelStyle(context) || isReceiptStyle(context))
                       ? BorderRadius.circular(2)
                       : BorderRadius.circular(14),
-                  gradient: (isInkStyle(context) ||
+                  gradient:
+                      (isInkStyle(context) ||
                           isComicStyle(context) ||
                           isPixelStyle(context))
                       ? null
@@ -321,29 +811,30 @@ class AccountsPage extends StatelessWidget {
                         ),
                   color: isInkStyle(context)
                       ? (isDark(context)
-                          ? Colors.white.withValues(alpha: 0.10)
-                          : Colors.black.withValues(alpha: 0.08))
+                            ? Colors.white.withValues(alpha: 0.10)
+                            : Colors.black.withValues(alpha: 0.08))
                       : isComicStyle(context) || isPixelStyle(context)
-                          ? (isDark(context)
-                              ? const Color(0xFF2E1E26)
-                              : Colors.white)
-                          : null,
+                      ? (isDark(context)
+                            ? const Color(0xFF2E1E26)
+                            : Colors.white)
+                      : null,
                   border: isInkStyle(context)
                       ? Border.all(
-                          color: (isDark(context)
-                                  ? Colors.white
-                                  : Colors.black)
-                              .withValues(alpha: 0.25))
+                          color: (isDark(context) ? Colors.white : Colors.black)
+                              .withValues(alpha: 0.25),
+                        )
                       : isComicStyle(context) || isPixelStyle(context)
-                          ? Border.all(
-                              color: paletteOf(context).cardBorder, width: 1.4)
-                          : isReceiptStyle(context)
-                              ? Border.all(
-                                  color: paletteOf(context)
-                                      .cardBorder
-                                      .withValues(alpha: 0.6),
-                                  width: 1)
-                              : null,
+                      ? Border.all(
+                          color: paletteOf(context).cardBorder,
+                          width: 1.4,
+                        )
+                      : isReceiptStyle(context)
+                      ? Border.all(
+                          color: paletteOf(context).cardBorder
+                              .withValues(alpha: 0.6),
+                          width: 1,
+                        )
+                      : null,
                   boxShadow: isComicStyle(context) || isPixelStyle(context)
                       ? [
                           BoxShadow(
@@ -387,9 +878,12 @@ class AccountsPage extends StatelessWidget {
                           decoration: isReceiptStyle(context)
                               ? BoxDecoration(
                                   color: statusColor,
-                                  borderRadius: BorderRadius.circular(1.5))
+                                  borderRadius: BorderRadius.circular(1.5),
+                                )
                               : BoxDecoration(
-                                  color: statusColor, shape: BoxShape.circle),
+                                  color: statusColor,
+                                  shape: BoxShape.circle,
+                                ),
                         ),
                         const SizedBox(width: 6),
                         Expanded(
@@ -398,8 +892,7 @@ class AccountsPage extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: monoText(
                               context,
-                              TextStyle(
-                                  fontSize: 12.5, color: statusColor),
+                              TextStyle(fontSize: 12.5, color: statusColor),
                             ),
                           ),
                         ),
@@ -463,7 +956,8 @@ class AccountsPage extends StatelessWidget {
           if (isReceiptStyle(context)) ...[
             const SizedBox(height: 12),
             DashedLine(
-              color: textPrimary(context).withValues(alpha: isDark(context) ? 0.30 : 0.28),
+              color: textPrimary(context)
+                  .withValues(alpha: isDark(context) ? 0.30 : 0.28),
               thickness: 1,
             ),
             const SizedBox(height: 8),
@@ -488,10 +982,11 @@ class AccountsPage extends StatelessWidget {
                   style: monoText(
                     context,
                     TextStyle(
-                        fontSize: 9.5,
-                        letterSpacing: 1.2,
-                        fontWeight: FontWeight.w600,
-                        color: textSecondary(context)),
+                      fontSize: 9.5,
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                      color: textSecondary(context),
+                    ),
                   ),
                 ),
               ],

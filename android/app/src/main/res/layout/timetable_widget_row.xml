@@ -1,69 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 今日课表小组件的课程行：时间 | 课程名/教室。
-     进行中的课由代码把整行背景换成绿色版 widget_row_bg_now。
-     文字带柔和暗影：玻璃体半透，暗影在深浅壁纸上都提升文字对比 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/tt_row"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="3dp"
-    android:layout_marginBottom="3dp"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:background="@drawable/widget_row_bg"
-    android:paddingStart="10dp"
-    android:paddingEnd="10dp"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp">
-
-    <TextView
-        android:id="@+id/tt_time"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:minWidth="36dp"
-        android:text=""
-        android:textSize="12sp"
-        android:textStyle="bold"
-        android:shadowColor="#66000000"
-        android:shadowRadius="6"
-        android:shadowDx="0"
-        android:shadowDy="0"
-        android:textColor="#0F6B54"/>
-
-    <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:layout_marginStart="10dp"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/tt_name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:text=""
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:shadowColor="#66000000"
-            android:shadowRadius="6"
-            android:shadowDx="0"
-            android:shadowDy="0"
-            android:textColor="#1F2937"/>
-
-        <TextView
-            android:id="@+id/tt_room"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:text=""
-            android:textSize="10sp"
-            android:shadowColor="#59000000"
-            android:shadowRadius="6"
-            android:shadowDx="0"
-            android:shadowDy="0"
-            android:textColor="#9CA3AF"/>
-    </LinearLayout>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/tt_row" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:gravity="center_vertical" android:background="@drawable/widget_study_row" android:padding="7dp" android:layout_marginBottom="5dp">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+<TextView android:hyphenationFrequency="none" android:id="@+id/tt_name" android:breakStrategy="balanced" android:layout_width="0dp" android:layout_height="wrap_content" android:text="" android:textSize="14sp" android:textColor="#151B2B" android:includeFontPadding="false" android:layout_weight="1" android:maxLines="2" android:ellipsize="end" android:textStyle="bold"/>
+<TextView android:breakStrategy="high_quality" android:hyphenationFrequency="none" android:id="@+id/tt_status" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="" android:textSize="11sp" android:textColor="#514112" android:includeFontPadding="false" android:layout_marginStart="6dp" android:maxLines="1"/>
+</LinearLayout>
+<TextView android:breakStrategy="high_quality" android:hyphenationFrequency="none" android:id="@+id/tt_time" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="3dp" android:maxLines="1" android:ellipsize="end"/>
+<TextView android:breakStrategy="high_quality" android:hyphenationFrequency="none" android:id="@+id/tt_room" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="3dp" android:maxLines="2" android:ellipsize="end"/>
 </LinearLayout>

@@ -1,6 +1,8 @@
 import Flutter
 import UIKit
 import WebKit
+import Security
+import UserNotifications
 
 // 凭据存 Keychain（service 固定，account 为键名）
 enum SecureBox {
@@ -12,23 +14,35 @@ enum SecureBox {
     ]
   }
 
-  static func read(_ key: String) -> String? {
+  static func read(_ key: String) throws -> String? {
     var item: CFTypeRef?
-    let status = SecItemCopyMatching(baseQuery(key) as CFDictionary, &item)
-    guard status == errSecSuccess, let data = item as? Data else { return nil }
-    return String(data: data, encoding: .utf8)
+    var query = baseQuery(key)
+    query[kSecReturnData as String] = true
+    query[kSecMatchLimit as String] = kSecMatchLimitOne
+    let status = SecItemCopyMatching(query as CFDictionary, &item)
+    if status == errSecItemNotFound { return nil }
+    guard status == errSecSuccess, let data = item as? Data,
+          let value = String(data: data, encoding: .utf8) else {
+      throw NSError(domain: NSOSStatusErrorDomain, code: Int(status == errSecSuccess ? errSecDecode : status))
+    }
+    return value
   }
 
-  static func write(_ key: String, _ value: String) {
-    var attrs = baseQuery(key)
-    attrs[kSecValueData as String] = value.data(using: .utf8) ?? Data()
-    attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-    SecItemDelete(baseQuery(key) as CFDictionary)
-    SecItemAdd(attrs as CFDictionary, nil)
+  @discardableResult static func write(_ key: String, _ value: String) -> Bool {
+    let changes: [String: Any] = [
+      kSecValueData as String: value.data(using: .utf8) ?? Data(),
+      kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+    ]
+    let status = SecItemUpdate(baseQuery(key) as CFDictionary, changes as CFDictionary)
+    if status == errSecSuccess { return true }
+    if status != errSecItemNotFound { return false }
+    let attrs = baseQuery(key).merging(changes) { _, new in new }
+    return SecItemAdd(attrs as CFDictionary, nil) == errSecSuccess
   }
 
-  static func delete(_ key: String) {
-    SecItemDelete(baseQuery(key) as CFDictionary)
+  @discardableResult static func delete(_ key: String) -> Bool {
+    let status = SecItemDelete(baseQuery(key) as CFDictionary)
+    return status == errSecSuccess || status == errSecItemNotFound
   }
 }
 
@@ -38,10 +52,15 @@ enum SecureBox {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    if let controller = window?.rootViewController as? FlutterViewController {
+    UNUserNotificationCenter.current().delegate = self
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
       let channel = FlutterMethodChannel(
         name: "homework_radar/platform",
-        binaryMessenger: controller.binaryMessenger)
+        binaryMessenger: engineBridge.applicationRegistrar.messenger())
       channel.setMethodCallHandler { (call, result) in
         switch call.method {
         case "getCookie":
@@ -60,8 +79,26 @@ enum SecureBox {
             result(parts.isEmpty ? nil : parts.joined(separator: "; "))
           }
         case "clearCookies":
-          WKWebsiteDataStore.default().removeAllCookies { _ in
+          WKWebsiteDataStore.default().removeData(ofTypes: [WKWebsiteDataTypeCookies],
+              modifiedSince: .distantPast) {
             result(true)
+          }
+        case "clearDomainCookies":
+          let domains = (call.arguments as? [String: Any])?["domains"] as? [String] ?? []
+          let store = WKWebsiteDataStore.default().httpCookieStore
+          store.getAllCookies { cookies in
+            let selected = cookies.filter { cookie in
+              let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+              return domains.contains { root in
+                domain == root || domain.hasSuffix("." + root) || root.hasSuffix("." + domain)
+              }
+            }
+            let group = DispatchGroup()
+            for cookie in selected {
+              group.enter()
+              store.delete(cookie) { group.leave() }
+            }
+            group.notify(queue: .main) { result(true) }
           }
         case "setCookie":
           // 与 Android 端 setCookie 对齐：退出任一平台时把其它平台的会话
@@ -89,24 +126,22 @@ enum SecureBox {
           }
         case "secureRead":
           let key = (call.arguments as? [String: Any])?["key"] as? String ?? ""
-          result(SecureBox.read(key))
+          do { result(try SecureBox.read(key)) }
+          catch { result(FlutterError(code: "secure", message: "Keychain read failed", details: nil)) }
         case "secureWrite":
           let args = call.arguments as? [String: Any]
-          SecureBox.write(args?["key"] as? String ?? "", args?["value"] as? String ?? "")
-          result(true)
+          if SecureBox.write(args?["key"] as? String ?? "", args?["value"] as? String ?? "") {
+            result(true)
+          } else {
+            result(FlutterError(code: "secure", message: "Keychain write failed", details: nil))
+          }
         case "secureDelete":
           let key = (call.arguments as? [String: Any])?["key"] as? String ?? ""
-          SecureBox.delete(key)
-          result(true)
+          if SecureBox.delete(key) { result(true) }
+          else { result(FlutterError(code: "secure", message: "Keychain delete failed", details: nil)) }
         default:
           result(FlutterMethodNotImplemented)
         }
       }
-    }
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-  }
-
-  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
   }
 }

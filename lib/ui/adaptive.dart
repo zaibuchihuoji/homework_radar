@@ -11,6 +11,8 @@ import 'tokens.dart';
 
 bool isDark(BuildContext c) => Theme.of(c).brightness == Brightness.dark;
 
+bool isCleanStyle(BuildContext c) => _pal(c).clean;
+
 StylePalette _pal(BuildContext c) => paletteOf(c);
 
 Color bgColor(BuildContext c) => _pal(c).bg;
@@ -272,8 +274,7 @@ Decoration? editorialRules(BuildContext c) {
   if (!pal.editorial) return null;
   return EditorialRulesDecoration(
     rule: pal.cardBorder,
-    hairline: pal.hairline,
-  );
+    hairline: pal.hairline);
 }
 
 class EditorialRulesDecoration extends Decoration {
@@ -301,7 +302,8 @@ class _EditorialRulesPainter extends BoxPainter {
     // Oxford 双线：粗线压顶，隔 2px 一道细线——报纸版块的经典记号
     canvas.drawRect(Rect.fromLTWH(rect.left, rect.top, rect.width, 2.2), rp);
     canvas.drawRect(
-        Rect.fromLTWH(rect.left, rect.top + 4.2, rect.width, 1), rp);
+        Rect.fromLTWH(rect.left, rect.top + 4.2, rect.width, 1), rp,
+    );
     canvas.drawRect(
       Rect.fromLTWH(rect.left, rect.bottom - 1, rect.width, 1),
       Paint()..color = d.rule.withValues(alpha: 0.35),
@@ -473,6 +475,7 @@ TextStyle inkTitle(BuildContext c, TextStyle base) {
 /// 像素=对角硬投影（按键立体感）；莫兰迪=雾面软影；其余=品牌光晕。
 List<BoxShadow> primaryButtonShadow(BuildContext c) {
   final pal = _pal(c);
+  if (pal.clean) return const [];
   if (pal.comic) {
     return [
       BoxShadow(

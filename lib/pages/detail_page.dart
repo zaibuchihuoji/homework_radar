@@ -12,6 +12,7 @@ import '../ui/adaptive.dart';
 import '../ui/hw_card.dart';
 import '../ui/ink_wash.dart';
 import '../ui/tokens.dart';
+import '../ui/style_background.dart';
 
 class HomeworkDetailPage extends StatefulWidget {
   const HomeworkDetailPage({super.key, required this.homeworkId});
@@ -60,6 +61,17 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final state = appStateForHome;
+    if (state != null) {
+      return ListenableBuilder(
+        listenable: state,
+        builder: (context, _) => _buildContent(context),
+      );
+    }
+    return _buildContent(context);
+  }
+
+  Widget _buildContent(BuildContext context) {
     final hw = _find();
     if (hw == null) {
       return Scaffold(
@@ -68,144 +80,204 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
       );
     }
     final pal = paletteOf(context);
-    final statusColor = hwStatusColor(hw);
-    return Scaffold(
-      backgroundColor: bgColor(context),
-      appBar: AppBar(
-          title: appBarTitle(
-        context,
-        hw.course.isEmpty ? '作业详情' : hw.course,
-      )),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: inkWashFill(context, cardRadius(context) + 2) ??
-                (pal.pixel
-                    ? BoxDecoration(color: cardColor(context))
-                    : pal.receipt
-                        ? receiptTear(context)
-                        : pal.editorial
-                            ? BoxDecoration(color: cardColor(context))
-                            : BoxDecoration(
-                                color: cardColor(context),
-                                borderRadius: BorderRadius.circular(
-                                    cardRadius(context) + 2),
-                                border: cardBorderOf(context),
-                              )),
-            foregroundDecoration: paperInnerRing(context, cardRadius(context) + 2) ??
-                morandiCream(context, cardRadius(context) + 2) ??
-                editorialRules(context),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(hw.title,
+    final statusColor = hwIsDone(hw)
+        ? pal.accent
+        : hwIsOverdue(hw)
+        ? (isDark(context) ? Tokens.dangerDark : Tokens.danger)
+        : pal.ink2;
+    final dateColor = hw.dueAt == null || hwIsDone(hw)
+        ? pal.ink2
+        : hwDueTone(hw, dark: isDark(context)).$1;
+    return StyleBackground(
+      child: Scaffold(
+        backgroundColor: scaffoldBgOf(context),
+        appBar: AppBar(
+          title: appBarTitle(context, hw.course.isEmpty ? '作业详情' : hw.course),
+        ),
+        body: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration:
+                  inkWashFill(context, cardRadius(context) + 2) ??
+                  (pal.pixel
+                      ? BoxDecoration(color: cardColor(context))
+                      : pal.receipt
+                      ? receiptTear(context)
+                      : pal.editorial
+                      ? BoxDecoration(color: cardColor(context))
+                      : BoxDecoration(
+                          color: cardColor(context),
+                          borderRadius: BorderRadius.circular(
+                            cardRadius(context) + 2,
+                          ),
+                          border: cardBorderOf(context),
+                        )),
+              foregroundDecoration:
+                  paperInnerRing(context, cardRadius(context) + 2) ??
+                  morandiCream(context, cardRadius(context) + 2) ??
+                  pixelFrame(context, cardRadius(context) + 2) ??
+                  editorialRules(context),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    hw.title,
                     style: inkTitle(
                       context,
                       serifTitle(
                         context,
                         TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: textPrimary(context),
-                            height: 1.3),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          color: textPrimary(context),
+                          height: 1.3,
+                        ),
                       ),
-                    )),
-                // 水墨：题下飞白收笔，再挂信息行
-                if (isInkStyle(context)) ...[
-                  const SizedBox(height: 9),
-                  BrushLine(
-                    color: textSecondary(context).withValues(alpha: 0.35),
-                    thickness: 2.6,
+                    ),
                   ),
-                  const SizedBox(height: 11),
-                ] else
-                  const SizedBox(height: 14),
-                _row(
+                  // 水墨：题下飞白收笔，再挂信息行
+                  if (isInkStyle(context)) ...[
+                    const SizedBox(height: 9),
+                    BrushLine(
+                      color: textSecondary(context).withValues(alpha: 0.35),
+                      thickness: 2.6,
+                    ),
+                    const SizedBox(height: 11),
+                  ] else
+                    const SizedBox(height: 14),
+                  _row(
                     context,
                     Icons.schedule_rounded,
                     '截止时间',
                     hw.dueAt == null
                         ? '未设置'
                         : HomeworkItem.formatDueTime(hw.dueAt!),
-                    statusColor),
-                const SizedBox(height: 10),
-                _row(context, Icons.info_outline_rounded, '状态', hwStatusLabel(hw),
-                    statusColor),
-                if (hw.score != null) ...[
+                    dateColor,
+                  ),
                   const SizedBox(height: 10),
                   _row(
+                    context,
+                    Icons.info_outline_rounded,
+                    '状态',
+                    hwStatusLabel(hw),
+                    statusColor,
+                  ),
+                  if (hw.score != null) ...[
+                    const SizedBox(height: 10),
+                    _row(
                       context,
                       Icons.grade_rounded,
                       '得分',
                       '${HomeworkItem.scoreText(hw.score)} 分',
-                      statusColor),
-                ],
-                _row(context, Icons.link_rounded, '平台', hw.platform.label,
-                    textSecondary(context)),
-              ],
-            ),
-          ),
-          if (hw.note != null && hw.note!.trim().isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: inkWashFill(context, cardRadius(context) + 2) ??
-                  (pal.receipt
-                      ? receiptTear(context)
-                      : pal.editorial
-                          ? BoxDecoration(color: cardColor(context))
-                          : BoxDecoration(
-                              color: cardColor(context),
-                              borderRadius: BorderRadius.circular(
-                                  cardRadius(context) + 2),
-                              border: cardBorderOf(context),
-                            )),
-              foregroundDecoration:
-                  paperInnerRing(context, cardRadius(context) + 2) ??
-                      morandiCream(context, cardRadius(context) + 2) ??
-                      editorialRules(context),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('备注',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: textSecondary(context))),
-                  const SizedBox(height: 6),
-                  Text(hw.note!.trim(),
-                      style: TextStyle(
-                          fontSize: 14, color: textPrimary(context), height: 1.5)),
+                      statusColor,
+                    ),
+                  ],
+                  _row(
+                    context,
+                    Icons.link_rounded,
+                    '平台',
+                    hw.platform.label,
+                    textSecondary(context),
+                  ),
                 ],
               ),
             ),
+            if (hw.note != null && hw.note!.trim().isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration:
+                    inkWashFill(context, cardRadius(context) + 2) ??
+                    (pal.receipt
+                        ? receiptTear(context)
+                        : pal.editorial
+                        ? BoxDecoration(color: cardColor(context))
+                        : BoxDecoration(
+                            color: cardColor(context),
+                            borderRadius: BorderRadius.circular(
+                              cardRadius(context) + 2,
+                            ),
+                            border: cardBorderOf(context),
+                          )),
+                foregroundDecoration:
+                    paperInnerRing(context, cardRadius(context) + 2) ??
+                    morandiCream(context, cardRadius(context) + 2) ??
+                    editorialRules(context),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '备注',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: textSecondary(context),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      hw.note!.trim(),
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: textPrimary(context),
+                        height: 1.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 18),
+            if (hw.platform == PlatformKind.manual && appStateForHome != null)
+              FilledButton.icon(
+                icon: Icon(hwIsDone(hw) ? Icons.undo : Icons.check),
+                label: Text(hwIsDone(hw) ? '标记未完成' : '标记完成'),
+                onPressed: () => appStateForHome!.setHomeworkStatus(
+                  hw.id,
+                  hwIsDone(hw) ? HwStatus.todo : HwStatus.done,
+                ),
+              ),
+            Text(
+              hw.platform == PlatformKind.manual
+                  ? '手动作业的完成状态仅保存在本机。'
+                  : '如需作答或提交，请到对应平台的官方 App 中完成。',
+              style: TextStyle(fontSize: 12.5, color: textSecondary(context)),
+            ),
           ],
-          const SizedBox(height: 18),
-          Text(
-            '如需作答或提交，请到对应平台的官方 App 中完成。',
-            style: TextStyle(fontSize: 12.5, color: textSecondary(context)),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _row(BuildContext context, IconData icon, String label, String value,
-      Color valueColor) {
+  Widget _row(
+    BuildContext context,
+    IconData icon,
+    String label,
+    String value,
+    Color valueColor,
+  ) {
     return Row(
       children: [
         Icon(icon, size: 16, color: textSecondary(context)),
         const SizedBox(width: 8),
-        Text(label,
-            style: TextStyle(fontSize: 13.5, color: textSecondary(context))),
-        const Spacer(),
-        Text(value,
+        Text(
+          label,
+          style: TextStyle(fontSize: 13.5, color: textSecondary(context)),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
             style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                color: valueColor)),
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: valueColor,
+            ),
+          ),
+        ),
       ],
     );
   }

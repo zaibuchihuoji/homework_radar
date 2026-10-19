@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only glyph edges receive a halo. No panel fill or text metrics here. -->
+    <style name="WidgetTextHaloDark" parent="">
+        <item name="android:shadowColor">#DD000000</item>
+        <item name="android:shadowRadius">2.0</item>
+        <item name="android:shadowDx">0.0</item>
+        <item name="android:shadowDy">0.0</item>
+    </style>
+    <style name="WidgetTextHaloLight" parent="">
+        <item name="android:shadowColor">#EEFFFFFF</item>
+        <item name="android:shadowRadius">2.0</item>
+        <item name="android:shadowDx">0.0</item>
+        <item name="android:shadowDy">0.0</item>
+    </style>
+</resources>

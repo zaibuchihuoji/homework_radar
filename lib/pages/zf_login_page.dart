@@ -16,6 +16,10 @@ import '../services/platform_cookie.dart';
 import '../services/storage.dart';
 import '../services/timetable_parser.dart';
 import '../ui/adaptive.dart';
+import '../ui/ink_wash.dart';
+import '../ui/style_background.dart';
+import '../ui/theme_page_parts.dart';
+import '../ui/tokens.dart';
 import 'jw_setup_page.dart';
 
 /// 抓取成功带回给课表页的结果。校对与入库由课表页接手——校对页绝不能
@@ -64,49 +68,51 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) {
-          _loadedAnyPage = true;
-          // http→https 回落真正加载成功：把升级后的 origin 写回配置，
-          // 否则迁移默认用户每次登录都先走一跳明文 http（内存里的升级
-          // 随页面销毁丢失）。回落只是尝试，加载成功一帧后才持久化
-          final base = _upgradeBase;
-          final upgraded = _config;
-          if (!_originPersisted && base != null && upgraded != null) {
-            _originPersisted = true;
-            unawaited(_persistUpgradedOrigin(upgraded, base));
-          }
-          _scheduleProbes();
-        },
-        onWebResourceError: (e) {
-          // 子资源（图片/脚本/字体）失败是常态，只有主文档打不开才提示
-          if (e.isForMainFrame == false) return;
-          if (_captured) return;
-          // http 打不开时自动换 https 试一次（可能部署了 TLS）；
-          // https 打不开也回落 http 试一次（大量校内教务只有 http）。
-          // 只在首个页面都没加载出来时才转：登录中途的跳转失败不能强转，
-          // 否则会打断正在进行的登录流程
-          final url = _config?.url ?? '';
-          final lower = url.toLowerCase();
-          if (!_triedHttps && !_loadedAnyPage) {
-            if (lower.startsWith('http://')) {
-              _triedHttps = true;
-              _setActiveUrl(url.replaceFirst('http://', 'https://'));
-              return;
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            _loadedAnyPage = true;
+            // http→https 回落真正加载成功：把升级后的 origin 写回配置，
+            // 否则迁移默认用户每次登录都先走一跳明文 http（内存里的升级
+            // 随页面销毁丢失）。回落只是尝试，加载成功一帧后才持久化
+            final base = _upgradeBase;
+            final upgraded = _config;
+            if (!_originPersisted && base != null && upgraded != null) {
+              _originPersisted = true;
+              unawaited(_persistUpgradedOrigin(upgraded, base));
             }
-            if (lower.startsWith('https://')) {
-              _triedHttps = true;
-              _setActiveUrl(url.replaceFirst('https://', 'http://'));
-              return;
+            _scheduleProbes();
+          },
+          onWebResourceError: (e) {
+            // 子资源（图片/脚本/字体）失败是常态，只有主文档打不开才提示
+            if (e.isForMainFrame == false) return;
+            if (_captured) return;
+            // http 打不开时自动换 https 试一次（可能部署了 TLS）；
+            // https 打不开也回落 http 试一次（大量校内教务只有 http）。
+            // 只在首个页面都没加载出来时才转：登录中途的跳转失败不能强转，
+            // 否则会打断正在进行的登录流程
+            final url = _config?.url ?? '';
+            final lower = url.toLowerCase();
+            if (!_triedHttps && !_loadedAnyPage) {
+              if (lower.startsWith('http://')) {
+                _triedHttps = true;
+                _setActiveUrl(url.replaceFirst('http://', 'https://'));
+                return;
+              }
+              if (lower.startsWith('https://')) {
+                _triedHttps = true;
+                _setActiveUrl(url.replaceFirst('https://', 'http://'));
+                return;
+              }
             }
-          }
-          if (mounted && !_captured) {
-            setState(() {
-              _status = '教务平台打不开：需要校园网或学校 VPN 环境，连上后再试';
-            });
-          }
-        },
-      ));
+            if (mounted && !_captured) {
+              setState(() {
+                _status = '教务平台打不开：需要校园网或学校 VPN 环境，连上后再试';
+              });
+            }
+          },
+        ),
+      );
     _bootstrap();
   }
 
@@ -157,9 +163,9 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
       JwConfig? pushed;
       await WidgetsBinding.instance.endOfFrame;
       if (!mounted) return;
-      pushed = await Navigator.of(context).push<JwConfig>(
-        MaterialPageRoute(builder: (_) => const JwSetupPage()),
-      );
+      pushed = await Navigator.of(
+        context,
+      ).push<JwConfig>(MaterialPageRoute(builder: (_) => const JwSetupPage()));
       if (!mounted) return;
       if (pushed == null) {
         Navigator.of(context).pop(false);
@@ -174,6 +180,18 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
       _config = c;
       _status = '正在打开 ${c.name} …';
     });
+    final previousHost = Storage.timetableSource().split('#').first;
+    final changedSchool =
+        previousHost.isNotEmpty && previousHost != c.host.toLowerCase();
+    if (Storage.zfCookie()?.isNotEmpty != true || changedSchool) {
+      try {
+        await PlatformCookie.clearPlatformCookies('zf', origins: [c.url]);
+      } catch (_) {
+        if (mounted) setState(() => _status = '清理旧教务会话失败，请退出后重试');
+        return;
+      }
+      if (!mounted) return;
+    }
     await _controller.loadRequest(Uri.parse(c.url));
   }
 
@@ -196,9 +214,11 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
     _timers.clear();
     _probe = 0;
     for (final d in [600, 1800, 4000]) {
-      _timers.add(Timer(Duration(milliseconds: d), () {
-        if (mounted && !_captured) _probeOnce();
-      }));
+      _timers.add(
+        Timer(Duration(milliseconds: d), () {
+          if (mounted && !_captured) _probeOnce();
+        }),
+      );
     }
     _autoTimer?.cancel();
     _autoTimer = Timer.periodic(const Duration(seconds: 4), (_) {
@@ -224,14 +244,19 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
       final parsed = TimetableParser.parseExtracted(raw);
       if (parsed.isEmpty) {
         if (mounted) {
-          setState(() => _status = '已看到课表，但解析失败：请点「检测」重试，'
-              '或用底部「粘贴文本 / 换个页面」兜底');
+          setState(
+            () => _status = parsed.error != null
+                ? '课表解析失败：${parsed.error}。请切换到单张课表页面或使用文本导入。'
+                : '已看到课表，但解析失败：请点「检测」重试，'
+                      '或用底部「粘贴文本 / 换个页面」兜底',
+          );
         }
         return;
       }
       final origin = _originOf(_active?.url ?? _config?.url ?? '');
-      final cookie =
-          origin.isEmpty ? null : await PlatformCookie.getCookie(origin);
+      final cookie = origin.isEmpty
+          ? null
+          : await PlatformCookie.getCookie(origin);
       _captured = true;
       for (final t in _timers) {
         t.cancel();
@@ -247,11 +272,13 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
       // WebView 平台视图之上——其原生视图残留在原位置会拦截校对页
       // 底部按钮的触摸（模拟器真机均复现）
       if (mounted) {
-        Navigator.of(context).pop(ZfCapture(
-          parsed: parsed,
-          cookie: cookie,
-          sourceName: _config?.name ?? '教务抓取',
-        ));
+        Navigator.of(context).pop(
+          ZfCapture(
+            parsed: parsed,
+            cookie: cookie,
+            sourceName: _config?.name ?? '教务抓取',
+          ),
+        );
       }
     } catch (_) {
       // JS 未就绪，等下一次探测
@@ -268,7 +295,8 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
   /// 把当前页面完整 HTML（含递归所有同源 iframe）复制到剪贴板：解析有问题时发给开发者排查。
   Future<void> _copyPageHtml() async {
     try {
-      var html = await _controller.runJavaScriptReturningResult('''
+      var html = await _controller
+          .runJavaScriptReturningResult('''
 (function() {
   var out = [];
   var seen = [];
@@ -284,7 +312,8 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
     }
   }
   return out.join('\\n\\n<!-- ===== frame 分隔 ===== -->\\n\\n');
-})()''').then((v) => v.toString());
+})()''')
+          .then((v) => v.toString());
       // Android 对字符串返回值可能包一层（或两层）JSON 引号
       for (var i = 0; i < 2 && html.length >= 2; i++) {
         if (!html.startsWith('"') || !html.endsWith('"')) break;
@@ -292,15 +321,16 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
       }
       if (html.trim().isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('页面还没有内容，等加载完再复制')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('页面还没有内容，等加载完再复制')));
         }
         return;
       }
       await Clipboard.setData(ClipboardData(text: html));
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('已复制本页 HTML（${html.length} 字符），可粘贴发给开发者排查')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已复制本页 HTML（${html.length} 字符），可粘贴发给开发者排查')),
+        );
       }
     } catch (_) {
       if (mounted) {
@@ -322,7 +352,8 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
     if (_probe < 3 || !mounted) return;
     try {
       // 主文档 + 递归所有同源 iframe 的正文都算（课表常在多层 iframe 里）
-      final text = await _controller.runJavaScriptReturningResult('''
+      final text = await _controller
+          .runJavaScriptReturningResult('''
 (function() {
   var t = '';
   var out = [document];
@@ -341,8 +372,10 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
     t += (out[i].body ? out[i].body.innerText : '') + '\\n';
   }
   return t;
-})()''').then((v) => v.toString());
-      final failed = text.contains('无法打开') ||
+})()''')
+          .then((v) => v.toString());
+      final failed =
+          text.contains('无法打开') ||
           text.contains('ERR_') ||
           text.trim().length < 20;
       if (failed || !mounted) return;
@@ -356,112 +389,276 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
     } catch (_) {}
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: cardColor(context),
-        elevation: 0.5,
-        centerTitle: true,
-        title: Text(_config == null ? '导入教务课表' : '导入课表 · ${_config!.name}'),
-        actions: [
-          IconButton(
-            tooltip: '复制本页 HTML（排查解析用）',
-            onPressed: _copyPageHtml,
-            icon: const Icon(Icons.copy_all_rounded, size: 20),
-          ),
-          TextButton(
-            onPressed: () async {
-              setState(() => _status = '正在检测课表…');
-              await _probeOnce();
-              if (mounted && !_captured && !_status.startsWith('抓到')) {
-                setState(() => _status = '未抓到课表。$_status');
-              }
-            },
-            child: const Text('检测'),
-          ),
-        ],
-      ),
-      body: Column(
+  Widget _themedBody(BuildContext context) {
+    final p = paletteOf(context);
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
         children: [
           Expanded(
-            child: _config == null
-                ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
-                : _hideWebview
-                    ? const SizedBox.expand()
-                    : WebViewWidget(controller: _controller),
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: p.card,
+                border: cardBorderOf(context),
+                borderRadius: BorderRadius.circular(
+                  p.pixel || p.terminal || p.receipt || p.editorial ? 0 : 10,
+                ),
+              ),
+              foregroundDecoration: pixelFrame(context, 0),
+              child: _config == null
+                  ? Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: p.accent,
+                      ),
+                    )
+                  : _hideWebview
+                  ? const SizedBox.expand()
+                  : WebViewWidget(controller: _controller),
+            ),
           ),
           SafeArea(
             top: false,
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: cardColor(context),
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: const [
-                  BoxShadow(color: Color(0x14101828), blurRadius: 14, offset: Offset(0, 4)),
-                ],
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: constraints.maxHeight * .42,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: ThemePanel(
+                  seed: 'timetable-login-status',
+                  label: p.terminal
+                      ? '~/timetable/probe'
+                      : p.pixel
+                      ? 'TIMETABLE / STATUS'
+                      : '登录 → 打开课表 → 自动抓取',
+                  icon: Icons.table_chart_outlined,
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (_status.startsWith('正在') ||
-                          _status.startsWith('抓到') ||
-                          _status.startsWith('课表抓取成功'))
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else
-                        Icon(Icons.info_outline_rounded,
-                            size: 15, color: Colors.grey.shade500),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _status,
-                          style: TextStyle(
-                              fontSize: 12.5, color: Colors.grey.shade700),
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (_status.startsWith('正在') ||
+                              _status.startsWith('抓到') ||
+                              _status.startsWith('课表抓取成功'))
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: p.accent,
+                              ),
+                            )
+                          else
+                            Icon(
+                              Icons.info_outline_rounded,
+                              size: 17,
+                              color: p.accent,
+                            ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _status,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                height: 1.4,
+                                color: p.ink2,
+                                fontFamily: p.terminal || p.receipt || p.pixel
+                                    ? 'monospace'
+                                    : p.paper || p.journal
+                                    ? 'serif'
+                                    : null,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  // 解析失败 → 兜底导入入口
-                  if (_status.contains('解析失败')) ...[
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _exitToTextImport,
-                            icon: const Icon(Icons.content_paste_rounded, size: 16),
-                            label: const Text('粘贴文本导入'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('试试在教务里切到「表格视图/周课表」页面再点检测')),
-                              );
-                            },
-                            icon: const Icon(Icons.refresh_rounded, size: 16),
-                            label: const Text('换个页面'),
-                          ),
+                      if (_status.contains('解析失败')) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: _exitToTextImport,
+                              icon: const Icon(
+                                Icons.content_paste_rounded,
+                                size: 16,
+                              ),
+                              label: const Text('粘贴文本导入'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('试试在教务里切到「表格视图/周课表」页面再点检测'),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.refresh_rounded, size: 16),
+                              label: const Text('换个页面'),
+                            ),
+                          ],
                         ),
                       ],
-                    ),
-                  ],
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = paletteOf(context);
+    return StyleBackground(
+      child: Scaffold(
+        backgroundColor: p.clean ? null : scaffoldBgOf(context),
+        appBar: AppBar(
+          backgroundColor: cardColor(context),
+          elevation: 0.5,
+          centerTitle: true,
+          title: p.clean
+              ? Text(_config == null ? '导入教务课表' : '导入课表 · ${_config!.name}')
+              : appBarTitle(
+                  context,
+                  _config == null ? '导入教务课表' : '导入课表 · ${_config!.name}',
+                ),
+          actions: [
+            IconButton(
+              tooltip: '复制本页 HTML（排查解析用）',
+              onPressed: _copyPageHtml,
+              icon: const Icon(Icons.copy_all_rounded, size: 20),
+            ),
+            TextButton(
+              onPressed: () async {
+                setState(() => _status = '正在检测课表…');
+                await _probeOnce();
+                if (mounted && !_captured && !_status.startsWith('抓到')) {
+                  setState(() => _status = '未抓到课表。$_status');
+                }
+              },
+              child: const Text('检测'),
+            ),
+          ],
+        ),
+        body: p.clean
+            ? Column(
+                children: [
+                  Expanded(
+                    child: _config == null
+                        ? const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : _hideWebview
+                        ? const SizedBox.expand()
+                        : WebViewWidget(controller: _controller),
+                  ),
+                  SafeArea(
+                    top: false,
+                    child: Container(
+                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cardColor(context),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x14101828),
+                            blurRadius: 14,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              if (_status.startsWith('正在') ||
+                                  _status.startsWith('抓到') ||
+                                  _status.startsWith('课表抓取成功'))
+                                const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              else
+                                Icon(
+                                  Icons.info_outline_rounded,
+                                  size: 15,
+                                  color: Colors.grey.shade500,
+                                ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _status,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          // 解析失败 → 兜底导入入口
+                          if (_status.contains('解析失败')) ...[
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _exitToTextImport,
+                                    icon: const Icon(
+                                      Icons.content_paste_rounded,
+                                      size: 16,
+                                    ),
+                                    label: const Text('粘贴文本导入'),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                '试试在教务里切到「表格视图/周课表」页面再点检测',
+                                              ),
+                                            ),
+                                          );
+                                    },
+                                    icon: const Icon(
+                                      Icons.refresh_rounded,
+                                      size: 16,
+                                    ),
+                                    label: const Text('换个页面'),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : _themedBody(context),
       ),
     );
   }

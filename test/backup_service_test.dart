@@ -8,6 +8,7 @@ import 'package:homework_radar/services/storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   test('导出 → 清空 → 导入，数据完整恢复', () async {
     SharedPreferences.setMockInitialValues({});
     await Storage.init();

@@ -1,23 +1,25 @@
 /// 日历视图：月历标记有截止的日期，点选日期查看当天作业。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'dart:async';
 
 import '../app_state.dart';
 import '../models/homework.dart';
 import '../ui/adaptive.dart';
+import '../ui/dashed_line.dart';
 import '../ui/hw_card.dart';
 import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
+import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
 import 'detail_page.dart';
 
 class CalendarPage extends StatefulWidget {
   const CalendarPage({super.key, required this.state});
-
   final AppState state;
 
   @override
@@ -35,7 +37,7 @@ class _CalendarPageState extends State<CalendarPage> {
     initializeDateFormatting('zh_CN', null).then((_) {
       if (mounted) setState(() => _localeReady = true);
     });
-    // 已截止/倒计时文案按 build 时刻算死，跨过截止点不翻转——定时重建
+    // 倒计时和截止状态需要随时间刷新；翻页状态同时保留。
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
@@ -52,271 +54,571 @@ class _CalendarPageState extends State<CalendarPage> {
     for (final hw in widget.state.homework) {
       final d = hw.dueAt;
       if (d == null) continue;
-      final key = DateTime(d.year, d.month, d.day);
-      map.putIfAbsent(key, () => []).add(hw);
+      map.putIfAbsent(DateTime(d.year, d.month, d.day), () => []).add(hw);
     }
     return map;
   }
 
   @override
   Widget build(BuildContext context) {
+    final p = paletteOf(context);
     final events = _events;
     final dayKey = DateTime(_selected.year, _selected.month, _selected.day);
-    final dayItems = (events[dayKey] ?? const <HomeworkItem>[])
-        .toList()
+    final dayItems = (events[dayKey] ?? const <HomeworkItem>[]).toList()
       ..sort((a, b) => a.dueAt!.compareTo(b.dueAt!));
+    final monthDays = events.entries.where(
+      (e) => e.key.year == _selected.year && e.key.month == _selected.month,
+    );
+    final monthCount = monthDays.fold<int>(0, (sum, e) => sum + e.value.length);
+    final dayTitle =
+        '${_selected.month}月${_selected.day}日 · ${dayItems.isEmpty ? '没有截止' : '${dayItems.length} 项截止'}';
+    final calendar = TableCalendar<HomeworkItem>(
+      firstDay: DateTime.now().subtract(const Duration(days: 120)),
+      lastDay: DateTime.now().add(const Duration(days: 400)),
+      focusedDay: _selected,
+      selectedDayPredicate: (day) => isSameDay(day, _selected),
+      locale: 'zh_CN',
+      eventLoader: (day) =>
+          events[DateTime(day.year, day.month, day.day)] ?? const [],
+      onDaySelected: (selected, focused) =>
+          setState(() => _selected = selected),
+      // 翻页也回写 focusedDay，防止时钟/外部重建时跳回旧月份。
+      onPageChanged: (focused) => setState(() => _selected = focused),
+      rowHeight: p.clean ? 52 : 48,
+      daysOfWeekHeight: p.clean ? 20 : 34,
+      headerStyle: HeaderStyle(
+        formatButtonVisible: false,
+        titleCentered: true,
+        leftChevronIcon: const Tooltip(
+          message: '上个月',
+          child: Icon(Icons.chevron_left),
+        ),
+        rightChevronIcon: const Tooltip(
+          message: '下个月',
+          child: Icon(Icons.chevron_right),
+        ),
+        titleTextStyle: monoText(
+          context,
+          const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        headerPadding: EdgeInsets.symmetric(vertical: p.clean ? 8 : 12),
+        leftChevronMargin: EdgeInsets.zero,
+        rightChevronMargin: EdgeInsets.zero,
+      ),
+      calendarStyle: CalendarStyle(
+        todayDecoration: BoxDecoration(
+          color: p.accentFill.withValues(alpha: 0.18),
+          shape: BoxShape.circle,
+        ),
+        selectedDecoration: BoxDecoration(
+          color: p.accentFill,
+          shape: BoxShape.circle,
+        ),
+        selectedTextStyle: TextStyle(color: p.onAccent),
+        outsideDaysVisible: false,
+      ),
+      calendarBuilders: CalendarBuilders<HomeworkItem>(
+        headerTitleBuilder: p.clean ? null : _monthHeading,
+        dowBuilder: p.clean ? null : _weekday,
+        defaultBuilder: p.clean ? null : (c, day, focused) => _day(c, day),
+        todayBuilder: p.clean
+            ? null
+            : (c, day, focused) => _day(c, day, today: true),
+        selectedBuilder: p.clean
+            ? null
+            : (c, day, focused) => _day(c, day, selected: true),
+        markerBuilder: _markers,
+      ),
+      availableGestures: AvailableGestures.horizontalSwipe,
+    );
 
     return StyleBackground(
-        // 玻璃样式下透明化 Scaffold，露出渐变磨砂底衬
-        child: Scaffold(
-      backgroundColor: scaffoldBgOf(context),
-      appBar: AppBar(title: appBarTitle(context, '作业日历')),
-      body: !_localeReady
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-              children: [
-                Container(
-                  decoration: inkWashFill(context, 18) ??
-                      (isPixelStyle(context)
-                          ? BoxDecoration(color: cardColor(context))
-                          : isReceiptStyle(context)
-                              ? receiptTear(context)
-                              : isEditorialStyle(context)
-                                  ? BoxDecoration(color: cardColor(context))
-                                  : BoxDecoration(
-                                      color: cardColor(context),
-                                      borderRadius:
-                                          BorderRadius.circular(18),
-                                      border: cardBorderOf(context),
-                                    )),
-                  foregroundDecoration: isPixelStyle(context)
-                      ? pixelFrame(context, 18)
-                      : paperInnerRing(context, 18) ??
-                          morandiCream(context, 18) ??
-                          editorialRules(context),
-                  clipBehavior: Clip.antiAlias,
-                  child: TableCalendar<HomeworkItem>(
-                    firstDay: DateTime.now().subtract(const Duration(days: 120)),
-                    lastDay: DateTime.now().add(const Duration(days: 400)),
-                    focusedDay: _selected,
-                    selectedDayPredicate: (day) =>
-                        isSameDay(day, _selected),
-                    locale: 'zh_CN',
-                    eventLoader: (day) =>
-                        events[DateTime(day.year, day.month, day.day)] ?? const [],
-                    onDaySelected: (selected, focused) {
-                      setState(() => _selected = selected);
-                    },
-                    // 跟踪翻页：不回写 focusedDay 的话，任何外部重建都会
-                    // 把日历弹回 _selected 所在月份
-                    onPageChanged: (focused) {
-                      setState(() => _selected = focused);
-                    },
-                    headerStyle: HeaderStyle(
-                      formatButtonVisible: false,
-                      titleCentered: true,
-                      // 小票：月份抬头是打印读数（等宽 + 拉字距）
-                      titleTextStyle: monoText(
-                        context,
-                        const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    calendarStyle: CalendarStyle(
-                      todayDecoration: BoxDecoration(
-                        color: accentColor(context).withValues(alpha: 0.18),
-                        shape: BoxShape.circle,
-                      ),
-                      // 小票：选中日是一枚盖下去的红章（方印），不是圆圈
-                      selectedDecoration: isReceiptStyle(context)
-                          ? BoxDecoration(
-                              color: accentColor(context),
-                              borderRadius: BorderRadius.circular(2),
-                            )
-                          : BoxDecoration(
-                              color: accentColor(context),
-                              shape: BoxShape.circle,
-                            ),
-                      outsideDaysVisible: false,
-                    ),
-                    calendarBuilders: CalendarBuilders(
-                      // 标记点颜色 = 当天作业状态：全完成绿、还没到期的橙、
-                      // 当天/已过还有未完成的红——哪天有事没办一眼可见
-                      markerBuilder: (context, day, events) {
-                        if (events.isEmpty) return null;
-                        final items = events.cast<HomeworkItem>();
-                        final now = DateTime.now();
-                        final today = DateTime(now.year, now.month, now.day);
-                        final day0 = DateTime(day.year, day.month, day.day);
-                        // 标记点颜色 = 当天作业状态：全完成绿、还没到期的橙、
-                        // 当天/已过还有未完成的红。水墨下收进墨朱二色：
-                        // 已办=淡墨点，未到=朱砂，已过期未办=赤红。
-                        final color = isInkStyle(context)
-                            ? (items.every(hwIsDone)
-                                ? textSecondary(context).withValues(alpha: 0.55)
-                                : day0.isAfter(today)
-                                    ? accentColor(context)
-                                    : Tokens.danger)
-                            : items.every(hwIsDone)
-                                ? accentColor(context)
-                                : day0.isAfter(today)
-                                    ? const Color(0xFFEA580C)
-                                    : Tokens.danger;
-                        return Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 4,
-                          child: Center(
-                            child: Container(
-                              width: 6,
-                              height: 6,
-                              // 小票：标记点是打印方点
-                              decoration: isReceiptStyle(context)
-                                  ? BoxDecoration(
-                                      color: color,
-                                      borderRadius:
-                                          BorderRadius.circular(1))
-                                  : BoxDecoration(
-                                      color: color,
-                                      shape: BoxShape.circle,
-                                    ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    availableGestures: AvailableGestures.horizontalSwipe,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                // 水墨：日期行前一枚顿笔墨点，与首页段头同一语言
-                Row(
-                  children: [
-                    if (isInkStyle(context)) ...[
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: textPrimary(context).withValues(alpha: 0.78),
-                        ),
-                      ),
-                      const SizedBox(width: 7),
-                    ],
-                    Text(
-                      '${_selected.month}月${_selected.day}日 · ${dayItems.isEmpty ? '没有截止' : '${dayItems.length} 项截止'}',
-                      style: monoText(
-                        context,
-                        TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: textSecondary(context)),
-                      ),
+      child: Scaffold(
+        backgroundColor: scaffoldBgOf(context),
+        appBar: AppBar(title: appBarTitle(context, '作业日历')),
+        body: !_localeReady
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                children: [
+                  if (!p.clean) ...[
+                    ThemePageHeader(
+                      compact: true,
+                      title: '作业日历',
+                      kicker: 'CALENDAR',
+                      icon: Icons.calendar_month_outlined,
+                      summary: '本月 $monthCount 项截止 · ${monthDays.length} 天有安排',
                     ),
                   ],
-                ),
-                const SizedBox(height: 8),
-                if (dayItems.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    child: Center(
-                      // 水墨：空态是一小幅远山 +「闲」印落款，不上彩色 emoji
-                      child: isInkStyle(context)
-                          ? Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const SizedBox(
-                                  width: 240,
-                                  height: 72,
-                                  child: InkMountains(height: 72),
-                                ),
-                                const SizedBox(height: 10),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text('这一天没有作业截止',
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            color: textFaint(context))),
-                                    const SizedBox(width: 7),
-                                    const InkSealChip(glyph: '闲'),
-                                  ],
-                                ),
-                              ],
-                            )
-                          : isReceiptStyle(context)
-                              // 小票：空态是一道「本日无账」的打印分区
-                              ? Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    SizedBox(
-                                      width: 190,
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                              height: 1,
-                                              color: textPrimary(context)
-                                                  .withValues(alpha: 0.30)),
-                                          const SizedBox(height: 2),
-                                          Container(
-                                              height: 1,
-                                              color: textPrimary(context)
-                                                  .withValues(alpha: 0.30)),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 9),
-                                    Text('这一天没有作业截止',
-                                        style: monoText(
-                                          context,
-                                          TextStyle(
-                                              fontSize: 12.5,
-                                              letterSpacing: 1.5,
-                                              color: textFaint(context)),
-                                        )),
-                                    const SizedBox(height: 9),
-                                    SizedBox(
-                                      width: 190,
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                              height: 1,
-                                              color: textPrimary(context)
-                                                  .withValues(alpha: 0.30)),
-                                          const SizedBox(height: 2),
-                                          Container(
-                                              height: 1,
-                                              color: textPrimary(context)
-                                                  .withValues(alpha: 0.30)),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Text('这一天没有作业截止 🎉',
-                                  style: TextStyle(
-                                      fontSize: 13, color: textFaint(context))),
-                    ),
-                  )
-                else
-                  ...dayItems.map(
-                    (hw) => Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: buildHwCard(
-                        context,
-                        hw,
-                        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => HomeworkDetailPage(homeworkId: hw.id),
-                        )),
+                  if (p.clean)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: cardColor(context),
+                        borderRadius: BorderRadius.circular(18),
+                        border: cardBorderOf(context),
                       ),
+                      clipBehavior: Clip.antiAlias,
+                      child: calendar,
+                    )
+                  else
+                    ThemePanel(
+                      seed: 'calendar-month',
+                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                      child: calendar,
+                    ),
+                  const SizedBox(height: 14),
+                  if (p.clean)
+                    Text(
+                      dayTitle,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: textSecondary(context),
+                      ),
+                    )
+                  else ...[
+                    ThemeSectionHeading(
+                      title: '当日安排',
+                      detail: '${dayItems.length} 项截止',
+                    ),
+                    const SizedBox(height: 8),
+                    _agendaDate(context, dayTitle),
+                  ],
+                  const SizedBox(height: 8),
+                  if (dayItems.isEmpty)
+                    _emptyDay(context)
+                  else
+                    ...dayItems.map(
+                      (hw) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: buildHwCard(
+                          context,
+                          hw,
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  HomeworkDetailPage(homeworkId: hw.id),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _monthHeading(BuildContext context, DateTime date) {
+    final p = paletteOf(context);
+    final month = date.month.toString().padLeft(2, '0');
+    final year = '${date.year}';
+    final title = p.pixel
+        ? '$year / $month'
+        : p.terminal
+        ? '[$year.$month]'
+        : p.receipt
+        ? '$year · $month'
+        : '${date.month}月';
+    final font = p.pixel || p.terminal || p.receipt
+        ? 'monospace'
+        : p.paper || p.inkWash || p.journal
+        ? 'serif'
+        : null;
+    final text = Text(
+      title,
+      style: TextStyle(
+        fontFamily: font,
+        fontSize: p.editorial
+            ? 36
+            : p.inkWash
+            ? 27
+            : 21,
+        fontWeight: p.editorial || p.comic ? FontWeight.w900 : FontWeight.w700,
+        color: p.ink,
+        letterSpacing: p.paper || p.inkWash
+            ? 3
+            : p.receipt
+            ? 2
+            : 0,
+      ),
+    );
+    Widget heading = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (!p.pixel && !p.terminal && !p.receipt)
+          Text(
+            p.journal ? '$year / MONTHLY' : year,
+            style: TextStyle(
+              fontSize: 10,
+              fontFamily: font,
+              color: p.ink2,
+              letterSpacing: 2,
+            ),
+          ),
+        FittedBox(fit: BoxFit.scaleDown, child: text),
+        if (p.paper || p.receipt) ...[
+          const SizedBox(height: 6),
+          DashedLine(color: p.ink3),
+        ],
+        if (p.inkWash) const BrushLine(),
+        if (p.editorial) Container(height: 3, color: p.ink),
+        if (p.morandi)
+          Padding(
+            padding: const EdgeInsets.only(top: 5),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final color in [p.accent, p.ink3, p.hairline])
+                  Container(
+                    width: 18,
+                    height: 5,
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    decoration: BoxDecoration(
+                      color: color,
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ),
               ],
             ),
-    ),
+          ),
+      ],
+    );
+    if (p.comic) {
+      heading = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BubbleDecoration(
+          fillColor: p.accentFill.withValues(alpha: 0.14),
+          borderColor: p.ink,
+          borderWidth: 2,
+        ),
+        child: heading,
+      );
+    }
+    if (p.pixel || p.terminal) {
+      heading = Container(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: p.ink, width: p.pixel ? 3 : 1),
+          ),
+        ),
+        child: heading,
+      );
+    }
+    if (p.journal) {
+      heading = Container(
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          color: p.accentFill.withValues(alpha: 0.08),
+          border: Border(bottom: BorderSide(color: p.accent)),
+        ),
+        child: heading,
+      );
+    }
+    return heading;
+  }
+
+  Widget _weekday(BuildContext context, DateTime date) {
+    final p = paletteOf(context);
+    const names = ['一', '二', '三', '四', '五', '六', '日'];
+    final label = names[date.weekday - 1];
+    return Container(
+      alignment: Alignment.center,
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        color: p.morandi || p.comic
+            ? p.accentFill.withValues(alpha: 0.09)
+            : null,
+        borderRadius: p.morandi
+            ? BorderRadius.circular(10)
+            : p.comic
+            ? BorderRadius.circular(5)
+            : null,
+        border: p.paper || p.editorial || p.journal || p.terminal
+            ? Border(
+                bottom: BorderSide(
+                  color: p.journal
+                      ? p.accentFill.withValues(alpha: 0.4)
+                      : p.hairline,
+                ),
+              )
+            : null,
+      ),
+      child: Text(
+        p.terminal
+            ? '[$label]'
+            : p.pixel
+            ? '·$label·'
+            : p.inkWash
+            ? label
+            : p.receipt
+            ? label
+            : '周$label',
+        style: TextStyle(
+          fontSize: p.terminal || p.pixel ? 10 : 11,
+          color: p.ink2,
+          fontFamily: p.pixel || p.terminal || p.receipt
+              ? 'monospace'
+              : p.paper || p.inkWash || p.journal
+              ? 'serif'
+              : null,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _day(
+    BuildContext context,
+    DateTime date, {
+    bool today = false,
+    bool selected = false,
+  }) {
+    final p = paletteOf(context);
+    final highlighted = today || selected;
+    final soft = p.paper || p.editorial || p.journal;
+    final fill = selected
+        ? (soft ? p.accentFill.withValues(alpha: 0.10) : p.accentFill)
+        : today
+        ? p.accentFill.withValues(alpha: 0.10)
+        : Colors.transparent;
+    final textColor = selected && !soft
+        ? p.onAccent
+        : highlighted
+        ? p.accent
+        : p.ink;
+    final radius = p.morandi
+        ? 13.0
+        : p.comic
+        ? 10.0
+        : p.inkWash
+        ? 3.0
+        : 0.0;
+    Decoration decoration = BoxDecoration(
+      color: fill,
+      shape: p.journal ? BoxShape.circle : BoxShape.rectangle,
+      borderRadius: p.journal ? null : BorderRadius.circular(radius),
+      border: highlighted
+          ? Border.all(
+              color: p.comic ? p.ink : p.accent,
+              width: p.comic
+                  ? 2
+                  : p.inkWash
+                  ? 1.5
+                  : 1,
+            )
+          : null,
+    );
+    if (p.pixel && highlighted) {
+      decoration = PixelFrameDecoration(lineColor: p.accent);
+    }
+    if (p.terminal && highlighted) decoration = BoxDecoration(color: fill);
+    return Center(
+      child: Container(
+        width: 34,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: decoration,
+        child: p.pixel && highlighted
+            ? Container(
+                alignment: Alignment.center,
+                margin: const EdgeInsets.all(4),
+                color: fill,
+                child: Text(
+                  '${date.day}',
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 14,
+                    color: textColor,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              )
+            : FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  p.terminal && highlighted ? '[${date.day}]' : '${date.day}',
+                  style: TextStyle(
+                    fontSize: p.terminal
+                        ? 12
+                        : p.editorial
+                        ? 18
+                        : 14,
+                    color: textColor,
+                    fontFamily: p.pixel || p.receipt || p.terminal
+                        ? 'monospace'
+                        : p.paper || p.inkWash || p.journal
+                        ? 'serif'
+                        : null,
+                    fontWeight: highlighted || p.editorial
+                        ? FontWeight.w800
+                        : FontWeight.w500,
+                    decoration: p.paper && highlighted
+                        ? TextDecoration.underline
+                        : null,
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget? _markers(
+    BuildContext context,
+    DateTime day,
+    List<HomeworkItem> items,
+  ) {
+    if (items.isEmpty) return null;
+    final p = paletteOf(context);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day0 = DateTime(day.year, day.month, day.day);
+    // 保留原有状态语义：完成为主题强调色（水墨淡墨）、未来橙色、到期红色。
+    final color = p.inkWash
+        ? items.every(hwIsDone)
+              ? p.ink2.withValues(alpha: 0.55)
+              : day0.isAfter(today)
+              ? p.accent
+              : Tokens.danger
+        : items.every(hwIsDone)
+        ? p.accent
+        : day0.isAfter(today)
+        ? const Color(0xFFEA580C)
+        : Tokens.danger;
+    final square = p.pixel || p.receipt || p.terminal;
+    final line = p.editorial || p.journal || p.paper;
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 3,
+      child: Center(
+        child: Semantics(
+          label: '${day.month}月${day.day}日 ${items.length}项截止',
+          child: Container(
+            width: line
+                ? 16
+                : p.comic
+                ? 8
+                : 6,
+            height: line
+                ? 3
+                : p.comic
+                ? 8
+                : 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: square || line ? BoxShape.rectangle : BoxShape.circle,
+              border: p.comic ? Border.all(color: p.ink, width: 1) : null,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _agendaDate(BuildContext context, String title) {
+    final p = paletteOf(context);
+    return ThemePanel(
+      seed: 'calendar-agenda',
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (p.inkWash)
+            const Padding(
+              padding: EdgeInsets.only(right: 10),
+              child: InkSealChip(glyph: '日'),
+            )
+          else if (p.editorial || p.journal) ...[
+            Text(
+              _selected.day.toString().padLeft(2, '0'),
+              style: TextStyle(
+                fontSize: p.editorial ? 36 : 28,
+                fontWeight: FontWeight.w900,
+                fontFamily: p.journal ? 'serif' : null,
+                color: p.ink,
+              ),
+            ),
+            const SizedBox(width: 12),
+          ] else ...[
+            Icon(
+              p.pixel
+                  ? Icons.event_note
+                  : p.receipt
+                  ? Icons.receipt_long
+                  : p.terminal
+                  ? Icons.chevron_right
+                  : Icons.today_outlined,
+              color: p.ink2,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Text(
+              p.terminal ? '> $title' : title,
+              style: serifTitle(
+                context,
+                monoText(
+                  context,
+                  TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: p.ink,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyDay(BuildContext context) {
+    final p = paletteOf(context);
+    final message = Text(
+      p.clean ? '这一天没有作业截止 🎉' : '这一天没有作业截止',
+      style: TextStyle(fontSize: 13, color: p.ink3),
+      textAlign: TextAlign.center,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Center(
+        child: p.inkWash
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 240,
+                    height: 72,
+                    child: InkMountains(height: 72),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 7,
+                    children: [
+                      message,
+                      const InkSealChip(glyph: '闲'),
+                    ],
+                  ),
+                ],
+              )
+            : p.receipt
+            ? Column(
+                children: [
+                  const DashedLine(),
+                  const SizedBox(height: 12),
+                  message,
+                  const SizedBox(height: 12),
+                  const DashedLine(),
+                ],
+              )
+            : message,
+      ),
     );
   }
 }

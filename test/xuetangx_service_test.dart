@@ -73,13 +73,14 @@ void main() {
   });
 
   group('parseChapterScan 章节树扫描', () {
-    test('收 leaf_type==6 的作业叶子，其他类型忽略', () {
+    test('收 leaf_type==6 作业与官方类型 5 考试，其他已知类型忽略', () {
       const body = '''
       {"data":{"course_chapter":[{"section_leaf_list":[
         {"leaf_list":[
           {"id":11,"name":"视频1","leaf_type":0},
           {"id":12,"name":"绪论--单元测试","leaf_type":6},
-          {"id":13,"name":"讨论","leaf_type":4}
+          {"id":13,"name":"讨论","leaf_type":4},
+          {"id":15,"name":"期末考试","leaf_type":5}
         ]},
         {"leaf_list":[{"id":14,"name":"第一章测试","leaf_type":6}]}
       ]}]}}
@@ -88,15 +89,19 @@ void main() {
       expect(scan, isNotNull);
       expect(scan!.homeworkLeaves.map((l) => l.id), ['12', '14']);
       expect(scan.homeworkLeaves.first.name, '绪论--单元测试');
+      expect(scan.examLeaves.map((l) => l.id), ['15']);
+      expect(scan.examLeaves.first.name, '期末考试');
     });
 
-    test('有类型字段但无 6 = 权威无作业（空列表）', () {
+    test('有类型字段但无 6/5 = 权威无作业（空列表）', () {
       const body = '''
       {"data":{"course_chapter":[{"section_leaf_list":[
         {"leaf_list":[{"id":11,"name":"视频","leaf_type":0}]}
       ]}]}}
       ''';
-      expect(XuetangxService.parseChapterScan(body)!.homeworkLeaves, isEmpty);
+      final scan = XuetangxService.parseChapterScan(body)!;
+      expect(scan.homeworkLeaves, isEmpty);
+      expect(scan.examLeaves, isEmpty);
     });
 
     test('全树无 leaf_type 字段 = 结构陌生返回 null', () {
@@ -236,7 +241,6 @@ void main() {
 const String courseListBody = '''
 {"code":200,"data":{"list":[
   {"classroomid":4231538,"sign":"HNU03031001055","name":"思想道德与法治"},
-  {"data":{"courseName":"外层包装"}},
   {"classroomid":4239999,"sign":"XYZ2"}
 ]}}
 ''';

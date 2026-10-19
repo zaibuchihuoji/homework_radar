@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 原生窗口底：品牌绿 + 徽章图 240dp 正中（与 A12+ 启动屏图标、
+<!-- 原生窗口底：品牌黄 + 徽章图 288dp 正中（与 A12+ 启动屏图标、
      Flutter 首帧同一张图）。服务 12 以下版本与 NormalTheme 窗口底。 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/launch_bg" />
     <item
         android:gravity="center"
-        android:width="240dp"
-        android:height="240dp"
+        android:width="288dp"
+        android:height="288dp"
         android:drawable="@drawable/splash_badge" />
 </layer-list>

@@ -1,171 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 仅用于系统微件选择器的静态预览（Android 12+）。
-     填充示例数据让预览接近真实效果；真正的桌面布局是 homework_widget.xml。 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/w_root"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@drawable/widget_bg"
-    android:paddingStart="12dp"
-    android:paddingEnd="12dp"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-
-        <ImageView
-            android:layout_width="18dp"
-            android:layout_height="18dp"
-            android:src="@mipmap/ic_launcher"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:text="作业通"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:textColor="#0F6B54"/>
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:text="· 最近截止"
-            android:textSize="11sp"
-            android:textColor="#9CA3AF"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="更新 09:30"
-            android:textSize="10sp"
-            android:textColor="#B0B7C3"/>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent">
+  <ImageView android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:importantForAccessibility="no" android:visibility="gone" />
+  <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="@drawable/widget_bg" android:padding="12dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginBottom="6dp">
+      <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:text="最近作业" android:textSize="15sp" android:textColor="#151B2B" android:includeFontPadding="false" android:textStyle="bold" android:layout_weight="1" android:maxLines="1" android:ellipsize="end" />
+      <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="2 项" android:textSize="10sp" android:textColor="#514112" android:includeFontPadding="false" android:background="@drawable/widget_focus_yellow" android:padding="5dp" android:textStyle="bold" />
     </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="8dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@drawable/widget_row_bg"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="34dp"
-            android:text="5小时"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#DC2626"/>
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:text="随堂测验：第五章"
-            android:textSize="13sp"
-            android:textColor="#1F2937"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:text="9/28 截止"
-            android:textSize="10sp"
-            android:textColor="#9CA3AF"/>
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="7dp" android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:orientation="vertical" android:background="@drawable/widget_study_row" android:padding="4dp" android:layout_marginBottom="2dp">
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="top">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:text="第三章 · 定积分练习" android:textSize="14sp" android:textColor="#151B2B" android:includeFontPadding="false" android:layout_weight="1" android:maxLines="2" android:ellipsize="end" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="剩余6小时" android:textSize="11sp" android:textColor="#514112" android:includeFontPadding="false" android:layout_marginStart="6dp" android:maxLines="1" android:ellipsize="end" android:background="@drawable/widget_focus_yellow" android:padding="2dp" />
+      </LinearLayout>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="今天 18:00 截止 · 高等数学" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="3dp" android:maxLines="1" android:ellipsize="end" android:visibility="visible" />
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="5dp" android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="3dp" android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
     </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="6dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@drawable/widget_row_bg"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="34dp"
-            android:text="2天"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#D97706"/>
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:text="实验报告：第三章"
-            android:textSize="13sp"
-            android:textColor="#1F2937"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:text="9/30 截止"
-            android:textSize="10sp"
-            android:textColor="#9CA3AF"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="48dp" android:orientation="vertical" android:background="@drawable/widget_study_row" android:padding="4dp" android:layout_marginBottom="2dp">
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="top">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:text="阅读与写作 · 第四单元" android:textSize="14sp" android:textColor="#151B2B" android:includeFontPadding="false" android:layout_weight="1" android:maxLines="2" android:ellipsize="end" android:textStyle="bold" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="剩余2天" android:textSize="11sp" android:textColor="#514112" android:includeFontPadding="false" android:layout_marginStart="6dp" android:maxLines="1" android:ellipsize="end" android:background="@drawable/widget_focus_yellow" android:padding="2dp" />
+      </LinearLayout>
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="10/20 20:00 截止 · 大学英语" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="3dp" android:maxLines="1" android:ellipsize="end" android:visibility="visible" />
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="5dp" android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
+      <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="12sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="3dp" android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
     </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="6dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@drawable/widget_row_bg"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="34dp"
-            android:text="12天"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:textColor="#0F6B54"/>
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:text="期中复习提纲"
-            android:textSize="13sp"
-            android:textColor="#1F2937"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="6dp"
-            android:text="10/10 截止"
-            android:textSize="10sp"
-            android:textColor="#9CA3AF"/>
-    </LinearLayout>
-</LinearLayout>
+    <TextView android:layout_width="match_parent" android:layout_height="0dp" android:text="暂无待办作业" android:textSize="14sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_weight="1" android:gravity="center" android:visibility="gone" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="" android:textSize="11sp" android:textColor="#686254" android:includeFontPadding="false" android:layout_marginTop="5dp" android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
+  </LinearLayout>
+</FrameLayout>
