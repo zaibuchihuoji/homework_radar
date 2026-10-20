@@ -1,5 +1,7 @@
 # 作业通 (Homework Radar)
 
+下载：[GitHub 发行版](https://github.com/zaibuchihuoji/homework_radar/releases) · [Gitee 国内下载](https://gitee.com/zaibuchihuoji/homework_radar/releases)。请选择匹配设备架构的 APK，直接覆盖安装即可。
+
 一个 Flutter 双端 App：汇总 **学习通（超星）** 和 **中国大学MOOC（icourse163）** 的作业/测验列表与截止时间，并在截止前推送本地提醒。取名「作业通」，如小灵通——接收作业、提醒及时。
 
 ## 功能

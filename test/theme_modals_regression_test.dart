@@ -179,7 +179,9 @@ void main() {
             .last;
         await tester.drag(guide, const Offset(0, -650));
         await tester.pumpAndSettle();
-        expect(find.textContaining('小组件可长按拖动边角缩放'), findsOneWidget);
+        expect(find.byType(SegmentedButton<bool>), findsOneWidget);
+        expect(find.text('跟随主题'), findsOneWidget);
+        expect(find.text('透明'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('知道了'));
         await tester.pumpAndSettle();
