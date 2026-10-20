@@ -19,6 +19,20 @@ internal object HomeworkWidgetData {
         val rows = root?.optJSONArray("items")
             ?: try { JSONArray(legacy ?: "[]") } catch (_: Exception) { JSONArray() }
         val today = Calendar.getInstance().apply { timeInMillis = now }
+        // Apply the app's semester rule even to a cache written by an older
+        // version, or across rollover while Flutter is not running. Read only.
+        val month = today.get(Calendar.MONTH)
+        val year = today.get(Calendar.YEAR)
+        val semesterStart = Calendar.getInstance().apply {
+            clear()
+            when {
+                month >= Calendar.AUGUST -> set(year, Calendar.AUGUST, 1)
+                month == Calendar.JANUARY -> set(year - 1, Calendar.AUGUST, 1)
+                else -> set(year, Calendar.FEBRUARY, 1)
+            }
+        }
+        val start = semesterStart.timeInMillis
+        val end = (semesterStart.clone() as Calendar).apply { add(Calendar.MONTH, 6) }.timeInMillis
         fun sameDay(ms: Long): Boolean {
             val date = Calendar.getInstance().apply { timeInMillis = ms }
             return date.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
@@ -30,6 +44,7 @@ internal object HomeworkWidgetData {
             if (status == "done" || status == "submitted" ||
                 (status.isEmpty() && row.optInt("u", 2) == 3)) return@mapNotNull null
             val due = row.optLong("d", -1L)
+            if (due > 0 && (due < start || due >= end)) return@mapNotNull null
             val past = due > 0 && due <= now
             val minutes = (due - now) / 60000L
             val count = when {

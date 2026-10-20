@@ -41,12 +41,12 @@ void main() {
   );
   List<dynamic> rows() => jsonDecode(cache['items_json'] as String) as List;
 
-  test('widget includes overdue, unknown and undated work without completed filler', () async {
+  test('widget includes current-semester overdue, unknown and undated work without historic filler', () async {
     final now = DateTime.now();
     await SyncService.updateHomeWidget([
-      task('past', due: now.subtract(const Duration(days: 2))),
+      task('past', due: DateTime(now.year, now.month, now.day)),
       task('older-semester', due: DateTime(2020)),
-      task('future', due: now.add(const Duration(days: 2))),
+      task('future', due: DateTime(now.year, now.month, now.day, 23, 59)),
       task('undated'),
       task('unknown', status: HwStatus.unknown),
       task('done', status: HwStatus.done),
@@ -54,19 +54,13 @@ void main() {
     ]);
     expect(rows().map((e) => e['id']).toSet(), {
       'past',
-      'older-semester',
       'future',
       'undated',
       'unknown',
     });
   });
   test('widget does not truncate assignments after twenty entries', () async {
-    await SyncService.updateHomeWidget(
-      List.generate(
-        75,
-        (i) => task('$i', due: DateTime.now().add(Duration(days: i + 1))),
-      ),
-    );
+    await SyncService.updateHomeWidget(List.generate(75, (i) => task('$i')));
     expect(rows().length, 75);
   });
   test(

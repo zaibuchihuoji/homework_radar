@@ -7,6 +7,37 @@ import org.junit.Test
 class StudyWidgetDataTest {
     private val now = 1792317600000L
 
+    private fun date(y: Int, m: Int, d: Int, hour: Int = 0, minute: Int = 0): Long =
+        java.util.Calendar.getInstance().apply { clear(); set(y, m - 1, d, hour, minute) }.timeInMillis
+
+    @Test fun oldVersionSnapshotsAndLegacyCachesUseTheSameSemesterAsTheApp() {
+        val rows = JSONArray().put(org.json.JSONObject().put("id", "old").put("title", "练习5实验报告").put("d", date(2025,5,17,22,30)))
+            .put(org.json.JSONObject().put("id", "current").put("d", date(2026,10,21,20,56)))
+            .put(org.json.JSONObject().put("id", "overdue").put("d", date(2026,10,19)))
+            .put(org.json.JSONObject().put("id", "undated"))
+            .put(org.json.JSONObject().put("id", "next").put("d", date(2027,2,1)))
+        val snapshot = org.json.JSONObject().put("version",2).put("items",rows).put("updatedAt",123L).toString()
+        for (data in listOf(HomeworkWidgetData.parse(snapshot, null, date(2026,10,20)),
+            HomeworkWidgetData.parse(null, rows.toString(), date(2026,10,20)))) {
+            assertEquals(setOf("current","overdue","undated"), data.items.map { it.id }.toSet())
+            assertEquals(1, data.overdue)
+        }
+        assertEquals(5, rows.length())
+    }
+
+    @Test fun cachedRowsRollOverAtLocalSemesterBoundariesWithoutFlutterRewrite() {
+        val rows = JSONArray()
+        for ((id, due) in listOf("autumn" to date(2026,8,1), "january" to date(2027,1,31,23,59),
+            "spring" to date(2027,2,1), "july" to date(2027,7,31,23,59), "next" to date(2027,8,1))) {
+            rows.put(org.json.JSONObject().put("id",id).put("d",due))
+        }
+        rows.put(org.json.JSONObject().put("id","undated"))
+        fun ids(at: Long) = HomeworkWidgetData.parse(null, rows.toString(), at).items.map { it.id }.toSet()
+        assertEquals(setOf("autumn","january","undated"), ids(date(2027,1,20)))
+        assertEquals(setOf("spring","july","undated"), ids(date(2027,2,1)))
+        assertEquals(setOf("next","undated"), ids(date(2027,8,1)))
+    }
+
     @Test fun pendingItemsAreNotLostToOldLimitOrMissingDeadline() {
         val rows = JSONArray()
         repeat(75) { rows.put(org.json.JSONObject().put("id", "$it").put("title", "task$it")

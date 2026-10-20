@@ -70,16 +70,19 @@ class HomeworkItem {
 
   /// 是否属于当前学期（8月~次年1月为秋学期，2~7月为春学期）。
   /// 无截止时间的条目无法判断，默认保留展示。
-  bool get inCurrentSemester {
+  bool get inCurrentSemester => isInSemester(DateTime.now());
+
+  /// Shared by the app list and widget export; a supplied clock also allows
+  /// semester rollover to be checked without changing stored deadlines.
+  bool isInSemester(DateTime now) {
     final d = dueAt;
     if (d == null) return true;
-    final now = DateTime.now();
     final (start, end) = switch (now.month) {
       >= 8 => (DateTime(now.year, 8), DateTime(now.year + 1, 2)),
       1 => (DateTime(now.year - 1, 8), DateTime(now.year, 2)),
       _ => (DateTime(now.year, 2), DateTime(now.year, 8)),
     };
-    return d.isAfter(start) && d.isBefore(end);
+    return !d.isBefore(start) && d.isBefore(end);
   }
 
   /// 紧急度排序权重：越紧急越靠前（当前仅测试引用，生产排序用「未完成优先+

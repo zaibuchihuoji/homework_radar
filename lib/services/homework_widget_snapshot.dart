@@ -7,7 +7,8 @@ Map<String, Object> homeworkWidgetSnapshot(
   DateTime? now,
 }) {
   final at = now ?? DateTime.now();
-  final pending = items
+  final semester = items.where((h) => h.isInSemester(at)).toList();
+  final pending = semester
       .where((h) => h.status != HwStatus.done && h.status != HwStatus.submitted)
       .toList();
   pending.sort((a, b) {
@@ -52,8 +53,8 @@ Map<String, Object> homeworkWidgetSnapshot(
     'overdue': pending
         .where((h) => h.dueAt != null && !h.dueAt!.isAfter(at))
         .length,
-    'done': items.length - pending.length,
-    'total': items.length,
+    'done': semester.length - pending.length,
+    'total': semester.length,
   };
   return {
     'version': 2,

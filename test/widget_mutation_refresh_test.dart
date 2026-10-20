@@ -13,6 +13,7 @@ import 'package:homework_radar/services/sync_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  final today = DateTime.now();
   final cache = <String, dynamic>{};
   Completer<void>? entered, release;
   var failNotifications = false;
@@ -22,7 +23,7 @@ void main() {
     platform: PlatformKind.manual,
     course: '课程',
     title: '作业 $id',
-    dueAt: DateTime(2020),
+    dueAt: DateTime(today.year, today.month, today.day),
     status: HwStatus.todo,
     note: '保留的旧备注 $id',
   );
@@ -114,7 +115,7 @@ void main() {
               platform: PlatformKind.manual,
               course: '课程',
               title: '修改后的作业',
-              dueAt: DateTime(2020),
+              dueAt: task('manual_old').dueAt,
               status: HwStatus.todo,
               note: task('manual_old').note,
             ),

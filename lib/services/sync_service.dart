@@ -478,7 +478,8 @@ class SyncService {
     return result;
   }
 
-  /// Export every visible unfinished item, including overdue / undated records.
+  /// Export current-semester visible unfinished items, including overdue /
+  /// undated records, using the same semester rule as the app list.
   /// The versioned cache is committed as one value; old cache keys remain readable.
   static Future<void> _widgetExports = Future<void>.value();
 
