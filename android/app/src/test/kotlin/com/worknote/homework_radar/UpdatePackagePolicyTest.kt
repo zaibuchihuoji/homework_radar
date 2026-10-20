@@ -20,6 +20,24 @@ class UpdatePackagePolicyTest {
             assertFalse(UpdatePackagePolicy.allowedUrl(url))
         }
     }
+    @Test fun giteeFallbackMustKeepTheExactVersionAndArchitecture() {
+        val path = "/zaibuchihuoji/homework_radar/releases/download/v1.2.0/app-arm64-v8a-release.apk"
+        val primary = "https://gitee.com$path"
+        val backup = "https://github.com$path"
+        assertTrue(UpdatePackagePolicy.allowedUrl(primary))
+        assertTrue(UpdatePackagePolicy.allowedFallback(primary, backup, "1.2.0"))
+        for (bad in listOf(backup.replace("v1.2.0", "v1.2.1"),
+            backup.replace("arm64-v8a", "armeabi-v7a"), primary,
+            backup.replace("github.com", "github.com.evil.example"),
+            backup + "?token=unexpected")) {
+            assertFalse(UpdatePackagePolicy.allowedFallback(primary, bad, "1.2.0"))
+        }
+        assertFalse(UpdatePackagePolicy.allowedFallback(backup, primary, "1.2.0"))
+        assertFalse(UpdatePackagePolicy.allowedFallback(primary, backup, "1.2.1"))
+        assertFalse(UpdatePackagePolicy.allowedUrl(primary.replace("gitee.com", "foruda.gitee.com")))
+        assertFalse(UpdatePackagePolicy.allowedUrl(primary.replace("https:", "http:")))
+        assertFalse(UpdatePackagePolicy.allowedUrl(primary.replace("zaibuchihuoji", "other")))
+    }
     @Test fun truncatedAndCorruptedDownloadsFailIntegrity() {
         val file = kotlin.io.path.createTempFile().toFile()
         try {

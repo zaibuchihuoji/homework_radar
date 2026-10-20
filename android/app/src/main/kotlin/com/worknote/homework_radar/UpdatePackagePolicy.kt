@@ -5,11 +5,16 @@ import java.net.URI
 import java.security.MessageDigest
 
 internal object UpdatePackagePolicy {
+    fun allowedFallback(primary: String, backup: String, version: String): Boolean = try {
+        allowedUrl(primary) && allowedUrl(backup) && URI(primary).host == "gitee.com" &&
+            URI(backup).host == "github.com" && URI(primary).rawPath == URI(backup).rawPath &&
+            URI(primary).rawPath.split('/')[5].removePrefix("v") == version
+    } catch (_: Exception) { false }
     data class Apk(val packageName: String, val versionName: String, val versionCode: Long, val signers: Set<String>)
 
     fun allowedUrl(url: String): Boolean = try {
         val uri = URI(url)
-        uri.scheme == "https" && uri.host == "github.com" &&
+        uri.scheme == "https" && uri.host in setOf("github.com", "gitee.com") &&
             uri.rawUserInfo == null && uri.rawFragment == null && uri.rawQuery == null &&
             uri.port in setOf(-1, 443) &&
             Regex("/zaibuchihuoji/homework_radar/releases/download/v?[0-9]+\\.[0-9]+\\.[0-9]+/app-(?:(?:arm64-v8a|armeabi-v7a|x86_64)-)?release\\.apk").matches(uri.rawPath)

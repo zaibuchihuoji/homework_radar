@@ -25,10 +25,11 @@ Future<void> checkForAppUpdate(BuildContext context) async {
     messenger.showSnackBar(
       const SnackBar(content: Text('正在检查更新…'), duration: Duration(seconds: 1)),
     );
+    final pkg = await PackageInfo.fromPlatform();
     final info = await fetchLatestRelease(
       supportedAbis: await controller.supportedAbis(),
+      localVersion: pkg.version,
     );
-    final pkg = await PackageInfo.fromPlatform();
     if (!context.mounted) return;
     if (info == null) {
       messenger.showSnackBar(const SnackBar(content: Text('暂时无法检查更新，请稍后再试')));
@@ -98,6 +99,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     // Validate new metadata before discarding the failed task.
     final info = await fetchLatestRelease(
       supportedAbis: await controller.supportedAbis(),
+      localVersion: (await PackageInfo.fromPlatform()).version,
     );
     if (info == null || info.apkUrl.isEmpty) {
       throw PlatformException(code: 'update', message: '暂未找到适合此设备的安装包，请稍后再试');
@@ -137,8 +139,10 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                 ),
                 const SizedBox(height: 16),
                 if (offer) ...[
-                  if (info != null && info.apkSize > 0)
-                    Text('${size(info.apkSize)} · GitHub'),
+                  if (info != null)
+                    Text(
+                      '${info.apkSize > 0 ? '${size(info.apkSize)} · ' : ''}${info.source}',
+                    ),
                   if (info != null && info.notes.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     ConstrainedBox(
@@ -154,6 +158,12 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                   ),
                 ] else if (status.active) ...[
                   Text(status.label),
+                  const SizedBox(height: 8),
+                  Text(
+                    status.switchedSource
+                        ? '已自动切换到 ${status.source}'
+                        : '下载来源：${status.source}',
+                  ),
                   const SizedBox(height: 12),
                   LinearProgressIndicator(value: status.progress),
                   const SizedBox(height: 10),

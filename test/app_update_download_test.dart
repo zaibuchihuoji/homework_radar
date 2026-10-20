@@ -10,9 +10,11 @@ void main() {
   const channel = MethodChannel('homework_radar/updater');
   final calls = <String>[];
   var task = <String, dynamic>{'phase': 'idle'};
+  Map<dynamic, dynamic>? startArgs;
   final controller = AppUpdateController.instance;
   setUp(() {
     calls.clear();
+    startArgs = null;
     task = {'phase': 'idle'};
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -23,11 +25,13 @@ void main() {
             case 'consumeOpen':
               return false;
             case 'start':
+              startArgs = call.arguments as Map;
               task = {
                 'phase': 'downloading',
                 'version': '1.2.0',
                 'bytes': 25,
                 'total': 100,
+                'source': 'Gitee',
               };
             case 'cancel':
               task = {'phase': 'idle'};
@@ -80,7 +84,8 @@ void main() {
                   info: const UpdateInfo(
                     version: '1.2.0',
                     releaseUrl: '',
-                    apkUrl: 'https://github.com/package.apk',
+                    apkUrl: 'https://gitee.com/zaibuchihuoji/homework_radar/releases/download/v1.2.0/app-arm64-v8a-release.apk',
+                    fallbackApkUrl: 'https://github.com/zaibuchihuoji/homework_radar/releases/download/v1.2.0/app-arm64-v8a-release.apk',
                     notes: '更新说明',
                     apkSize: 100,
                   ),
@@ -94,9 +99,19 @@ void main() {
       await tester.tap(find.text('更新'));
       await tester.pumpAndSettle();
       expect(find.text('发现新版本'), findsOneWidget);
+      expect(find.text('0.0 MB · Gitee'), findsOneWidget);
       await tester.tap(find.text('下载更新'));
       await tester.pump();
       expect(find.text('正在下载 25%'), findsOneWidget);
+      expect(
+        startArgs!['fallbackUrl'],
+        'https://github.com/zaibuchihuoji/homework_radar/releases/download/v1.2.0/app-arm64-v8a-release.apk',
+      );
+      task = {...task, 'source': 'GitHub', 'switchedSource': true, 'bytes': 50};
+      await controller.refresh();
+      await tester.pump();
+      expect(find.text('正在下载 50%'), findsOneWidget);
+      expect(find.text('已自动切换到 GitHub'), findsOneWidget);
       await tester.tap(find.text('后台下载'));
       await tester.pumpAndSettle();
       expect(calls.where((c) => c == 'start').length, 1);

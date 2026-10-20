@@ -51,6 +51,8 @@ class SafeHttp {
     // api.github.com 查最新版，release 下载重定向到 objects.githubusercontent.com
     'github.com',
     'githubusercontent.com',
+    // Gitee release API and checksum downloads (foruda.gitee.com redirects).
+    'gitee.com',
   ];
 
   /// 保留主机名（RFC 6761/6762 等）一律拒绝。

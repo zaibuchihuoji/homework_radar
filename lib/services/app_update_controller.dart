@@ -12,6 +12,8 @@ class UpdateDownloadStatus {
   String get phase => data['phase'] as String? ?? 'idle';
   String get version => data['version'] as String? ?? '';
   String get error => data['error'] as String? ?? '';
+  String get source => data['source'] as String? ?? 'GitHub';
+  bool get switchedSource => data['switchedSource'] == true;
   bool get retryable => data['retryable'] != false;
   int get bytes => (data['bytes'] as num?)?.toInt() ?? 0;
   int get total => (data['total'] as num?)?.toInt() ?? 0;
@@ -101,6 +103,7 @@ class AppUpdateController extends ChangeNotifier with WidgetsBindingObserver {
     'url': info.apkUrl,
     'size': info.apkSize,
     'sha256': info.apkSha256,
+    'fallbackUrl': info.fallbackApkUrl,
   });
   Future<void> retry() => _operation('retry');
   Future<void> cancel() => _operation('cancel');

@@ -32,14 +32,20 @@ internal class AppUpdateDownload(private val context: Context) {
         val version = args["version"] as? String ?: ""
         val size = (args["size"] as? Number)?.toLong() ?: 0
         val hash = args["sha256"] as? String
+        val fallback = args["fallbackUrl"] as? String ?: ""
         require(UpdatePackagePolicy.allowedUrl(url)) { "更新下载地址无效，请重新检查更新" }
         require(Regex("[0-9]+\\.[0-9]+\\.[0-9]+").matches(version) && size >= 0 &&
             (hash == null || Regex("[a-fA-F0-9]{64}").matches(hash))) { "更新信息不完整，请重新检查更新" }
+        require((Uri.parse(url).host != "gitee.com" || hash != null) &&
+            (fallback.isEmpty() || UpdatePackagePolicy.allowedFallback(url, fallback, version))) {
+            "备用下载信息无效，请重新检查更新"
+        }
         val existing = status()
         if (existing["phase"] in setOf("queued", "downloading", "paused", "ready")) return existing
         cancel()
         check(prefs.edit().putString("url", url).putString("version", version)
-            .putLong("size", size).putString("sha256", hash).commit()) { "无法保存下载任务" }
+            .putLong("size", size).putString("sha256", hash)
+            .putString("fallbackUrl", fallback).commit()) { "无法保存下载任务" }
         return enqueue()
     }
 
@@ -47,7 +53,7 @@ internal class AppUpdateDownload(private val context: Context) {
         staging.delete()
         val request = DownloadManager.Request(Uri.parse(prefs.getString("url", "")))
             .setTitle("作业通 ${prefs.getString("version", "")} 更新")
-            .setDescription("正在下载安装包，可在后台继续")
+            .setDescription("${source()} · 正在下载安装包，可在后台继续")
             .setMimeType("application/vnd.android.package-archive")
             .setAllowedOverMetered(true).setAllowedOverRoaming(false)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
@@ -80,10 +86,31 @@ internal class AppUpdateDownload(private val context: Context) {
         return mapOf("phase" to "idle")
     }
 
+    private fun source() = if (Uri.parse(prefs.getString("url", "")).host == "gitee.com") "Gitee" else "GitHub"
+
+    /** One persisted, forward-only switch. The completion receiver runs this even without Flutter. */
+    private fun fallback(): Map<String, Any?>? {
+        val url = prefs.getString("url", "") ?: ""
+        val backup = prefs.getString("fallbackUrl", "") ?: ""
+        if (!UpdatePackagePolicy.allowedFallback(url, backup, prefs.getString("version", "") ?: "") ||
+            prefs.getString("sha256", null) == null) return null
+        val previousId = id
+        check(prefs.edit().putString("url", backup).remove("fallbackUrl")
+            .putBoolean("switchedSource", true).putLong("id", -1).commit()) { "无法切换下载来源，请重试" }
+        if (previousId != -1L) manager.remove(previousId)
+        verified.delete()
+        File(cache, "update.partial").delete()
+        return try { enqueue() } catch (_: Exception) {
+            fail("备用来源暂时无法下载，请检查网络后重试", true)
+            null
+        }
+    }
+
     fun status(): Map<String, Any?> {
         if (!prefs.contains("url")) return mapOf("phase" to "idle")
         val result = mutableMapOf<String, Any?>("version" to prefs.getString("version", ""),
-            "bytes" to 0L, "total" to prefs.getLong("size", 0), "source" to "GitHub")
+            "bytes" to 0L, "total" to prefs.getLong("size", 0), "source" to source(),
+            "switchedSource" to prefs.getBoolean("switchedSource", false))
         if (prefs.contains("readyCode")) {
             if (code(installed()) >= prefs.getLong("readyCode", 0)) return cancel()
             if (!verified.isFile) fail("安装包已被清理，请重新下载", true)
@@ -103,6 +130,9 @@ internal class AppUpdateDownload(private val context: Context) {
                     DownloadManager.STATUS_PENDING -> result["phase"] = "queued"
                     DownloadManager.STATUS_RUNNING -> result["phase"] = "downloading"
                     DownloadManager.STATUS_PAUSED -> {
+                        if (long(DownloadManager.COLUMN_REASON).toInt() == DownloadManager.PAUSED_WAITING_TO_RETRY) {
+                            fallback()?.let { return it }
+                        }
                         result["phase"] = "paused"
                         result["error"] = "等待网络恢复或系统继续下载"
                     }
@@ -117,12 +147,19 @@ internal class AppUpdateDownload(private val context: Context) {
                             notifyResult(true)
                             return result.apply { put("phase", "ready"); put("bytes", verified.length()); put("total", verified.length()) }
                         } catch (e: Exception) {
+                            fallback()?.let { return it }
                             fail(e.message ?: "安装包校验失败，请重新检查更新", false)
                             notifyResult(false)
                         }
                     }
                     else -> {
                         val reason = long(DownloadManager.COLUMN_REASON).toInt()
+                        // Storage/permission failures affect both mirrors; keep the actionable error.
+                        if (reason in 400..599 || reason in setOf(DownloadManager.ERROR_UNKNOWN,
+                                DownloadManager.ERROR_HTTP_DATA_ERROR, DownloadManager.ERROR_CANNOT_RESUME,
+                                DownloadManager.ERROR_UNHANDLED_HTTP_CODE, DownloadManager.ERROR_TOO_MANY_REDIRECTS)) {
+                            fallback()?.let { return it }
+                        }
                         fail(when (reason) {
                             DownloadManager.ERROR_INSUFFICIENT_SPACE -> "存储空间不足，清理后重试"
                             DownloadManager.ERROR_HTTP_DATA_ERROR, DownloadManager.ERROR_CANNOT_RESUME -> "下载中断，请重试"
