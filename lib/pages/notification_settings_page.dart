@@ -82,7 +82,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
     if (_failed) return '暂时无法读取；仍可打开系统设置检查';
     final matches = _channels?.where((c) => c.id == id);
     if (matches == null || matches.isEmpty) {
-      return '系统未返回此渠道；可先发送测试通知或打开系统设置';
+      return '暂未开启，可发送一条提醒或打开系统设置';
     }
     final channel = matches.first;
     if (channel.importance == Importance.none) return '此类通知已关闭';
@@ -99,15 +99,15 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
     setState(() => _sending = true);
     try {
       await NotificationService.showSimple(
-        id == 'homework_due' ? '作业提醒测试' : '上课提醒测试',
-        '请检查是否出现顶部横幅，点击可返回作业通',
+        id == 'homework_due' ? '作业截止提醒' : '上课提醒',
+        '这是一条提醒，点击返回作业通',
         channelId: id,
         payload: id == 'homework_due' ? widget.homeworkId : null,
       );
-      _message('已提交测试通知；顶部是否弹出由系统通知设置决定');
+      _message('提醒已发送');
       await _refresh();
     } catch (_) {
-      _message('测试通知发送失败，请检查系统通知权限');
+      _message('发送失败，请检查通知权限');
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -124,12 +124,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
           ThemePanel(
             label: '顶部横幅',
             icon: Icons.notifications_active_outlined,
-            child: const Text(
-              '通知栏能看到，不代表已允许顶部弹出。请在系统通知设置中开启“横幅通知”'
-              '或“悬浮通知”，并将提醒设为“允许打扰／重要通知”。\n\n'
-              '小米、荣耀、OPPO、vivo、一加的开关名称和位置可能不同。作业提醒和'
-              '上课提醒需要分别检查；勿扰、游戏模式和连续通知降噪也可能限制横幅。',
-            ),
+            child: const Text('想在屏幕顶部看到提醒，请在系统通知设置中允许横幅或悬浮通知。'),
           ),
           const SizedBox(height: 12),
           ValueListenableBuilder<bool?>(
@@ -146,7 +141,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
                         : 'App 通知权限状态未知',
                   ),
                   const SizedBox(height: 4),
-                  const Text('此权限与“顶部横幅”是不同的设置。'),
+                  const Text('横幅和声音可在系统设置中调整。'),
                   TextButton(
                     onPressed: () => _open(),
                     child: const Text('打开 App 通知设置'),
@@ -169,24 +164,21 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
                 children: [
                   Text(_status(channel.id)),
                   const SizedBox(height: 6),
-                  const Text('高优先级仍需系统允许横幅；部分手机需在 App 通知总开关页开启。'),
+                  const Text('可分别设置横幅、声音和振动。'),
                   TextButton(
                     onPressed: () => _open(channel.id),
                     child: Text('设置${channel.name}'),
                   ),
                   OutlinedButton(
                     onPressed: _sending ? null : () => _test(channel.id),
-                    child: Text('测试${channel.name}'),
+                    child: const Text('发送一条提醒'),
                   ),
                 ],
               ),
             ),
           ],
           const SizedBox(height: 12),
-          const Text(
-            '测试时保持屏幕点亮并解锁，避免连续快速发送。若刚开机或收到大量通知，'
-            '请稍等再试。App 无法代替你开启系统的横幅开关。',
-          ),
+          const Text('未收到提醒时，请检查系统通知权限和勿扰模式。'),
         ],
       ),
     ),

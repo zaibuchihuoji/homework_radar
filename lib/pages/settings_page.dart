@@ -11,9 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../app_state.dart';
 import '../ui/theme_forms.dart';
@@ -22,7 +20,8 @@ import '../services/backup_service.dart';
 import '../services/notification_service.dart';
 import '../services/safe_http.dart';
 import '../services/storage.dart';
-import '../services/update_service.dart';
+import '../services/app_update_controller.dart';
+import 'update_dialog.dart';
 import '../ui/adaptive.dart';
 import '../ui/ink_wash.dart';
 import '../ui/dashed_line.dart';
@@ -31,6 +30,7 @@ import '../ui/tokens.dart';
 import '../ui/theme_page_parts.dart';
 import 'section_times_page.dart';
 import 'notification_settings_page.dart';
+import 'background_sync_settings_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.state});
@@ -244,6 +244,22 @@ class SettingsPage extends StatelessWidget {
                 _groupCard(context, [
                   _tile(
                     context,
+                    icon: Icons.sync_rounded,
+                    title: '后台同步',
+                    subtitle: Storage.syncConfig().enabled
+                        ? '每 ${Storage.syncConfig().minutes} 分钟检查 · 失败自动重试'
+                        : '后台定时已关闭 · 回前台仍会检查',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            BackgroundSyncSettingsPage(state: state),
+                      ),
+                    ),
+                  ),
+                  _divider(context),
+                  _tile(
+                    context,
                     icon: Icons.update_rounded,
                     title: '上次同步',
                     subtitle: syncText,
@@ -296,63 +312,21 @@ class SettingsPage extends StatelessWidget {
                       color: Color(0xFF9CA3AF),
                     ),
                   ),
-                  _divider(context),
-                  _tile(
-                    context,
-                    icon: Icons.notifications_none_rounded,
-                    title: '发送测试通知',
-                    onTap: () async {
-                      // 带上第一条作业的 id，顺便验证通知深链
-                      final first = state.homework
-                          .where((h) => h.status != HwStatus.done)
-                          .toList();
-                      try {
-                        await NotificationService.showSimple(
-                          '作业通',
-                          '这是一条测试通知 ✓',
-                          payload: first.isEmpty ? null : first.first.id,
-                        );
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text('已提交测试通知；顶部未弹出时请检查横幅设置'),
-                            action:
-                                defaultTargetPlatform == TargetPlatform.android
-                                ? SnackBarAction(
-                                    label: '横幅设置',
-                                    onPressed: () => Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            NotificationSettingsPage(
-                                              homeworkId: first.firstOrNull?.id,
-                                            ),
-                                      ),
-                                    ),
-                                  )
-                                : null,
-                          ),
-                        );
-                      } catch (_) {
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('测试通知发送失败，请检查系统通知设置')),
-                        );
-                      }
-                    },
-                  ),
                 ]),
                 _groupLabel(context, '关于'),
                 _groupCard(context, [
-                  _tile(
-                    context,
-                    icon: Icons.system_update_rounded,
-                    title: '检查更新',
-                    // 无自有后端：新版本经 GitHub Releases 发布（update_service）
-                    subtitle: '新版本经 GitHub 发布，失败多为网络不通，稍后再试',
-                    onTap: () => _checkForUpdates(context),
-                    trailing: const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Color(0xFF9CA3AF),
+                  ListenableBuilder(
+                    listenable: AppUpdateController.instance,
+                    builder: (context, _) => _tile(
+                      context,
+                      icon: Icons.system_update_rounded,
+                      title: '检查更新',
+                      subtitle: AppUpdateController.instance.status.label,
+                      onTap: () => checkForAppUpdate(context),
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Color(0xFF9CA3AF),
+                      ),
                     ),
                   ),
                 ]),
@@ -396,40 +370,6 @@ class SettingsPage extends StatelessWidget {
     Clipboard.setData(ClipboardData(text: email));
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text('已复制 $email')));
-  }
-
-  /// 应用内检查更新：查 GitHub 最新 Release，与本地版本比较；
-  /// 失败（被墙/断网/仓库未建）只提示不抛错——更新检查绝不能打扰主流程。
-  Future<void> _checkForUpdates(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(
-      const SnackBar(content: Text('正在检查更新…'), duration: Duration(seconds: 1)),
-    );
-    final info = await fetchLatestRelease();
-    if (info == null) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('检查失败：GitHub 访问不通，请稍后再试')),
-      );
-      return;
-    }
-    final pkg = await PackageInfo.fromPlatform();
-    if (info.isNewerThan(pkg.version)) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text('发现新版本 v${info.version}（当前 v${pkg.version}）'),
-          duration: const Duration(seconds: 8),
-          action: SnackBarAction(
-            label: '下载',
-            onPressed: () => launchUrl(
-              Uri.parse(info.apkUrl.isNotEmpty ? info.apkUrl : info.releaseUrl),
-              mode: LaunchMode.externalApplication,
-            ),
-          ),
-        ),
-      );
-    } else {
-      messenger.showSnackBar(SnackBar(content: Text('已是最新版本 v${pkg.version}')));
-    }
   }
 
   Future<void> _exportBackup(BuildContext context) async {
@@ -1500,7 +1440,7 @@ class SettingsPage extends StatelessWidget {
                 ],
                 const SizedBox(height: 16),
                 Text(
-                  '外观跟随 App 主题；透明模式保留主题装饰，文字按明暗配色，辅以轻微提边。',
+                  '外观跟随 App 主题，也可以选择透明背景。',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: textSecondary(dialogContext),
@@ -1649,9 +1589,8 @@ class SettingsPage extends StatelessWidget {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        '小组件可长按拖动边角缩放，作业最小 2×1，课表最小 2×2；列表可上下滑动。'
-                        '透明背景透出真实壁纸，文字适度加重并带轻微提边，保持通透；'
-                        '从相册选图后玻璃会带模糊与边缘折射，更换壁纸后可重新选图。',
+                        '长按小组件可调整大小，列表可以上下滑动。'
+                        '更换壁纸后，可重新选择玻璃底图。',
                         style: TextStyle(
                           fontSize: 12,
                           height: 1.45,

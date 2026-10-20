@@ -17,6 +17,9 @@ class UpdateInfo {
     required this.releaseUrl,
     required this.apkUrl,
     required this.notes,
+    this.apkName = '',
+    this.apkSize = 0,
+    this.apkSha256,
   });
 
   /// 最新版本号（不含 v 前缀）
@@ -24,6 +27,9 @@ class UpdateInfo {
   final String releaseUrl;
   final String apkUrl;
   final String notes;
+  final String apkName;
+  final int apkSize;
+  final String? apkSha256;
 
   /// 有新版本（相对本地 [local]）
   bool isNewerThan(String local) => compareVersions(version, local) > 0;
@@ -55,7 +61,9 @@ int compareVersions(String a, String b) {
 ///（调用方给出「检查失败」反馈，绝不能抛异常）。
 /// 单独压 10s 超时：GitHub 被墙时 DNS/TCP 会黑洞挂很久，
 /// 不等 SafeHttp 的 30s——更新检查不值得让用户等半个分钟。
-Future<UpdateInfo?> fetchLatestRelease() async {
+Future<UpdateInfo?> fetchLatestRelease({
+  List<String> supportedAbis = const [],
+}) async {
   final resp = await SafeHttp.get(
     'https://api.github.com/repos/$kGithubRepo/releases/latest',
     headers: {
@@ -64,33 +72,73 @@ Future<UpdateInfo?> fetchLatestRelease() async {
       // 但带上语义化 UA 更稳
       'X-GitHub-Api-Version': '2022-11-28',
     },
-  ).timeout(
-    const Duration(seconds: 10),
-    onTimeout: () => null,
-  );
+  ).timeout(const Duration(seconds: 10), onTimeout: () => null);
   if (resp == null || resp.statusCode != 200) return null;
   try {
-    final j = jsonDecode(resp.body) as Map<String, dynamic>;
-    final tag = (j['tag_name'] as String?)?.trim() ?? '';
-    if (tag.isEmpty) return null;
-    final assets = (j['assets'] as List? ?? const []).cast<Map<String, dynamic>>();
-    String apkUrl = '';
-    for (final a in assets) {
-      final name = (a['name'] as String? ?? '').toLowerCase();
-      final url = a['browser_download_url'] as String? ?? '';
-      if (url.isNotEmpty && name.endsWith('.apk')) {
-        apkUrl = url;
-        break;
-      }
-    }
-    return UpdateInfo(
-      version: tag.replaceFirst(RegExp('^v'), ''),
-      releaseUrl: j['html_url'] as String? ??
-          'https://github.com/$kGithubRepo/releases',
-      apkUrl: apkUrl,
-      notes: (j['body'] as String? ?? '').trim(),
+    return parseGithubRelease(
+      jsonDecode(resp.body) as Map<String, dynamic>,
+      supportedAbis: supportedAbis,
     );
   } catch (_) {
     return null;
   }
+}
+
+/// Only a matching architecture or the explicitly named legacy universal APK.
+UpdateInfo? parseGithubRelease(
+  Map<String, dynamic> release, {
+  required List<String> supportedAbis,
+}) {
+  final tag = (release['tag_name'] as String? ?? '').trim();
+  if (!RegExp(r'^v?\d+\.\d+\.\d+$').hasMatch(tag) ||
+      release['draft'] == true ||
+      release['prerelease'] == true) {
+    return null;
+  }
+  final names = [
+    for (final abi in supportedAbis)
+      if (const ['arm64-v8a', 'armeabi-v7a', 'x86_64'].contains(abi))
+        'app-$abi-release.apk',
+    'app-release.apk',
+  ];
+  Map? selected;
+  String? hash;
+  for (final name in names) {
+    for (final asset in (release['assets'] as List? ?? const [])) {
+      if (asset is! Map || asset['name'] != name) continue;
+      final uri = Uri.tryParse(asset['browser_download_url'] as String? ?? '');
+      if (uri == null ||
+          uri.scheme != 'https' ||
+          uri.host != 'github.com' ||
+          uri.userInfo.isNotEmpty ||
+          uri.hasFragment ||
+          uri.hasQuery ||
+          uri.port != 443 ||
+          !uri.path.startsWith('/$kGithubRepo/releases/download/$tag/') ||
+          uri.pathSegments.last != name) {
+        continue;
+      }
+      final digest = asset['digest'];
+      if (digest != null &&
+          (digest is! String ||
+              !RegExp(r'^sha256:[a-fA-F0-9]{64}$').hasMatch(digest))) {
+        continue;
+      }
+      selected = asset;
+      hash = digest == null
+          ? null
+          : (digest as String).substring(7).toLowerCase();
+      break;
+    }
+    if (selected != null) break;
+  }
+  return UpdateInfo(
+    version: tag.replaceFirst(RegExp('^v'), ''),
+    releaseUrl: 'https://github.com/$kGithubRepo/releases/tag/$tag',
+    apkUrl: selected?['browser_download_url'] as String? ?? '',
+    apkName: selected?['name'] as String? ?? '',
+    apkSize: (selected?['size'] as num?)?.toInt() ?? 0,
+    apkSha256: hash,
+    notes: (release['body'] as String? ?? '').trim(),
+  );
 }

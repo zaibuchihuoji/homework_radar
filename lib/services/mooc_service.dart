@@ -610,8 +610,10 @@ class MoocService {
   Future<List<HomeworkItem>> allHomework({
     void Function(int done, int total)? onProgress,
   }) async {
-    if (await checkLogin() != true) {
+    final initialSession = await checkLogin();
+    if (initialSession != true) {
       listFailed = true;
+      if (initialSession == false) loginFailed = true;
       return [];
     }
     final cs = await courses();

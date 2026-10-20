@@ -69,6 +69,15 @@ void main() {
     );
     await tester.tap(find.byTooltip('添加作业'));
     await tester.pumpAndSettle();
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.byType(BottomSheet), findsNothing);
+    expect(
+      tester.getCenter(find.byType(Dialog)).dy,
+      closeTo(
+        tester.view.physicalSize.height / tester.view.devicePixelRatio / 2,
+        1,
+      ),
+    );
     expect(find.text('手动添加'), findsOneWidget);
     await tester.tap(find.text('识别添加'));
     await tester.pumpAndSettle();

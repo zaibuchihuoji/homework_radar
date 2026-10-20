@@ -12,6 +12,7 @@ import '../services/platform_cookie.dart';
 import '../services/stable_hash.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
+import '../ui/account_platform_icon.dart';
 import '../ui/dashed_line.dart';
 import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
@@ -80,8 +81,6 @@ class AccountsPage extends StatelessWidget {
                 extra: Storage.chaoxingUid() == null
                     ? null
                     : 'UID ${Storage.chaoxingUid()}',
-                icon: Icons.school_rounded,
-                gradient: const [Color(0xFF3B82F6), Color(0xFF6366F1)],
                 onLogin: () => _openLogin(context, PlatformKind.chaoxing),
                 onLogout: () async {
                   await state.logoutChaoxing();
@@ -94,8 +93,6 @@ class AccountsPage extends StatelessWidget {
                 index: 2,
                 title: PlatformKind.mooc.label,
                 state: state.moocState,
-                icon: Icons.menu_book_rounded,
-                gradient: const [Color(0xFFF43F5E), Color(0xFFF97316)],
                 onLogin: () => _openLogin(context, PlatformKind.mooc),
                 onLogout: () async {
                   await state.logoutMooc();
@@ -108,8 +105,6 @@ class AccountsPage extends StatelessWidget {
                 index: 3,
                 title: PlatformKind.zhihuishu.label,
                 state: state.zhihuishuState,
-                icon: Icons.park_rounded,
-                gradient: const [Color(0xFF16A34A), Color(0xFF22C55E)],
                 onLogin: () => _openLogin(context, PlatformKind.zhihuishu),
                 onLogout: () async {
                   await state.logoutZhihuishu();
@@ -122,8 +117,6 @@ class AccountsPage extends StatelessWidget {
                 index: 4,
                 title: PlatformKind.xuetangx.label,
                 state: state.xuetangxState,
-                icon: Icons.auto_stories_rounded,
-                gradient: const [Color(0xFF0EA5E9), Color(0xFF0284C7)],
                 onLogin: () => _openLogin(context, PlatformKind.xuetangx),
                 onLogout: () async {
                   await state.logoutXuetangx();
@@ -136,8 +129,6 @@ class AccountsPage extends StatelessWidget {
                 index: 5,
                 title: PlatformKind.yuketang.label,
                 state: state.yuketangState,
-                icon: Icons.cloud_rounded,
-                gradient: const [Color(0xFF6366F1), Color(0xFF8B5CF6)],
                 onLogin: () => _openLogin(context, PlatformKind.yuketang),
                 onLogout: () async {
                   await state.logoutYuketang();
@@ -153,8 +144,6 @@ class AccountsPage extends StatelessWidget {
                     : '教务系统',
                 state: state.zfState,
                 extra: Storage.zfXh() == null ? null : '学号 ${Storage.zfXh()}',
-                icon: Icons.view_timeline_rounded,
-                gradient: const [Color(0xFF0F6B54), Color(0xFF17997A)],
                 onLogin: () async {
                   // 接住抓取结果：此前 push 返回值被丢弃，登录+抓取全流程
                   // 走完 cookie 不落盘、课表不入库、卡片仍显示「未登录」
@@ -250,9 +239,8 @@ class AccountsPage extends StatelessWidget {
                   ),
                 ),
               Text(
-                '登录在 App 内嵌的官方页面中完成，Cookie 仅保存在本机。\n'
-                '作业通只读取你自己账号的作业列表，不会提交任何数据。\n'
-                '教务系统需校园网或学校 VPN 环境。',
+                '通过平台官方页面登录，账号信息仅保存在本机。\n'
+                '教务系统可能需要校园网或学校 VPN。',
                 style: TextStyle(
                   fontSize: 12.5,
                   color: Colors.grey.shade500,
@@ -296,7 +284,6 @@ class AccountsPage extends StatelessWidget {
     required Color statusColor,
     required AccountState state,
     required String? extra,
-    required IconData icon,
     required VoidCallback onLogin,
     required VoidCallback onLogout,
   }) {
@@ -337,7 +324,7 @@ class AccountsPage extends StatelessWidget {
         return Column(
           children: [
             if (showIcon) ...[
-              Icon(icon, size: 30, color: pal.ink),
+              AccountPlatformIcon(index: index, size: 46),
               const SizedBox(height: 8),
             ],
             name,
@@ -348,7 +335,7 @@ class AccountsPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (showIcon) ...[
-            Icon(icon, size: 28, color: pal.ink),
+            AccountPlatformIcon(index: index, size: 42),
             const SizedBox(width: 12),
           ],
           Expanded(child: name),
@@ -481,7 +468,7 @@ class AccountsPage extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 color: swatch,
-                child: Icon(icon, color: pal.ink, size: 30),
+                child: AccountPlatformIcon(index: index, size: 44),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -537,7 +524,7 @@ class AccountsPage extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(icon, size: 24, color: pal.ink2),
+                AccountPlatformIcon(index: index, size: 34),
                 const SizedBox(width: 14),
                 Expanded(child: status()),
               ],
@@ -654,7 +641,7 @@ class AccountsPage extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, size: 22, color: pal.ink2),
+              AccountPlatformIcon(index: index, size: 34),
               const SizedBox(width: 10),
               Expanded(child: status()),
             ],
@@ -732,8 +719,6 @@ class AccountsPage extends StatelessWidget {
     required String title,
     required AccountState state,
     String? extra,
-    required IconData icon,
-    required List<Color> gradient,
     required VoidCallback onLogin,
     required VoidCallback onLogout,
   }) {
@@ -753,7 +738,6 @@ class AccountsPage extends StatelessWidget {
         statusColor: statusColor,
         state: state,
         extra: extra,
-        icon: icon,
         onLogin: onLogin,
         onLogout: onLogout,
       );
@@ -787,72 +771,7 @@ class AccountsPage extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 46,
-                height: 46,
-                // 水墨：平台图标是一方墨石（墨线描边的淡墨板块 + 焦墨图标），
-                // 平台彩色渐变不上墨面；漫画：白底贴纸块 + 剪影描边。
-                // 墨石不用笔锋圆角——对角大小圆在 46px 小盒+描边上读出来
-                // 是一片叶子（用户实测），笔锋只留给大卡面
-                decoration: BoxDecoration(
-                  borderRadius:
-                      (isPixelStyle(context) || isReceiptStyle(context))
-                      ? BorderRadius.circular(2)
-                      : BorderRadius.circular(14),
-                  gradient:
-                      (isInkStyle(context) ||
-                          isComicStyle(context) ||
-                          isPixelStyle(context))
-                      ? null
-                      : LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: gradient,
-                        ),
-                  color: isInkStyle(context)
-                      ? (isDark(context)
-                            ? Colors.white.withValues(alpha: 0.10)
-                            : Colors.black.withValues(alpha: 0.08))
-                      : isComicStyle(context) || isPixelStyle(context)
-                      ? (isDark(context)
-                            ? const Color(0xFF2E1E26)
-                            : Colors.white)
-                      : null,
-                  border: isInkStyle(context)
-                      ? Border.all(
-                          color: (isDark(context) ? Colors.white : Colors.black)
-                              .withValues(alpha: 0.25),
-                        )
-                      : isComicStyle(context) || isPixelStyle(context)
-                      ? Border.all(
-                          color: paletteOf(context).cardBorder,
-                          width: 1.4,
-                        )
-                      : isReceiptStyle(context)
-                      ? Border.all(
-                          color: paletteOf(context).cardBorder
-                              .withValues(alpha: 0.6),
-                          width: 1,
-                        )
-                      : null,
-                  boxShadow: isComicStyle(context) || isPixelStyle(context)
-                      ? [
-                          BoxShadow(
-                            color: paletteOf(context).cardBorder,
-                            blurRadius: 0,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Icon(
-                  icon,
-                  color: isInkStyle(context) || isPixelStyle(context)
-                      ? textPrimary(context)
-                      : (isComicStyle(context) ? gradient.first : Colors.white),
-                  size: 22,
-                ),
-              ),
+              AccountPlatformIcon(index: index, size: 50),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

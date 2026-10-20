@@ -1,10 +1,11 @@
 /// 同步编排：拉取各平台 → 归并 → 存库 → 重排通知 → 更新桌面小组件。
-/// 设计为不依赖 UI，可在后台 isolate 里复用。
+/// UI 与 WorkManager 共用同一引擎、事务队列及账号代际。
 library;
 
 import 'dart:convert';
 
 import 'package:home_widget/home_widget.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/homework.dart';
 import 'chaoxing_service.dart';
@@ -13,6 +14,7 @@ import 'homework_widget_snapshot.dart';
 import 'notification_service.dart';
 import 'safe_http.dart';
 import 'storage.dart';
+import 'sync_policy.dart';
 import 'xuetangx_service.dart';
 import 'yuketang_service.dart';
 import 'zhihuishu_service.dart';
@@ -111,6 +113,8 @@ void mergePlatform(
 }
 
 class SyncResult {
+  final Set<PlatformKind> attempted = {};
+  final Map<PlatformKind, SyncOutcome> outcomes = {};
   bool cancelled = false;
   bool partial = false;
   int generation = -1;
@@ -133,14 +137,39 @@ class SyncResult {
 }
 
 class SyncService {
+  static final widgetPublishError = ValueNotifier<String?>(null);
+
   /// 拉取并归并。传入当前保存的凭据；凭据无效的平台标记为需重新登录。
   static Future<SyncResult> run({
     void Function(int done, int total)? onProgress,
+    Set<PlatformKind>? platforms,
+    void Function()? onCommitted,
   }) async {
     await Storage.waitForBusinessTransaction();
     final result = SyncResult();
     final epoch = Storage.syncEpoch;
     result.generation = epoch;
+    final selected = (platforms ?? Storage.syncAccounts()).intersection(
+      Storage.syncAccounts(),
+    );
+    result.attempted.addAll(selected);
+    final attemptedAt = DateTime.now();
+    final statuses = Storage.syncStatuses();
+    final previousStatuses = {...statuses};
+    // Reserve a retry before network I/O: process death cannot leave a platform
+    // permanently marked as running or falsely advance its successful time.
+    for (final p in selected) {
+      statuses[p] = (statuses[p] ?? const PlatformSyncStatus()).finish(
+        SyncOutcome.retry,
+        attemptedAt,
+      );
+    }
+    if (selected.isNotEmpty) await Storage.saveSyncStatuses(statuses);
+    if (epoch != Storage.syncEpoch) {
+      result.cancelled = true;
+      return result;
+    }
+
     SyncResult cancelled() {
       result.cancelled = true;
       result.items = Storage.homework()
@@ -173,175 +202,195 @@ class SyncService {
     String? yktExpiredNotice;
 
     final cx = ChaoxingService(cookie: Storage.chaoxingCookie());
-    try {
-      final cxOk = await cx.checkLogin();
-      if (epoch != Storage.syncEpoch) return cancelled();
-      // 登录从有效变为失效时，发系统通知提醒重新登录（只提醒一次）。
-      // 网络失败算「未知」：把网络抖动当登录过期会误发通知、误标失效，
-      // 还会清掉 cx_ok 让真正的过期永远不再提醒。
-      if (cxOk == null) {
+    if (selected.contains(PlatformKind.chaoxing)) {
+      try {
+        final cxOk = await cx.checkLogin();
+        if (epoch != Storage.syncEpoch) return cancelled();
+        // 登录从有效变为失效时，发系统通知提醒重新登录（只提醒一次）。
+        // 网络失败算「未知」：把网络抖动当登录过期会误发通知、误标失效，
+        // 还会清掉 cx_ok 让真正的过期永远不再提醒。
+        if (cxOk == null) {
+          result.chaoxingUnknown = true;
+        } else {
+          if (Storage.chaoxingCookie()?.isNotEmpty == true &&
+              !cxOk &&
+              Storage.flag('cx_ok')) {
+            loginExpiredNotice = '学习通登录已过期';
+          }
+          await Storage.setFlag('cx_ok', cxOk);
+          if (cxOk) {
+            result.chaoxingValid = true;
+            final list = await cx.allHomework(onProgress: onProgress);
+            if (epoch != Storage.syncEpoch) return cancelled();
+            mergePlatform(
+              merged,
+              list,
+              PlatformKind.chaoxing,
+              complete: !cx.listFailed && cx.failedCount == 0,
+            );
+          }
+        }
+      } catch (e) {
         result.chaoxingUnknown = true;
-      } else {
-        if (Storage.chaoxingCookie()?.isNotEmpty == true &&
-            !cxOk &&
-            Storage.flag('cx_ok')) {
-          loginExpiredNotice = '学习通登录已过期';
-        }
-        await Storage.setFlag('cx_ok', cxOk);
-        if (cxOk) {
-          result.chaoxingValid = true;
-          final list = await cx.allHomework(onProgress: onProgress);
-          mergePlatform(
-            merged,
-            list,
-            PlatformKind.chaoxing,
-            complete: !cx.listFailed && cx.failedCount == 0,
-          );
-        }
+        result.message += '学习通同步异常：$e\n';
       }
-    } catch (e) {
-      result.message += '学习通同步异常：$e\n';
     }
 
     final mooc = MoocService(
       cookie: Storage.moocCookie(),
       csrfKey: Storage.moocCsrf(),
     );
-    try {
-      final moocOk = await mooc.checkLogin();
-      if (epoch != Storage.syncEpoch) return cancelled();
-      if (moocOk == null) {
-        result.moocUnknown = true;
-      } else if (moocOk) {
-        final wasValid = Storage.flag('mooc_ok');
-        final list = await mooc.allHomework(onProgress: onProgress);
-        if (mooc.loginFailed) {
-          // 与学习通同款：从有效变为失效发一次系统通知提醒重新登录。
-          // checkLogin 凭缓存的 csrfKey 恒 true，没有这个信号的话 MOOC
-          // 掉登录后静默停更、界面永远显示「已登录」
-          if (Storage.moocCookie()?.isNotEmpty == true && wasValid) {
-            moocExpiredNotice = 'MOOC登录已过期';
+    if (selected.contains(PlatformKind.mooc)) {
+      try {
+        final moocOk = await mooc.checkLogin();
+        if (epoch != Storage.syncEpoch) return cancelled();
+        if (moocOk == null) {
+          result.moocUnknown = true;
+        } else if (moocOk) {
+          final wasValid = Storage.flag('mooc_ok');
+          final list = await mooc.allHomework(onProgress: onProgress);
+          if (epoch != Storage.syncEpoch) return cancelled();
+          if (mooc.loginFailed) {
+            // 与学习通同款：从有效变为失效发一次系统通知提醒重新登录。
+            // checkLogin 凭缓存的 csrfKey 恒 true，没有这个信号的话 MOOC
+            // 掉登录后静默停更、界面永远显示「已登录」
+            if (Storage.moocCookie()?.isNotEmpty == true && wasValid) {
+              moocExpiredNotice = 'MOOC登录已过期';
+            }
+            await Storage.setFlag('mooc_ok', false);
+          } else {
+            result.moocValid = true;
+            await Storage.setFlag('mooc_ok', true);
+            mergePlatform(
+              merged,
+              list,
+              PlatformKind.mooc,
+              complete: !mooc.listFailed && mooc.failedCount == 0,
+            );
           }
-          await Storage.setFlag('mooc_ok', false);
-        } else {
-          result.moocValid = true;
-          await Storage.setFlag('mooc_ok', true);
-          mergePlatform(
-            merged,
-            list,
-            PlatformKind.mooc,
-            complete: !mooc.listFailed && mooc.failedCount == 0,
-          );
         }
+      } catch (e) {
+        result.moocUnknown = true;
+        result.message += 'MOOC同步异常：$e\n';
       }
-    } catch (e) {
-      result.message += 'MOOC同步异常：$e\n';
     }
 
     // 智慧树分支：与学习通同构——checkLogin 是真实网关探测，能直接给出
     // 三态结论（不像 MOOC 凭缓存 csrfKey 恒 true，需要靠 loginFailed 补信号）
     final zhs = ZhihuishuService(cookie: Storage.zhihuishuCookie());
-    try {
-      final zhsState = await zhs.checkLogin();
-      if (epoch != Storage.syncEpoch) return cancelled();
-      // 网络失败算「未知」：把网络抖动当登录过期会误发通知、误标失效，
-      // 还会清掉 zhs_ok 让真正的过期永远不再提醒（与学习通/MOOC 同款）
-      if (zhsState == ZhsSessionState.unknown) {
+    if (selected.contains(PlatformKind.zhihuishu)) {
+      try {
+        final zhsState = await zhs.checkLogin();
+        if (epoch != Storage.syncEpoch) return cancelled();
+        // 网络失败算「未知」：把网络抖动当登录过期会误发通知、误标失效，
+        // 还会清掉 zhs_ok 让真正的过期永远不再提醒（与学习通/MOOC 同款）
+        if (zhsState == ZhsSessionState.unknown) {
+          result.zhihuishuUnknown = true;
+        } else {
+          // 会话从有效变为失效时，发一次系统通知提醒（通知在 reschedule
+          // 之后才弹，见 run 尾部）。签名被拒 ≠ 登录过期：密钥组/网关校验
+          // 变化时重登无效，文案分开，免得用户反复重登（真会话过期的业务
+          // 码语义待抓包核实后再细分）
+          if (Storage.zhihuishuCookie()?.isNotEmpty == true &&
+              zhsState != ZhsSessionState.ok &&
+              Storage.flag('zhs_ok')) {
+            zhsExpiredNotice = zhsState == ZhsSessionState.signatureRejected
+                ? '智慧树接口校验被拒，可能需要更新 App'
+                : '智慧树登录已过期';
+          }
+          if (zhsState == ZhsSessionState.signatureRejected) {
+            result.zhihuishuSignatureRejected = true;
+          }
+          await Storage.setFlag('zhs_ok', zhsState == ZhsSessionState.ok);
+          if (zhsState == ZhsSessionState.ok) {
+            result.zhihuishuValid = true;
+            final list = await zhs.allHomework(onProgress: onProgress);
+            if (epoch != Storage.syncEpoch) return cancelled();
+            // complete 守卫语义不可动：课程/作业没拉全（候选端点全失败、
+            // 网关抖动）绝不能把旧条目当「确认消失」清库
+            mergePlatform(
+              merged,
+              list,
+              PlatformKind.zhihuishu,
+              complete: !zhs.listFailed && zhs.failedCount == 0,
+            );
+          }
+        }
+      } catch (e) {
         result.zhihuishuUnknown = true;
-      } else {
-        // 会话从有效变为失效时，发一次系统通知提醒（通知在 reschedule
-        // 之后才弹，见 run 尾部）。签名被拒 ≠ 登录过期：密钥组/网关校验
-        // 变化时重登无效，文案分开，免得用户反复重登（真会话过期的业务
-        // 码语义待抓包核实后再细分）
-        if (Storage.zhihuishuCookie()?.isNotEmpty == true &&
-            zhsState != ZhsSessionState.ok &&
-            Storage.flag('zhs_ok')) {
-          zhsExpiredNotice = zhsState == ZhsSessionState.signatureRejected
-              ? '智慧树接口校验被拒，可能需要更新 App'
-              : '智慧树登录已过期';
-        }
-        if (zhsState == ZhsSessionState.signatureRejected) {
-          result.zhihuishuSignatureRejected = true;
-        }
-        await Storage.setFlag('zhs_ok', zhsState == ZhsSessionState.ok);
-        if (zhsState == ZhsSessionState.ok) {
-          result.zhihuishuValid = true;
-          final list = await zhs.allHomework(onProgress: onProgress);
-          // complete 守卫语义不可动：课程/作业没拉全（候选端点全失败、
-          // 网关抖动）绝不能把旧条目当「确认消失」清库
-          mergePlatform(
-            merged,
-            list,
-            PlatformKind.zhihuishu,
-            complete: !zhs.listFailed && zhs.failedCount == 0,
-          );
-        }
+        result.message += '智慧树同步异常：$e\n';
       }
-    } catch (e) {
-      result.message += '智慧树同步异常：$e\n';
     }
 
     // 学堂在线分支：与智慧树同构——checkLogin 三态（无签名概念，无
     // signatureRejected），Cookie 会话纯只读拉取
     final xt = XuetangxService(cookie: Storage.xuetangxCookie());
-    try {
-      final xtState = await xt.checkLogin();
-      if (epoch != Storage.syncEpoch) return cancelled();
-      if (xtState == XtSessionState.unknown) {
+    if (selected.contains(PlatformKind.xuetangx)) {
+      try {
+        final xtState = await xt.checkLogin();
+        if (epoch != Storage.syncEpoch) return cancelled();
+        if (xtState == XtSessionState.unknown) {
+          result.xuetangxUnknown = true;
+        } else {
+          if (Storage.xuetangxCookie()?.isNotEmpty == true &&
+              xtState != XtSessionState.ok &&
+              Storage.flag('xtx_ok')) {
+            xtxExpiredNotice = '学堂在线登录已过期';
+          }
+          await Storage.setFlag('xtx_ok', xtState == XtSessionState.ok);
+          if (xtState == XtSessionState.ok) {
+            result.xuetangxValid = true;
+            final list = await xt.allHomework(onProgress: onProgress);
+            if (epoch != Storage.syncEpoch) return cancelled();
+            // complete 守卫语义不可动：课程列表候选端点未校准/章节树失败
+            // （listFailed）或单课失败时，绝不能把旧条目当「确认消失」清库
+            mergePlatform(
+              merged,
+              list,
+              PlatformKind.xuetangx,
+              complete: !xt.listFailed && xt.failedCount == 0,
+            );
+          }
+        }
+      } catch (e) {
         result.xuetangxUnknown = true;
-      } else {
-        if (Storage.xuetangxCookie()?.isNotEmpty == true &&
-            xtState != XtSessionState.ok &&
-            Storage.flag('xtx_ok')) {
-          xtxExpiredNotice = '学堂在线登录已过期';
-        }
-        await Storage.setFlag('xtx_ok', xtState == XtSessionState.ok);
-        if (xtState == XtSessionState.ok) {
-          result.xuetangxValid = true;
-          final list = await xt.allHomework(onProgress: onProgress);
-          // complete 守卫语义不可动：课程列表候选端点未校准/章节树失败
-          // （listFailed）或单课失败时，绝不能把旧条目当「确认消失」清库
-          mergePlatform(
-            merged,
-            list,
-            PlatformKind.xuetangx,
-            complete: !xt.listFailed && xt.failedCount == 0,
-          );
-        }
+        result.message += '学堂在线同步异常：$e\n';
       }
-    } catch (e) {
-      result.message += '学堂在线同步异常：$e\n';
     }
 
     // 雨课堂分支：与学堂在线同构——纯 Cookie 会话、候选 origin 自适应
     final ykt = YuketangService(cookie: Storage.yuketangCookie());
-    try {
-      final yktState = await ykt.checkLogin();
-      if (epoch != Storage.syncEpoch) return cancelled();
-      if (yktState == YktSessionState.unknown) {
+    if (selected.contains(PlatformKind.yuketang)) {
+      try {
+        final yktState = await ykt.checkLogin();
+        if (epoch != Storage.syncEpoch) return cancelled();
+        if (yktState == YktSessionState.unknown) {
+          result.yuketangUnknown = true;
+        } else {
+          if (Storage.yuketangCookie()?.isNotEmpty == true &&
+              yktState != YktSessionState.ok &&
+              Storage.flag('ykt_ok')) {
+            yktExpiredNotice = '雨课堂登录已过期';
+          }
+          await Storage.setFlag('ykt_ok', yktState == YktSessionState.ok);
+          if (yktState == YktSessionState.ok) {
+            result.yuketangValid = true;
+            final list = await ykt.allHomework(onProgress: onProgress);
+            if (epoch != Storage.syncEpoch) return cancelled();
+            // complete 守卫语义不可动：origin 全挂/单课失败时绝不能把旧
+            // 条目当「确认消失」清库
+            mergePlatform(
+              merged,
+              list,
+              PlatformKind.yuketang,
+              complete: !ykt.listFailed && ykt.failedCount == 0,
+            );
+          }
+        }
+      } catch (e) {
         result.yuketangUnknown = true;
-      } else {
-        if (Storage.yuketangCookie()?.isNotEmpty == true &&
-            yktState != YktSessionState.ok &&
-            Storage.flag('ykt_ok')) {
-          yktExpiredNotice = '雨课堂登录已过期';
-        }
-        await Storage.setFlag('ykt_ok', yktState == YktSessionState.ok);
-        if (yktState == YktSessionState.ok) {
-          result.yuketangValid = true;
-          final list = await ykt.allHomework(onProgress: onProgress);
-          // complete 守卫语义不可动：origin 全挂/单课失败时绝不能把旧
-          // 条目当「确认消失」清库
-          mergePlatform(
-            merged,
-            list,
-            PlatformKind.yuketang,
-            complete: !ykt.listFailed && ykt.failedCount == 0,
-          );
-        }
+        result.message += '雨课堂同步异常：$e\n';
       }
-    } catch (e) {
-      result.message += '雨课堂同步异常：$e\n';
     }
 
     // 落库前重读一遍磁盘：同步可达数十秒，期间用户的手动增删改与备注编辑
@@ -369,6 +418,83 @@ class SyncService {
     if (warnings.isNotEmpty) {
       result.message += '${warnings.join('、')}未完整同步，已保留旧记录，请稍后重试。\n';
     }
+    final health = <PlatformKind, (bool, bool, bool)>{
+      PlatformKind.chaoxing: (
+        result.chaoxingValid,
+        result.chaoxingUnknown,
+        cx.listFailed || cx.failedCount > 0,
+      ),
+      PlatformKind.mooc: (
+        result.moocValid,
+        result.moocUnknown,
+        mooc.listFailed || mooc.failedCount > 0,
+      ),
+      PlatformKind.zhihuishu: (
+        result.zhihuishuValid,
+        result.zhihuishuUnknown,
+        zhs.listFailed || zhs.failedCount > 0,
+      ),
+      PlatformKind.xuetangx: (
+        result.xuetangxValid,
+        result.xuetangxUnknown,
+        xt.listFailed || xt.failedCount > 0,
+      ),
+      PlatformKind.yuketang: (
+        result.yuketangValid,
+        result.yuketangUnknown,
+        ykt.listFailed || ykt.failedCount > 0,
+      ),
+    };
+    for (final p in selected) {
+      final (valid, unknown, incomplete) = health[p]!;
+      result.outcomes[p] =
+          p == PlatformKind.zhihuishu && result.zhihuishuSignatureRejected
+          ? SyncOutcome.signatureRejected
+          : p == PlatformKind.zhihuishu &&
+                zhs.lastSessionState == ZhsSessionState.signatureRejected
+          ? SyncOutcome.signatureRejected
+          : (p == PlatformKind.mooc && mooc.loginFailed) ||
+                (p == PlatformKind.zhihuishu &&
+                    zhs.lastSessionState == ZhsSessionState.expired) ||
+                (p == PlatformKind.xuetangx &&
+                    xt.lastSessionState == XtSessionState.expired) ||
+                (p == PlatformKind.yuketang &&
+                    ykt.lastSessionState == YktSessionState.expired)
+          ? SyncOutcome.loginExpired
+          : unknown || incomplete
+          ? SyncOutcome.retry
+          : valid
+          ? SyncOutcome.success
+          : SyncOutcome.loginExpired;
+    }
+    if (result.outcomes[PlatformKind.zhihuishu] == SyncOutcome.loginExpired ||
+        result.outcomes[PlatformKind.zhihuishu] ==
+            SyncOutcome.signatureRejected) {
+      result.zhihuishuValid = false;
+      result.zhihuishuSignatureRejected =
+          result.outcomes[PlatformKind.zhihuishu] ==
+          SyncOutcome.signatureRejected;
+      if (Storage.flag('zhs_ok')) {
+        zhsExpiredNotice = result.zhihuishuSignatureRejected
+            ? '智慧树接口校验被拒，可能需要更新 App'
+            : '智慧树登录已过期';
+      }
+      await Storage.setFlag('zhs_ok', false);
+      if (epoch != Storage.syncEpoch) return cancelled();
+    }
+    if (result.outcomes[PlatformKind.xuetangx] == SyncOutcome.loginExpired) {
+      result.xuetangxValid = false;
+      if (Storage.flag('xtx_ok')) xtxExpiredNotice = '学堂在线登录已过期';
+      await Storage.setFlag('xtx_ok', false);
+      if (epoch != Storage.syncEpoch) return cancelled();
+    }
+    if (result.outcomes[PlatformKind.yuketang] == SyncOutcome.loginExpired) {
+      result.yuketangValid = false;
+      if (Storage.flag('ykt_ok')) yktExpiredNotice = '雨课堂登录已过期';
+      await Storage.setFlag('ykt_ok', false);
+      if (epoch != Storage.syncEpoch) return cancelled();
+    }
+    if (epoch != Storage.syncEpoch) return cancelled();
     final fresh = {for (final h in Storage.homework()) h.id: h};
 
     // 手动隐藏过的条目不再入库（下次同步也不会回来）。快照放到重读磁盘
@@ -436,10 +562,25 @@ class SyncService {
 
     if (epoch != Storage.syncEpoch) return cancelled();
     await Storage.saveHomework(result.items, fromSync: true);
+    if (epoch != Storage.syncEpoch) return cancelled();
+    onCommitted?.call();
+    final completedAt = DateTime.now();
+    for (final p in selected) {
+      final outcome = result.outcomes[p]!;
+      statuses[p] = (previousStatuses[p] ?? const PlatformSyncStatus()).finish(
+        outcome,
+        completedAt,
+      );
+    }
+    await Storage.saveSyncStatuses(statuses);
+    if (epoch != Storage.syncEpoch) return cancelled();
     await Storage.saveDebugLog(SafeHttp.log);
     // 上课提醒要一并重排：reschedule 会先 cancelAll，漏掉 courses 就会把
     // 课前 15 分钟提醒清光（每次打开 App 都同步，等于提醒常灭）
-    await NotificationService.reschedule(visible(), courses: Storage.courses());
+    await Future.wait([
+      updateHomeWidget(visible()),
+      NotificationService.reschedule(visible(), courses: Storage.courses()),
+    ]);
     if (epoch != Storage.syncEpoch) return cancelled();
     // 过期通知必须在 reschedule 之后弹：reschedule 先 cancelAll，先弹会被
     // 自己清掉，而且去重标志已置位、永远不会再补发
@@ -473,7 +614,6 @@ class SyncService {
         '雨课堂作业没法同步了，点开作业通重新登录一下',
       );
     }
-    await updateHomeWidget(visible());
     if (epoch != Storage.syncEpoch) result.cancelled = true;
     return result;
   }
@@ -511,10 +651,15 @@ class SyncService {
         // Retry a transient native channel/commit failure once, in call order.
       }
     }
-    if (!committed) return;
+    if (!committed) {
+      widgetPublishError.value = '小组件缓存更新失败，会自动重试';
+      return;
+    }
     try {
       await HomeWidget.updateWidget(androidName: 'HomeworkWidgetProvider');
+      widgetPublishError.value = null;
     } catch (_) {
+      widgetPublishError.value = '小组件重绘失败，缓存已保存，会自动重试';
       // Retain the latest committed cache for the next host/app refresh.
     }
     try {

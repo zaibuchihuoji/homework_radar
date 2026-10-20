@@ -15,6 +15,7 @@ import 'services/notification_service.dart';
 import 'services/jw_config.dart';
 import 'services/storage.dart';
 import 'services/sync_service.dart';
+import 'services/sync_policy.dart';
 import 'services/timetable_widget.dart';
 import 'ui/tokens.dart';
 
@@ -92,21 +93,25 @@ class AppState extends ChangeNotifier {
   Future<void> loadLocal() async {
     homework = _visibleHomework();
     courses = Storage.courses();
-    chaoxingState = Storage.chaoxingCookie()?.isNotEmpty == true
-        ? AccountState.ok
-        : AccountState.notLoggedIn;
-    moocState = Storage.moocCookie()?.isNotEmpty == true
-        ? AccountState.ok
-        : AccountState.notLoggedIn;
-    zhihuishuState = Storage.zhihuishuCookie()?.isNotEmpty == true
-        ? AccountState.ok
-        : AccountState.notLoggedIn;
-    xuetangxState = Storage.xuetangxCookie()?.isNotEmpty == true
-        ? AccountState.ok
-        : AccountState.notLoggedIn;
-    yuketangState = Storage.yuketangCookie()?.isNotEmpty == true
-        ? AccountState.ok
-        : AccountState.notLoggedIn;
+    final successes =
+        Storage.syncStatuses().values
+            .map((s) => s.lastSuccess)
+            .nonNulls
+            .toList()
+          ..sort();
+    lastSync = successes.lastOrNull;
+    final statuses = Storage.syncStatuses();
+    AccountState account(PlatformKind p, String? cookie) =>
+        cookie?.isNotEmpty != true
+        ? AccountState.notLoggedIn
+        : statuses[p]?.outcome == SyncOutcome.loginExpired
+        ? AccountState.needRelogin
+        : AccountState.ok;
+    chaoxingState = account(PlatformKind.chaoxing, Storage.chaoxingCookie());
+    moocState = account(PlatformKind.mooc, Storage.moocCookie());
+    zhihuishuState = account(PlatformKind.zhihuishu, Storage.zhihuishuCookie());
+    xuetangxState = account(PlatformKind.xuetangx, Storage.xuetangxCookie());
+    yuketangState = account(PlatformKind.yuketang, Storage.yuketangCookie());
     zfState = Storage.zfCookie()?.isNotEmpty == true
         ? AccountState.ok
         : AccountState.notLoggedIn;
@@ -114,20 +119,54 @@ class AppState extends ChangeNotifier {
   }
 
   bool _syncQueued = false;
-
-  Future<String> syncAll() async {
-    if (syncing) {
-      // 同步进行中又来了同步请求（典型：刚登录成功触发）：置位排队，
-      // 结束后补跑一次。直接吞掉的话新凭据本次不生效，还要手动再刷。
-      _syncQueued = true;
-      return '';
+  Set<PlatformKind>? _queuedPlatforms;
+  Future<String>? _activeSync;
+  Future<void> waitForSync() async {
+    try {
+      await _activeSync;
+    } catch (_) {
+      // A previous I/O failure must not poison every future automatic retry.
+      // The original caller still receives that failure; retry reads current data.
     }
+  }
+
+  Future<void> Function()? onSyncScheduleChanged;
+
+  Future<String> syncAll() => syncPlatforms();
+
+  Future<String> syncPlatforms({Set<PlatformKind>? platforms}) {
+    if (syncing) {
+      if (!_syncQueued) {
+        _queuedPlatforms = platforms == null ? null : {...platforms};
+      } else if (platforms == null) {
+        _queuedPlatforms = null;
+      } else {
+        _queuedPlatforms?.addAll(platforms);
+      }
+      _syncQueued = true;
+      return _activeSync ?? Future.value('');
+    }
+    return _activeSync = _runSync(platforms);
+  }
+
+  Future<void> setSyncConfig(SyncConfig value) async {
+    await Storage.saveSyncConfig(value);
+    await onSyncScheduleChanged?.call();
+    notifyListeners();
+  }
+
+  Future<String> _runSync(Set<PlatformKind>? platforms) async {
     syncing = true;
     lastSyncMessage = '';
     syncProgress = '';
     notifyListeners();
     try {
       final result = await SyncService.run(
+        platforms: platforms,
+        onCommitted: () {
+          homework = _visibleHomework();
+          notifyListeners();
+        },
         onProgress: (done, total) {
           syncProgress = total > 0 ? '$done/$total' : '';
           notifyListeners();
@@ -137,45 +176,63 @@ class AppState extends ChangeNotifier {
       if (result.cancelled || result.generation != Storage.syncEpoch) {
         if (hasAnyAccount) _syncQueued = true;
       } else {
-        if (!result.partial) lastSync = DateTime.now();
+        final successes =
+            Storage.syncStatuses().values
+                .map((s) => s.lastSuccess)
+                .nonNulls
+                .toList()
+              ..sort();
+        lastSync = successes.lastOrNull;
         syncProgress = '';
 
-        chaoxingState = Storage.chaoxingCookie()?.isNotEmpty == true
-            ? (result.chaoxingValid
-                  ? AccountState.ok
-                  : (result.chaoxingUnknown
-                        ? chaoxingState // 网络失败≠登录失效，保持原状态
-                        : AccountState.needRelogin))
-            : AccountState.notLoggedIn;
-        moocState = Storage.moocCookie()?.isNotEmpty == true
-            ? (result.moocValid
-                  ? AccountState.ok
-                  : (result.moocUnknown ? moocState : AccountState.needRelogin))
-            : AccountState.notLoggedIn;
-        zhihuishuState = Storage.zhihuishuCookie()?.isNotEmpty == true
-            ? (result.zhihuishuValid
-                  ? AccountState.ok
-                  : (result.zhihuishuUnknown ||
-                            result.zhihuishuSignatureRejected
-                        // 签名被拒重登也过不了捕获校验：保持原状态，通知文案
-                        // 已引导「可能需要更新 App」，别把用户标成需重登去反复碰壁
-                        ? zhihuishuState
-                        : AccountState.needRelogin))
-            : AccountState.notLoggedIn;
-        xuetangxState = Storage.xuetangxCookie()?.isNotEmpty == true
-            ? (result.xuetangxValid
-                  ? AccountState.ok
-                  : (result.xuetangxUnknown
-                        ? xuetangxState
-                        : AccountState.needRelogin))
-            : AccountState.notLoggedIn;
-        yuketangState = Storage.yuketangCookie()?.isNotEmpty == true
-            ? (result.yuketangValid
-                  ? AccountState.ok
-                  : (result.yuketangUnknown
-                        ? yuketangState
-                        : AccountState.needRelogin))
-            : AccountState.notLoggedIn;
+        if (result.attempted.contains(PlatformKind.chaoxing)) {
+          chaoxingState = Storage.chaoxingCookie()?.isNotEmpty == true
+              ? (result.chaoxingValid
+                    ? AccountState.ok
+                    : (result.chaoxingUnknown
+                          ? chaoxingState // 网络失败≠登录失效，保持原状态
+                          : AccountState.needRelogin))
+              : AccountState.notLoggedIn;
+        }
+        if (result.attempted.contains(PlatformKind.mooc)) {
+          moocState = Storage.moocCookie()?.isNotEmpty == true
+              ? (result.moocValid
+                    ? AccountState.ok
+                    : (result.moocUnknown
+                          ? moocState
+                          : AccountState.needRelogin))
+              : AccountState.notLoggedIn;
+        }
+        if (result.attempted.contains(PlatformKind.zhihuishu)) {
+          zhihuishuState = Storage.zhihuishuCookie()?.isNotEmpty == true
+              ? (result.zhihuishuValid
+                    ? AccountState.ok
+                    : (result.zhihuishuUnknown ||
+                              result.zhihuishuSignatureRejected
+                          // 签名被拒重登也过不了捕获校验：保持原状态，通知文案
+                          // 已引导「可能需要更新 App」，别把用户标成需重登去反复碰壁
+                          ? zhihuishuState
+                          : AccountState.needRelogin))
+              : AccountState.notLoggedIn;
+        }
+        if (result.attempted.contains(PlatformKind.xuetangx)) {
+          xuetangxState = Storage.xuetangxCookie()?.isNotEmpty == true
+              ? (result.xuetangxValid
+                    ? AccountState.ok
+                    : (result.xuetangxUnknown
+                          ? xuetangxState
+                          : AccountState.needRelogin))
+              : AccountState.notLoggedIn;
+        }
+        if (result.attempted.contains(PlatformKind.yuketang)) {
+          yuketangState = Storage.yuketangCookie()?.isNotEmpty == true
+              ? (result.yuketangValid
+                    ? AccountState.ok
+                    : (result.yuketangUnknown
+                          ? yuketangState
+                          : AccountState.needRelogin))
+              : AccountState.notLoggedIn;
+        }
 
         lastSyncMessage = result.message;
       }
@@ -183,12 +240,15 @@ class AppState extends ChangeNotifier {
       // 没有 finally 的老实现：收尾任何一步抛错都让 syncing 永久卡 true，
       // 所有同步入口（下拉刷新/按钮/回前台自动同步）静默失效直到杀进程
       syncing = false;
+      await onSyncScheduleChanged?.call();
       notifyListeners();
     }
     if (_syncQueued) {
       _syncQueued = false;
       // 排队的那次是登录回调触发的，fire-and-forget 即可
-      unawaited(syncAll());
+      final queued = _queuedPlatforms;
+      _queuedPlatforms = null;
+      await syncPlatforms(platforms: queued);
     }
     return lastSyncMessage;
   }
@@ -227,8 +287,10 @@ class AppState extends ChangeNotifier {
     await Storage.businessTransaction(() async {
       await _prepareAccountLogin(platform, cookie, uid: uid);
       await save();
+      await Storage.resetSyncStatus(platform);
     }, credentials: true);
     await loadLocal();
+    await onSyncScheduleChanged?.call();
   }
 
   Future<void> onChaoxingLogin(
@@ -292,8 +354,10 @@ class AppState extends ChangeNotifier {
     await Storage.businessTransaction(() async {
       await Storage.archivePlatform(platform);
       await clear();
+      await Storage.resetSyncStatus(platform);
     }, credentials: true);
     await loadLocal();
+    await onSyncScheduleChanged?.call();
     await _refreshHomeworkOutputs();
   }
 

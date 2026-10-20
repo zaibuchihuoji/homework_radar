@@ -87,7 +87,14 @@ class YuketangService {
       SafeHttp.get(url, headers: _headers);
 
   /// Cookie 是否有效（问一次课程列表）。结论见 [YktSessionState]。
+  YktSessionState? lastSessionState;
   Future<YktSessionState> checkLogin() async {
+    final state = await _checkLogin();
+    lastSessionState = state;
+    return state;
+  }
+
+  Future<YktSessionState> _checkLogin() async {
     if (cookie == null || cookie!.isEmpty) return YktSessionState.expired;
     var unknown = false;
     for (final origin in origins) {

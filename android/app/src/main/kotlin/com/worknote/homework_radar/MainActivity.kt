@@ -9,26 +9,31 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.webkit.CookieManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import java.security.KeyStore
-import java.util.concurrent.Executors
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 import es.antonborri.home_widget.HomeWidgetLaunchIntent
 
 class MainActivity : FlutterActivity() {
-    companion object {
-        private val secureExecutor = Executors.newSingleThreadExecutor()
+    override fun provideFlutterEngine(context: Context): FlutterEngine = SyncRuntimeHost.engine(context)
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
+    override fun onResume() {
+        super.onResume()
+        UpdateBridge.attach(this)
+        SyncRuntimeHost.foreground(true)
+    }
+    override fun onPause() {
+        SyncRuntimeHost.foreground(false)
+        UpdateBridge.detach(this)
+        super.onPause()
+    }
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        super.cleanUpFlutterEngine(flutterEngine)
+        SyncRuntimeHost.restorePlatformBridge(this)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -37,28 +42,29 @@ class MainActivity : FlutterActivity() {
         // intent available to initiallyLaunchedFromHomeWidget as well.
         setIntent(intent)
         super.onNewIntent(intent)
+        UpdateBridge.handleIntent(intent)
     }
 
     override fun shouldHandleDeeplinking(): Boolean =
         intent?.action != HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION &&
             super.shouldHandleDeeplinking()
 
-    private fun secureCall(result: MethodChannel.Result, operation: () -> Any?) {
-        secureExecutor.execute {
-            try {
-                val value = operation()
-                runOnUiThread { result.success(value) }
-            } catch (_: Exception) {
-                runOnUiThread { result.error("secure", "Secure storage operation failed", null) }
-            }
-        }
-    }
     // 首帧已可上屏（Dart 定妆页画好，或 4s 兜底）；通道回调与绘制线程都会碰
     @Volatile
     private var splashReady = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val retainedUi = SyncRuntimeHost.hasUi
         super.onCreate(savedInstanceState)
+        UpdateBridge.handleIntent(intent)
+        // A retained Dart navigator does not read initial intents a second time.
+        // Deliver fresh clicks to the existing plugin listeners when Activity was
+        // finished and recreated, without replaying history/configuration intents.
+        if (retainedUi && savedInstanceState == null &&
+            intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0 &&
+            intent.action in setOf(HomeWidgetLaunchIntent.HOME_WIDGET_LAUNCH_ACTION, "SELECT_NOTIFICATION")) {
+            flutterEngine?.activityControlSurface?.onNewIntent(intent)
+        }
         // 压住系统启动屏到 Flutter 首帧真正上屏再放行：A12+ 在首帧一出现时
         // 就撤启动屏，若窗口还没从启动尺寸过渡到全屏，画面会被劈成两截。
         // 只压这一下，无任何额外等待。仅冷启动拦截（recreate 不拦）。
@@ -78,48 +84,12 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // 凭据加密：AES-256-GCM 密钥存 AndroidKeyStore，密文存独立 prefs
-    private fun secretKey(): SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey("hw_radar_master", null) as? SecretKey)?.let { return it }
-        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        gen.init(
-            KeyGenParameterSpec.Builder(
-                "hw_radar_master",
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-            )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .build(),
-        )
-        return gen.generateKey()
-    }
-
-    private fun securePrefs() =
-        getSharedPreferences("hw_radar_secure", Context.MODE_PRIVATE)
-
-    private fun secureRead(key: String): String? {
-        val raw = securePrefs().getString(key, null) ?: return null
-        val data = Base64.decode(raw, Base64.DEFAULT)
-        val iv = data.copyOfRange(0, 12)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, iv))
-        return String(cipher.doFinal(data.copyOfRange(12, data.size)), Charsets.UTF_8)
-    }
-
-    private fun secureWrite(key: String, value: String) {
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-        val iv = cipher.iv
-        val enc = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        DurablePreferences.commit(securePrefs().edit()
-            .putString(key, Base64.encodeToString(iv + enc, Base64.DEFAULT)))
-    }
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
+        // The application engine registered plugins once, before Dart started.
+        val secure = SecureCredentialStore(applicationContext)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "homework_radar/platform")
             .setMethodCallHandler { call, result ->
+                if (secure.handle(call, result)) return@setMethodCallHandler
                 when (call.method) {
                     "openNotificationSettings" -> {
                         val channel = call.argument<String>("channelId")
@@ -156,29 +126,10 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(true)
                     }
-                    "secureRead" -> {
-                        secureCall(result) { secureRead(call.argument<String>("key") ?: "") }
-                    }
-                    "secureWrite" -> {
-                        secureCall(result) {
-                            secureWrite(
-                                call.argument<String>("key") ?: "",
-                                call.argument<String>("value") ?: "",
-                            )
-                            true
-                        }
-                    }
-                                        // Dart 定妆页已上屏，可以撤系统启动屏了
                     "splashDone" -> {
+                        SyncRuntimeHost.hasUi = true
                         splashReady = true
                         result.success(true)
-                    }
-                    "secureDelete" -> {
-                        secureCall(result) {
-                            DurablePreferences.commit(securePrefs().edit()
-                                .remove(call.argument<String>("key") ?: ""))
-                            true
-                        }
                     }
                     else -> result.notImplemented()
                 }

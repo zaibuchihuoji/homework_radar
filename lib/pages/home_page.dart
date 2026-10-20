@@ -910,35 +910,56 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _openAddMenu(BuildContext context) async {
-    final choice = await showModalBottomSheet<String>(
+    final choice = await showDialog<String>(
       context: context,
-      backgroundColor: cardColor(context),
-      shape: themeModalShape(paletteOf(context)),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                '添加作业',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
+      builder: (dialogContext) => ThemedDialog(
+        backgroundColor: cardColor(dialogContext),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '添加作业',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: textPrimary(dialogContext),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_rounded, size: 21),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _AddHomeworkOption(
+                  icon: Icons.edit_note_rounded,
+                  title: '手动添加',
+                  subtitle: '填写课程、内容和截止时间',
+                  onTap: () => Navigator.pop(dialogContext, 'manual'),
+                ),
+                const SizedBox(height: 12),
+                _AddHomeworkOption(
+                  icon: Icons.document_scanner_rounded,
+                  title: '识别添加',
+                  subtitle: '导入截图或粘贴文字',
+                  onTap: () => Navigator.pop(dialogContext, 'recognition'),
+                ),
+              ],
             ),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('手动添加'),
-              subtitle: const Text('自己填写课程、标题和截止时间'),
-              onTap: () => Navigator.pop(context, 'manual'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.document_scanner_outlined),
-              title: const Text('识别添加'),
-              subtitle: const Text('截图或粘贴文字，核对后勾选添加'),
-              onTap: () => Navigator.pop(context, 'recognition'),
-            ),
-            const SizedBox(height: 12),
-          ],
+          ),
         ),
       ),
     );
@@ -1716,6 +1737,82 @@ class _HomePageState extends State<HomePage> {
             if (action != null) const SizedBox(height: 18),
             ?action,
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A full-width, keyboard/semantics-friendly choice inside the centered dialog.
+class _AddHomeworkOption extends StatelessWidget {
+  const _AddHomeworkOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String title, subtitle;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final p = paletteOf(context);
+    final radius = p.pixel || p.receipt || p.terminal
+        ? 3.0
+        : p.paper || p.journal
+        ? 8.0
+        : 16.0;
+    return Material(
+      color: Color.alphaBlend(p.accentFill.withValues(alpha: .045), p.modal),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(radius),
+        side: BorderSide(color: p.cardBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(15),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: p.accentFill.withValues(alpha: p.sunny ? .36 : .10),
+                  borderRadius: BorderRadius.circular(radius * .7),
+                ),
+                child: Icon(icon, color: p.sunny ? p.ink : p.accent, size: 25),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: p.ink,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: p.ink2,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(Icons.chevron_right_rounded, color: p.ink3, size: 20),
+            ],
+          ),
         ),
       ),
     );

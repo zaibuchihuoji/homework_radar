@@ -9,6 +9,7 @@ import 'package:homework_radar/models/homework.dart';
 import 'package:homework_radar/services/secure_store.dart';
 import 'package:homework_radar/services/storage.dart';
 import 'package:homework_radar/services/sync_service.dart';
+import 'package:homework_radar/services/sync_policy.dart';
 import 'package:homework_radar/services/zhihuishu_service.dart';
 
 import 'support/synthetic_http.dart';
@@ -61,12 +62,95 @@ void main() {
     {'content-type': 'application/json; charset=utf-8'},
   );
 
+  test(
+    'confirmed expiry during fetch pauses retry and retains existing work',
+    () async {
+      var probes = 0;
+      network.handler = (_, uri, body) {
+        if (uri.path.contains('getMyLearnedCoursePanelList')) {
+          probes++;
+          return probes == 1
+              ? json({
+                  'code': 0,
+                  'result': [
+                    {'courseId': 1, 'termId': 1, 'name': 'Existing'},
+                  ],
+                })
+              : json({'code': 1});
+        }
+        return json({'code': 1});
+      };
+      await Storage.saveMooc(cookie: 'STUDY_SESS=synthetic', csrf: 'synthetic');
+      await Storage.saveHomework([
+        HomeworkItem(
+          id: 'old-auth',
+          platform: PlatformKind.mooc,
+          course: 'Existing',
+          title: 'Keep me',
+          note: 'Keep note',
+        ),
+      ]);
+      final result = await SyncService.run(platforms: {PlatformKind.mooc});
+      expect(result.outcomes[PlatformKind.mooc], SyncOutcome.loginExpired);
+      expect(Storage.syncStatuses()[PlatformKind.mooc]!.paused, true);
+      expect(Storage.syncStatuses()[PlatformKind.mooc]!.nextRetry, isNull);
+      expect(Storage.homework().single.note, 'Keep note');
+    },
+  );
+
   for (final platform in [
     PlatformKind.mooc,
     PlatformKind.xuetangx,
     PlatformKind.yuketang,
     PlatformKind.zhihuishu,
   ]) {
+    if (platform != PlatformKind.mooc) {
+      test(
+        '${platform.name}: expiry in the second session probe pauses retry',
+        () async {
+          var probes = 0;
+          network.handler = (_, uri, body) {
+            probes++;
+            if (probes > 1) return SyntheticResponse('{}', 401);
+            return switch (platform) {
+              PlatformKind.xuetangx => json({
+                'success': true,
+                'data': {'product_list': []},
+              }),
+              PlatformKind.yuketang => json({
+                'errcode': 0,
+                'data': {'list': []},
+              }),
+              _ => json({
+                'code': 200,
+                'result': {'courseOpenDtos': []},
+              }),
+            };
+          };
+          switch (platform) {
+            case PlatformKind.xuetangx:
+              await Storage.saveXuetangx(cookie: 'synthetic');
+            case PlatformKind.yuketang:
+              await Storage.saveYuketang(cookie: 'synthetic');
+            default:
+              await Storage.saveZhihuishu(cookie: 'synthetic');
+          }
+          await Storage.saveHomework([
+            HomeworkItem(
+              id: 'keep-${platform.name}',
+              platform: platform,
+              course: 'Old',
+              title: 'Old',
+              note: 'Keep note',
+            ),
+          ]);
+          final result = await SyncService.run(platforms: {platform});
+          expect(result.outcomes[platform], SyncOutcome.loginExpired);
+          expect(Storage.syncStatuses()[platform]!.paused, true);
+          expect(Storage.homework().single.note, 'Keep note');
+        },
+      );
+    }
     for (final failed in [false, true]) {
       test(
         '${platform.name}: ${failed ? "failed second course retains old work and reports partial" : "healthy course plus normal empty course completes without warning"}',
@@ -281,8 +365,26 @@ void main() {
               sourceKey: '${platform.name}|old',
             ),
           ]);
-          final result = await SyncService.run();
+          await Storage.saveChaoxing(cookie: 'unselected-synthetic');
+          final previous = const PlatformSyncStatus().finish(
+            SyncOutcome.success,
+            DateTime(2026, 10, 19),
+          );
+          await Storage.saveSyncStatuses({PlatformKind.chaoxing: previous});
+          final result = await SyncService.run(platforms: {platform});
           final incomplete = failed || platform == PlatformKind.zhihuishu;
+          expect(result.attempted, {platform});
+          expect(
+            Storage.syncStatuses()[PlatformKind.chaoxing]!.lastSuccess,
+            previous.lastSuccess,
+          );
+          final outcome = incomplete ? SyncOutcome.retry : SyncOutcome.success;
+          expect(result.outcomes[platform], outcome);
+          expect(Storage.syncStatuses()[platform]!.outcome, outcome);
+          expect(
+            Storage.syncStatuses()[platform]!.nextRetry != null,
+            incomplete,
+          );
           expect(result.partial, incomplete);
           expect(result.message.isNotEmpty, incomplete);
           expect(result.items.map((h) => h.title), contains('Fresh'));

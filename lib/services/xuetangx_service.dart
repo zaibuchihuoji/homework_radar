@@ -93,7 +93,14 @@ class XuetangxService {
       SafeHttp.get(url, headers: _headers);
 
   /// Cookie 是否有效（问一次在学课程列表第 1 页）。结论见 [XtSessionState]。
+  XtSessionState? lastSessionState;
   Future<XtSessionState> checkLogin() async {
+    final state = await _checkLogin();
+    lastSessionState = state;
+    return state;
+  }
+
+  Future<XtSessionState> _checkLogin() async {
     if (cookie == null || cookie!.isEmpty) return XtSessionState.expired;
     final resp = await _get('$_userCoursesUrl?status=1&page=1');
     if (resp == null) return XtSessionState.unknown; // 网络失败 ≠ 登录过期

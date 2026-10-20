@@ -9,6 +9,7 @@ import 'package:homework_radar/pages/notification_settings_page.dart';
 import 'package:homework_radar/services/notification_service.dart';
 import 'package:homework_radar/services/storage.dart';
 import 'package:homework_radar/ui/tokens.dart';
+import 'package:homework_radar/ui/theme_page_parts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -234,9 +235,13 @@ void main() {
         await tester.scrollUntilVisible(find.text('设置上课提醒'), 300);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        await tester.scrollUntilVisible(find.text('测试上课提醒'), 160);
+        final send = find.descendant(
+          of: find.widgetWithText(ThemePanel, '上课提醒'),
+          matching: find.text('发送一条提醒'),
+        );
+        await tester.scrollUntilVisible(send, 160);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('测试上课提醒'));
+        await tester.tap(send);
         await tester.pumpAndSettle();
         expect(calls.where((c) => c.method == 'show'), hasLength(1));
         expect(tester.takeException(), isNull);

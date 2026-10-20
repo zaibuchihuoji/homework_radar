@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:home_widget/home_widget.dart';
@@ -15,6 +16,9 @@ import 'pages/settings_page.dart';
 import 'pages/splash_page.dart';
 import 'pages/timetable_page.dart';
 import 'services/notification_service.dart';
+import 'services/background_sync.dart';
+import 'services/app_update_controller.dart';
+import 'pages/update_dialog.dart';
 import 'services/storage.dart';
 import 'services/timetable_widget.dart';
 import 'services/sync_service.dart';
@@ -33,6 +37,7 @@ bool showSplashOnStart = true;
 
 /// main() 里挂好的全局 AppState，供启动页交接时取用。
 AppState? appStateForHome;
+BackgroundSync? backgroundSyncForApp;
 
 void _openDetail(String homeworkId) {
   _navigatorKey.currentState?.push(
@@ -46,11 +51,8 @@ void _openDetail(String homeworkId) {
 /// 只消费一次，用完即清。
 VoidCallback? onSplashFinished;
 
-/// 冷启动深链交接通道：main() 拿到通知启动 payload 后 complete 它，
-/// 启动页撤除时等待它完成。不能让撤除回调直接读一个可能尚未
-/// 赋值的 onSplashFinished——通知 init 内含 Android 13+ 权限弹窗
-/// （必超启动页 1.2s 停留），先到点的 Timer/整屏点按会把深链读成
-/// null 而永久丢失；等待通道让「点按早到」只是晚几秒跳详情。
+/// 首次前台页面等通知启动 payload 就绪后再交接，避免启动页先撤导致深链丢失。
+/// 后台引擎不提前消费启动信息；之后打开 Activity 时才读取。
 final Completer<String?> launchPayloadReady = Completer<String?>();
 
 Future<void> main() async {
@@ -67,53 +69,46 @@ Future<void> main() async {
         return true; // 已由 zone 兜底记录，不交给默认处理器再炸一次
       };
 
-      // 首帧路径上只留必要的本地读取：通知、小组件、同步全部让路到 runApp 之后。
-      // 系统启动屏会定格到首帧出现为止——之前这里串行等完五件事，开屏后半段
-      // 全是静止画面，是"启动墨迹"的主因。
+      // 前后台都先加载同一份本地数据；后台任务不创建页面或请求权限。
       await Storage.init();
       final state = AppState();
       appStateForHome = state;
       // 先上屏本地已有数据（作业 + 课表），主页一出来就有内容
       await state.loadLocal();
-      runApp(HomeworkRadarApp(state: state));
+      Future<void>? uiStarted;
+      Future<void> startUi() => uiStarted ??= () async {
+        runApp(HomeworkRadarApp(state: state));
+        String? payload;
+        try {
+          await NotificationService.init();
+          payload = await NotificationService.initialPayload();
+        } catch (e) {
+          debugPrint('notification launch init failed: $e');
+        }
+        if (!launchPayloadReady.isCompleted) {
+          launchPayloadReady.complete(payload);
+        }
+        unawaited(NotificationService.rerequestPermission());
+      }();
 
-      // ---- 以下都在首帧之后进行，不挡开屏 ----
-      // 深链交接先挂上：必须排在通知 init（内含权限弹窗，await 必超启动页
-      // 1.2s）与 initialPayload 之前——否则启动页撤除回调还是 null，深链必丢。
-      // 回调里等 launchPayloadReady：点按/Timer 早到只是等
-      // payload，不会再读到空值。
+      // 在启动任何 UI 之前挂好交接，首次 Activity 到来时才读取通知 payload。
       onSplashFinished = () async {
         final payload = await launchPayloadReady.future;
         if (payload != null && payload.isNotEmpty) _openDetail(payload);
       };
-      // 通知初始化失败（权限通道异常等）不能连坐深链交接与冷启动收尾：
-      // 补排/小组件/自动同步照常执行，payload 按没有拉起处理
-      String? launchPayload;
       NotificationService.onSelect = _openDetail;
+      // Safe without an Activity: notification initialization never requests UI permission.
       try {
         await NotificationService.init();
-        launchPayload = await NotificationService.initialPayload();
-      } catch (e, st) {
-        debugPrint('notification init failed: $e\n$st');
-      }
-      // payload 就绪（含「没有通知拉起」的 null）：放行等待中的撤除回调
-      if (!launchPayloadReady.isCompleted) {
-        launchPayloadReady.complete(launchPayload);
-      }
-      // 先消费通知启动信息，授权弹窗再异步进行，不设置丢弃迟到深链的超时。
-      unawaited(NotificationService.rerequestPermission());
-      // 提醒只会在打开 App 时重排：冷启动先按本地数据补排一次，
-      // 上次把上课提醒清掉的操作不会一直生效到下次同步
+      } catch (_) {}
+      final background = BackgroundSync(state, onForeground: startUi);
+      backgroundSyncForApp = background;
+      await background.init();
       unawaited(
         NotificationService.reschedule(state.homework, courses: state.courses),
       );
       unawaited(TimetableWidget.push(state.courses));
-      // Refresh pre-upgrade widget caches from the visible local records even
-      // without a logged-in platform. Export never edits the records themselves.
       unawaited(SyncService.updateHomeWidget(state.homework));
-      if (state.hasAnyAccount) {
-        Future.microtask(state.syncAll);
-      }
     },
     (e, st) {
       // 同步/通知/小组件链路的未捕获异步异常：记到 debug 控制台即可，
@@ -608,6 +603,11 @@ class _HomeworkRadarAppState extends State<HomeworkRadarApp>
     // 进程冷启动：首帧上屏后放行启动屏
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(milliseconds: 150), _notifySplashReady);
+      AppUpdateController.instance.onOpen = () {
+        final context = _navigatorKey.currentState?.overlay?.context;
+        if (context != null) unawaited(showAppUpdateDialog(context));
+      };
+      unawaited(AppUpdateController.instance.initialize());
     });
   }
 
@@ -627,8 +627,19 @@ class _HomeworkRadarAppState extends State<HomeworkRadarApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed &&
+        defaultTargetPlatform != TargetPlatform.android) {
+      unawaited(
+        backgroundSyncForApp?.foreground(false) ?? Future<void>.value(),
+      );
+    }
     // 进程内重建 Activity 时补发一次，防止启动屏被压住不放
     if (state == AppLifecycleState.resumed) {
+      if (defaultTargetPlatform != TargetPlatform.android) {
+        unawaited(
+          backgroundSyncForApp?.foreground(true) ?? Future<void>.value(),
+        );
+      }
       _syncWidgetTheme();
       _notifySplashReady();
       unawaited(NotificationService.refreshPermission());
@@ -807,18 +818,6 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     unawaited(_widgetNavigation.dispose());
     _pageController.dispose();
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-    final s = widget.state;
-    if (!s.hasAnyAccount || s.syncing) return;
-    final last = s.lastSync;
-    if (last == null ||
-        DateTime.now().difference(last) > const Duration(hours: 6)) {
-      s.syncAll();
-    }
   }
 
   @override

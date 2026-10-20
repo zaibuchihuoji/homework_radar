@@ -10,6 +10,7 @@ import '../models/course.dart';
 import '../models/homework.dart';
 import 'secure_store.dart';
 import 'safe_http.dart';
+import 'sync_policy.dart';
 
 class ReminderSettings {
   ReminderSettings({
@@ -70,6 +71,7 @@ class Storage {
   }
 
   static const _businessKeys = [
+    'sync_status_v1',
     'homework_json',
     'courses_json',
     'semester_start',
@@ -90,6 +92,54 @@ class Storage {
     'zf_raw_page',
     'zf_xh',
   ];
+
+  static SyncConfig syncConfig() {
+    try {
+      return SyncConfig.fromJson(
+        jsonDecode(_sp.getString('sync_config_v1') ?? '{}')
+            as Map<String, dynamic>,
+      );
+    } catch (_) {
+      return const SyncConfig();
+    }
+  }
+
+  static Future<void> saveSyncConfig(SyncConfig value) =>
+      _setString('sync_config_v1', jsonEncode(value.toJson()));
+
+  static Map<PlatformKind, PlatformSyncStatus> syncStatuses() {
+    try {
+      final raw = jsonDecode(_sp.getString('sync_status_v1') ?? '{}') as Map;
+      return {
+        for (final p in PlatformKind.values)
+          if (raw[p.name] is Map)
+            p: PlatformSyncStatus.fromJson(
+              Map<String, dynamic>.from(raw[p.name] as Map),
+            ),
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> saveSyncStatuses(
+    Map<PlatformKind, PlatformSyncStatus> value,
+  ) => _setString(
+    'sync_status_v1',
+    jsonEncode(value.map((p, s) => MapEntry(p.name, s.toJson()))),
+  );
+  static Future<void> resetSyncStatus(PlatformKind platform) async {
+    final statuses = syncStatuses()..remove(platform);
+    await saveSyncStatuses(statuses);
+  }
+
+  static Set<PlatformKind> syncAccounts() => {
+    if (chaoxingCookie()?.isNotEmpty == true) PlatformKind.chaoxing,
+    if (moocCookie()?.isNotEmpty == true) PlatformKind.mooc,
+    if (zhihuishuCookie()?.isNotEmpty == true) PlatformKind.zhihuishu,
+    if (xuetangxCookie()?.isNotEmpty == true) PlatformKind.xuetangx,
+    if (yuketangCookie()?.isNotEmpty == true) PlatformKind.yuketang,
+  };
   static Future<void>? _transactionTail;
   static bool _recoveryPending = false;
   static Future<void> waitForBusinessTransaction() async {

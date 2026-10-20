@@ -181,7 +181,14 @@ class ZhihuishuService {
   }
 
   /// Cookie 是否有效（问一次课程网关第 1 页），结论见 [ZhsSessionState]。
+  ZhsSessionState? lastSessionState;
   Future<ZhsSessionState> checkLogin() async {
+    final state = await _checkLogin();
+    lastSessionState = state;
+    return state;
+  }
+
+  Future<ZhsSessionState> _checkLogin() async {
     if (cookie == null || cookie!.isEmpty) return ZhsSessionState.expired;
     final current = _examApi ??= ZhihuishuExamApi(cookie: cookie);
     final enrolled = await current.enrollments();

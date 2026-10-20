@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- flutter_local_notifications v16+ 不再自动合并：排期通知的接收器必须
          由应用清单注册，缺了的话 zonedSchedule 排出的全部提醒永远不会触发 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
@@ -8,8 +10,23 @@
         android:label="作业通"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:fullBackupContent="@xml/update_backup_rules"
+        android:dataExtractionRules="@xml/update_extraction_rules"
         android:theme="@style/AppTheme"
         android:networkSecurityConfig="@xml/network_security_config">
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates.fileprovider"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_file_paths" />
+        </provider>
+        <!-- DownloadProvider is a separate UID. Receiver checks our persisted
+             task ID and queries DownloadManager; intent data is never trusted. -->
+        <receiver android:name=".UpdateDownloadReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+                <action android:name="android.intent.action.DOWNLOAD_NOTIFICATION_CLICKED" />
+            </intent-filter>
+        </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"

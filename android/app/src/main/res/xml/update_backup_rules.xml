@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep normal user-data backup unchanged; update caches and task IDs are local. -->
+<full-backup-content>
+    <exclude domain="file" path="updates/" />
+    <exclude domain="external" path="Download/app-update.apk" />
+    <exclude domain="sharedpref" path="app_update_download.xml" />
+</full-backup-content>
