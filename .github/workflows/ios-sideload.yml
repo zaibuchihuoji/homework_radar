@@ -44,6 +44,7 @@ jobs:
           xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/runner-settings.txt 2>&1 || true
           xcodebuild -project ios/Pods/Pods.xcodeproj -target Pods-Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/pods-settings.txt 2>&1 || true
       - name: Verify Keychain, Chinese OCR and app launch
+        timeout-minutes: 15
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +54,8 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
-            -resultBundlePath build/ios/qa/RunnerTests.xcresult test CODE_SIGNING_ALLOWED=NO \
+            -resultBundlePath build/ios/qa/RunnerTests.xcresult test BUILD_DIR="$PWD/build/ios" \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
             > build/ios/qa/native-tests.log 2>&1 || { tail -n 120 build/ios/qa/native-tests.log; exit 1; }
           xcrun simctl install "$SIMULATOR_ID" build/ios/iphonesimulator/Runner.app
           xcrun simctl launch "$SIMULATOR_ID" com.worknote.homeworkRadar
