@@ -3,6 +3,7 @@ name: iOS self-sign IPA
 on:
   workflow_dispatch:
   push:
+    branches: [main, fix/ios-sideload-build]
     paths:
       - 'ios/**'
       - 'scripts/ios/**'
@@ -28,7 +29,18 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Build simulator app
-        run: flutter build ios --simulator --debug
+        run: |
+          mkdir -p build/ios/qa
+          flutter build ios --simulator --debug --verbose > build/ios/qa/simulator-build.log 2>&1 || { tail -n 120 build/ios/qa/simulator-build.log; exit 1; }
+      - name: Capture native integration diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p build/ios/qa
+          cp ios/Podfile.lock build/ios/qa/Podfile.lock || true
+          cat ios/Runner.xcworkspace/contents.xcworkspacedata > build/ios/qa/workspace.txt
+          find build/ios -name '*Pods*Runner*' > build/ios/qa/pod-products.txt
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/runner-settings.txt 2>&1 || true
+          xcodebuild -project ios/Pods/Pods.xcodeproj -target Pods-Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/pods-settings.txt 2>&1 || true
       - name: Verify Keychain, Chinese OCR and app launch
         shell: bash
         run: |
