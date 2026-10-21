@@ -18,7 +18,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-latest
+    # ML Kit's current pods exclude arm64 for iphonesimulator. Use an Intel
+    # simulator host; the separate iphoneos Release build still targets arm64.
+    runs-on: macos-15-intel
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
