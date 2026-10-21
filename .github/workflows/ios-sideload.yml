@@ -1,0 +1,68 @@
+name: iOS self-sign IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ios/**'
+      - 'scripts/ios/**'
+      - '.github/workflows/ios-sideload.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-sideload-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve locked dependencies
+        run: flutter pub get --enforce-lockfile
+      - name: Build simulator app
+        run: flutter build ios --simulator --debug
+      - name: Verify Keychain, Chinese OCR and app launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/ios/qa
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for v in d.values() for x in v if x["name"].startswith("iPhone")))')
+          xcrun simctl boot "$SIMULATOR_ID" || true
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
+            -resultBundlePath build/ios/qa/RunnerTests.xcresult test CODE_SIGNING_ALLOWED=NO \
+            > build/ios/qa/native-tests.log 2>&1 || { tail -n 120 build/ios/qa/native-tests.log; exit 1; }
+          xcrun simctl install "$SIMULATOR_ID" build/ios/iphonesimulator/Runner.app
+          xcrun simctl launch "$SIMULATOR_ID" com.worknote.homeworkRadar
+          sleep 8
+          xcrun simctl io "$SIMULATOR_ID" screenshot build/ios/qa/launch.png
+      - name: Build unsigned iPhone release
+        run: flutter build ios --release --no-codesign
+      - name: Package device IPA for Windows self-signing
+        run: |
+          bash scripts/ios/package_unsigned_ipa.sh
+          cp ios/SELF_SIGNING.md build/ios/ipa/SELF_SIGNING.md
+      - name: Save IPA and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-self-sign-ipa
+          path: build/ios/ipa/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Save native validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-native-validation
+          path: build/ios/qa/
+          if-no-files-found: ignore
+          retention-days: 14

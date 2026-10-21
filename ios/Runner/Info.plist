@@ -12,7 +12,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Homework Radar</string>
+	<string>作业通</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>选择课表或作业截图进行文字识别，也可选择图片设置小组件背景。</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
