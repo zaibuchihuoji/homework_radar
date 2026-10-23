@@ -69,6 +69,8 @@ final class MajorFlowsTests: XCTestCase {
   private func replace(_ field: XCUIElement, with text: String) {
     XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
     field.tap()
+    let keyboardIntro = app.buttons["Continue"]
+    if keyboardIntro.exists && keyboardIntro.isHittable { keyboardIntro.tap() }
     let old = field.value as? String ?? ""
     if !old.isEmpty { field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
     field.typeText(text)
@@ -82,12 +84,10 @@ final class MajorFlowsTests: XCTestCase {
   private func createManual(_ title: String, note: String) {
     tap("添加作业")
     tap("手动添加")
-    app.textFields.element(boundBy: 0).tap()
-    app.textFields.element(boundBy: 0).typeText("QA Course")
-    app.textViews.firstMatch.tap()
-    app.textViews.firstMatch.typeText(note)
-    app.textFields.element(boundBy: 1).tap()
-    app.textFields.element(boundBy: 1).typeText(title)
+    // Flutter's iOS accessibility bridge exposes multiline fields as TextField.
+    replace(app.textFields.element(boundBy: 0), with: "QA Course")
+    replace(app.textFields.element(boundBy: 2), with: note)
+    replace(app.textFields.element(boundBy: 1), with: title)
     finishTyping()
     tap("添加", scroll: true)
     XCTAssertTrue(element(containing: title).waitForExistence(timeout: 8), app.debugDescription)
@@ -104,7 +104,7 @@ final class MajorFlowsTests: XCTestCase {
     createManual("QA old keep", note: "keep-note")
     createManual("QA task", note: "initial-note")
     menu("QA task", action: "编辑作业")
-    replace(app.textViews.firstMatch, with: "changed-note")
+    replace(app.textFields.element(boundBy: 2), with: "changed-note")
     replace(app.textFields.element(boundBy: 1), with: "QA task edited")
     finishTyping()
     tap("保存", scroll: true)
@@ -144,7 +144,9 @@ final class MajorFlowsTests: XCTestCase {
     tap("添加作业")
     tap("识别添加")
     tap("选择截图")
-    let photo = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Photo,' OR label BEGINSWITH '照片' OR label == 'Photo'")).firstMatch
+    // PHPicker also has a grid Other whose label starts with every photo name.
+    // Select the actual Image, never that non-hittable grouping element.
+    let photo = app.images.matching(NSPredicate(format: "label BEGINSWITH 'Photo,' OR label BEGINSWITH '照片' OR label == 'Photo'")).firstMatch
     if photo.waitForExistence(timeout: 10) && photo.isHittable {
       photo.tap()
     } else {
@@ -155,7 +157,7 @@ final class MajorFlowsTests: XCTestCase {
     XCTAssertTrue(element("核对识别结果").waitForExistence(timeout: 30), app.debugDescription)
     XCTAssertTrue(element(containing: "检查并添加（2）").exists, app.debugDescription)
     capture("02-real-ocr-review")
-    let title = app.textViews.matching(NSPredicate(format: "value CONTAINS '第四单元'")).firstMatch
+    let title = app.textFields.matching(NSPredicate(format: "value CONTAINS '第四单元'")).firstMatch
     replace(title, with: "QA OCR reading")
     // The course field is single-line; Done dismisses the system keyboard.
     replace(app.textFields.firstMatch, with: "QA English")
@@ -175,14 +177,19 @@ final class MajorFlowsTests: XCTestCase {
       XCTAssertTrue(element(containing: "账号标签页").waitForExistence(timeout: 15))
       tab("账号")
       let heading = element(platform)
-      for _ in 0..<8 {
-        if heading.exists && heading.isHittable { break }
+      var login: XCUIElement?
+      for _ in 0..<10 {
+        if heading.exists && heading.isHittable && heading.frame.height >= 100 {
+          let buttons = app.buttons.matching(NSPredicate(format: "label == '登录'")).allElementsBoundByIndex
+          login = buttons.filter {
+            $0.isHittable && $0.frame.minY > heading.frame.minY &&
+            $0.frame.maxY <= heading.frame.maxY
+          }.min { $0.frame.minY < $1.frame.minY }
+          if login != nil { break }
+        }
         app.swipeUp()
       }
-      XCTAssertTrue(heading.exists && heading.isHittable, app.debugDescription)
-      let buttons = app.buttons.matching(NSPredicate(format: "label == '登录'")).allElementsBoundByIndex
-      let login = try XCTUnwrap(buttons.filter { $0.isHittable && $0.frame.minY > heading.frame.minY }.min { $0.frame.minY < $1.frame.minY }, app.debugDescription)
-      login.tap()
+      try XCTUnwrap(login, app.debugDescription).tap()
       XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 15), app.debugDescription)
       sleep(5)
       capture("03-\(index)-official-login")
@@ -202,10 +209,9 @@ final class MajorFlowsTests: XCTestCase {
     format.dateFormat = "yyyy-MM-dd HH:mm"
     let due = Date().addingTimeInterval(3600 + 120)
     let text = "【QA Notify】QA reminder 作业，截止" + format.string(from: due)
-    let input = app.textViews.firstMatch
+    let input = app.textFields["作业通知"]
     XCTAssertTrue(input.waitForExistence(timeout: 5))
-    input.tap()
-    input.typeText(text)
+    replace(input, with: text)
     tap("识别作业", scroll: true)
     XCTAssertTrue(element(containing: "检查并添加（1）").waitForExistence(timeout: 8), app.debugDescription)
     tap("检查并添加（1）")
