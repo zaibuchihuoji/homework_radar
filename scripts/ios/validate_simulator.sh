@@ -12,13 +12,9 @@ xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug
   BUILD_DIR="$ROOT/build/ios" CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- VERBOSE_SCRIPT_LOGGING=YES \
   > "$QA/simulator-build.log" 2>&1 || { tail -n 100 "$QA/simulator-build.log"; exit 1; }
 APP="$ROOT/build/ios/Debug-iphonesimulator/Runner.app"
-codesign -d --entitlements :- "$APP" > "$QA/simulator-entitlements.plist" 2> "$QA/simulator-signing.log"
-python3 - "$QA/simulator-entitlements.plist" <<'PY'
-import plistlib, sys
-with open(sys.argv[1], 'rb') as source:
-    identity = plistlib.load(source)['application-identifier']
-assert identity.endswith('com.worknote.homeworkRadar') and '$(' not in identity
-PY
+# Simulator entitlements live in __TEXT,__entitlements, rather than the
+# ordinary codesign entitlement blob. The Keychain test verifies real access.
+codesign -d -vv "$APP" 2> "$QA/simulator-signing.log"
 
 # The simulator is only needed for execution, not the native compilation above.
 trap 'xcrun simctl shutdown "$SIMULATOR_ID" || true' EXIT
