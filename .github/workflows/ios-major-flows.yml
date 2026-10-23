@@ -1,0 +1,31 @@
+name: iOS major flows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.7'
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - name: Run actual iOS main flows in a disposable simulator
+        timeout-minutes: 38
+        run: bash scripts/ios/validate_major_flows.sh
+      - name: Save screenshots, XCTest results and disposable test data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-major-flows-evidence
+          path: build/ios/major-flows/
+          if-no-files-found: error
+          retention-days: 14
