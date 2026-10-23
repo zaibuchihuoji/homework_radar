@@ -6,8 +6,8 @@ on:
       flow:
         description: 'Run all main flows, or only the independent notification flow'
         type: choice
-        options: [all, notification]
-        default: all
+        options: [integration, all, notification]
+        default: integration
   push:
     branches: [fix/ios-sideload-build]
     paths: ['.github/workflows/ios-major-flows.yml']
@@ -30,8 +30,13 @@ jobs:
       - name: Run actual iOS main flows in a disposable simulator
         timeout-minutes: 38
         env:
-          IOS_MAJOR_FLOW: ${{ inputs.flow || 'all' }}
-        run: bash scripts/ios/validate_major_flows.sh
+          IOS_MAJOR_FLOW: ${{ inputs.flow || 'integration' }}
+        run: |
+          if [ "$IOS_MAJOR_FLOW" = integration ]; then
+            bash scripts/ios/validate_integration.sh
+          else
+            bash scripts/ios/validate_major_flows.sh
+          fi
       - name: Save screenshots, XCTest results and disposable test data
         if: always()
         uses: actions/upload-artifact@v4

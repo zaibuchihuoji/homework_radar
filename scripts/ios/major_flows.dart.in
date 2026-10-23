@@ -1,0 +1,273 @@
+// Run only with scripts/ios/validate_integration.sh in a disposable simulator.
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' as ui;
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:integration_test/integration_test.dart';
+// ignore: depend_on_referenced_packages
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:homework_radar/main.dart' as app;
+import 'package:homework_radar/app_state.dart';
+import 'package:homework_radar/models/homework.dart';
+import 'package:homework_radar/services/notification_service.dart';
+import 'package:homework_radar/services/platform_cookie.dart';
+import 'package:homework_radar/services/storage.dart';
+import 'package:homework_radar/services/widget_platform.dart';
+import '../test/support/synthetic_http.dart';
+
+/// Only the OS photo-selection boundary is substituted. ImageTextReader still
+/// decodes/resizes the real PNG and invokes the bundled native Chinese ML Kit.
+class _ChosenScreenshot extends ImagePickerPlatform {
+  _ChosenScreenshot(this.path);
+  final String path;
+  @override
+  Future<XFile?> getImageFromSource({
+    required ImageSource source,
+    ImagePickerOptions options = const ImagePickerOptions(),
+  }) async => XFile(path);
+}
+
+void main() {
+  final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  const MethodChannel('homework_radar/ios_validation').setMethodCallHandler((call) async {
+    if (call.method != 'results' || !binding.allTestsPassed.isCompleted) return null;
+    return binding.results.map((name, result) => MapEntry(name, result.toString()));
+  });
+  late AppState state;
+  late Directory evidence;
+  final plugin = FlutterLocalNotificationsPlugin();
+  const platform = MethodChannel('homework_radar/platform');
+  final report = <String, Object>{};
+
+  Future<void> saveReport() => File('${evidence.path}/steps.json')
+      .writeAsString(const JsonEncoder.withIndent('  ').convert(report));
+  Future<void> screenshot(String name) async {
+    final bytes = await binding.takeScreenshot(name);
+    await File('${evidence.path}/$name.png').writeAsBytes(bytes);
+  }
+  Future<void> settle(WidgetTester tester) => tester.pumpAndSettle(
+    const Duration(milliseconds: 100), EnginePhase.sendSemanticsUpdate,
+    const Duration(seconds: 20),
+  );
+  Future<void> tap(WidgetTester tester, String text) async {
+    final target = find.text(text).last;
+    await tester.ensureVisible(target);
+    await tester.tap(target);
+    await settle(tester);
+  }
+  Future<void> open(WidgetTester tester) async {
+    app.showSplashOnStart = false;
+    app.appStateForHome = state;
+    await tester.pumpWidget(app.HomeworkRadarApp(state: state));
+    await settle(tester);
+  }
+  Future<void> manual(WidgetTester tester, String title, String note) async {
+    await tester.tap(find.byTooltip('添加作业'));
+    await settle(tester);
+    await tap(tester, '手动添加');
+    await tester.enterText(find.byType(TextField).at(0), 'QA Course');
+    await tester.enterText(find.byType(TextField).at(1), title);
+    await tester.enterText(find.byType(TextField).at(2), note);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    await tap(tester, '添加');
+  }
+  Future<void> menu(WidgetTester tester, String title, String action) async {
+    await tester.longPress(find.text(title).first);
+    await settle(tester);
+    await tap(tester, action);
+  }
+  Future<void> nativeReload() async {
+    await (await SharedPreferences.getInstance()).reload();
+    await state.loadLocal();
+  }
+
+  setUpAll(() async {
+    if (!Platform.isIOS) throw StateError('This suite requires the disposable iOS simulator');
+    await Storage.init();
+    // Refuse to replace any existing database. The script creates a fresh UDID.
+    if (Storage.homework().isNotEmpty || Storage.courses().isNotEmpty ||
+        Storage.syncAccounts().isNotEmpty) {
+      throw StateError('Refusing to seed a non-empty app container');
+    }
+    evidence = Directory('${(await getApplicationDocumentsDirectory()).path}/major-integration');
+    await evidence.create(recursive: true);
+    await WidgetPlatform.initialize();
+    await NotificationService.init();
+    // Provisional authorization avoids an OS dialog in the Flutter runner.
+    // This validates the real system queue, not audible/visible alert delivery.
+    await plugin.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()!
+        .requestPermissions(alert: true, badge: true, sound: true, provisional: true);
+    await Storage.saveClassReminder(false);
+    state = AppState();
+    await state.loadLocal();
+    report['boundaries'] = {
+      'storage': 'real iOS SharedPreferences and Keychain',
+      'ocr': 'real bundled Chinese ML Kit; synthetic local screenshot selection',
+      'sync': 'controlled HTTP responses; no real account login',
+      'notifications': 'real UNUserNotificationCenter pending requests; provisional permission',
+    };
+    await saveReport();
+  });
+  tearDownAll(() async { state.dispose(); app.appStateForHome = null; });
+
+  testWidgets('01 manual create edit hide restore delete and native persistence', (tester) async {
+    await open(tester);
+    await manual(tester, 'QA old keep', 'keep-note');
+    await manual(tester, 'QA task', 'initial-note');
+    await menu(tester, 'QA task', '编辑作业');
+    await tester.enterText(find.byType(TextField).at(1), 'QA task edited');
+    await tester.enterText(find.byType(TextField).at(2), 'changed-note');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await settle(tester);
+    await tap(tester, '保存');
+    await nativeReload();
+    expect(Storage.homework().firstWhere((h) => h.title == 'QA task edited').note, 'changed-note');
+    await screenshot('01-edited-and-persisted');
+    await menu(tester, 'QA task edited', '标记完成');
+    await tap(tester, '已完成');
+    await menu(tester, 'QA task edited', '标记未完成');
+    await tap(tester, '未完成');
+    await menu(tester, 'QA task edited', '隐藏这条作业');
+    final hidden = Storage.hiddenItems();
+    expect(hidden.values.any((body) => body.contains('QA task edited')), isTrue);
+    // Exercise the actual restore operation and native publication queue.
+    await state.restoreHomework(hidden.keys.single);
+    await settle(tester);
+    await menu(tester, 'QA task edited', '删除');
+    await tap(tester, '取消');
+    expect(Storage.homework().any((h) => h.title == 'QA task edited'), isTrue);
+    await menu(tester, 'QA task edited', '删除');
+    await tap(tester, '删除');
+    await nativeReload();
+    expect(Storage.homework().map((h) => h.title), ['QA old keep']);
+    expect(Storage.homework().single.note, 'keep-note');
+    await screenshot('01-deleted-old-record-kept');
+    report['manual_crud'] = 'passed: actual Flutter forms and native persistence; restore called through AppState';
+    await saveReport();
+  });
+
+  testWidgets('02 native Chinese screenshot OCR review edit confirm without original deletion', (tester) async {
+    await open(tester);
+    final due = DateTime.now().add(const Duration(days: 2));
+    final day = '${due.year}-${due.month.toString().padLeft(2, '0')}-${due.day.toString().padLeft(2, '0')}';
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder)..drawColor(Colors.white, BlendMode.src);
+    final text = TextPainter(
+      text: TextSpan(text: '1. 【大学英语】阅读第四单元，截止$day 20:00\n\n2. 【计算机网络】完成第5章练习',
+        style: const TextStyle(fontSize: 44, color: Colors.black, height: 1.5)),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: 1800);
+    text.paint(canvas, const Offset(35, 40));
+    final image = await recorder.endRecording().toImage(1900, 400);
+    final data = (await image.toByteData(format: ui.ImageByteFormat.png))!;
+    final file = File('${evidence.path}/ocr-original.png');
+    final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+    await file.writeAsBytes(bytes);
+    image.dispose();
+    final originalPicker = ImagePickerPlatform.instance;
+    ImagePickerPlatform.instance = _ChosenScreenshot(file.path);
+    try {
+      await tester.tap(find.byTooltip('添加作业'));
+      await settle(tester);
+      await tap(tester, '识别添加');
+      await tap(tester, '选择截图');
+      expect(find.text('核对识别结果'), findsOneWidget);
+      expect(find.byKey(const ValueKey('select_0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('select_1')), findsOneWidget);
+      expect(Storage.homework(), hasLength(1));
+      await tester.enterText(find.byKey(const ValueKey('course_0')), 'QA English');
+      await tester.enterText(find.byKey(const ValueKey('title_0')), 'QA OCR reading');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await settle(tester);
+      await screenshot('02-real-native-ocr-review');
+      await tester.tap(find.byKey(const ValueKey('review_save')));
+      await settle(tester);
+      expect(Storage.homework(), hasLength(1));
+      await tap(tester, '确认添加 2 项');
+      await nativeReload();
+      expect(Storage.homework(), hasLength(3));
+      final first = Storage.homework().firstWhere((h) => h.title == 'QA OCR reading');
+      expect(first.course, 'QA English');
+      expect(first.dueAt, DateTime(due.year, due.month, due.day, 20));
+      expect(first.note, contains('第四单元'));
+      expect(Storage.homework().firstWhere((h) => h.title.contains('第5章')).dueAt, isNull);
+      expect(await file.readAsBytes(), bytes);
+      await screenshot('02-confirmed-two-assignments');
+      report['screenshot_ocr'] = 'passed: real native Chinese OCR, two editable drafts, explicit confirmation, uncertain deadline left empty, original PNG unchanged; OS picker substituted';
+      await saveReport();
+    } finally { ImagePickerPlatform.instance = originalPicker; }
+  });
+
+  testWidgets('03 native cookie Keychain login commit sync and failure preservation', (tester) async {
+    final network = SyntheticHttp();
+    final due = DateTime.now().add(const Duration(days: 2)).millisecondsSinceEpoch;
+    network.handler = (_, uri, _) {
+      if (uri.path.contains('getMyLearnedCoursePanelList')) {
+        return SyntheticResponse('{"code":0,"result":[{"courseId":1,"termId":2,"name":"QA sync course"}]}');
+      }
+      if (uri.path.contains('getMocTermDto')) {
+        return SyntheticResponse(jsonEncode({'code':0,'result':{'id':2,'courseId':1,'chapters':[{'id':10,'lessons':[],'homeworks':[{'id':14,'contentType':3,'contentId':8,'name':'QA synced homework','test':{'id':8,'type':3,'name':'QA synced homework','deadline':due,'examId':-1},'exam':null}],'quizs':[],'exam':null}],'exams':[]}}));
+      }
+      return SyntheticResponse('{}', 503);
+    };
+    HttpOverrides.global = network;
+    try {
+      await platform.invokeMethod<bool>('setCookie', {'url':'https://www.icourse163.org/','cookie':'STUDY_SESS=qa-ios-only'});
+      await platform.invokeMethod<bool>('setCookie', {'url':'https://www.icourse163.org/','cookie':'NTESSTUDYSI=qa-ios-csrf'});
+      final cookie = (await PlatformCookie.getCookie('https://www.icourse163.org/'))!;
+      expect(cookie, contains('STUDY_SESS=qa-ios-only'));
+      await state.onMoocLogin(cookie, 'qa-ios-csrf', sync: false);
+      expect(await platform.invokeMethod<String>('secureRead', {'key':'mooc_cookie'}), cookie);
+      await state.syncAll();
+      expect(state.moocState, AccountState.ok);
+      expect(Storage.homework().where((h) => h.platform == PlatformKind.mooc), hasLength(1));
+      final before = Storage.homework().map((h) => h.toJson()).toList();
+      network.handler = (_, _, _) => SyntheticResponse('{}', 503);
+      await state.syncAll();
+      expect(Storage.homework().map((h) => h.toJson()).toList(), before);
+      await open(tester);
+      await screenshot('03-controlled-sync-failure-keeps-records');
+      await state.logoutMooc();
+      expect(Storage.homework(), hasLength(3));
+      expect(Storage.homework().firstWhere((h) => h.title == 'QA old keep').note, 'keep-note');
+      await PlatformCookie.clearPlatformCookies('mooc');
+      expect(await platform.invokeMethod<String>('secureRead', {'key':'mooc_cookie'}), isNull);
+      report['login_sync'] = 'passed: real WK cookie store, Keychain commit/delete and sync merge with controlled HTTP; real account authentication not tested';
+      await saveReport();
+    } finally { HttpOverrides.global = null; }
+  });
+
+  testWidgets('04 real iOS reminder scheduling edit hide restore and deletion', (tester) async {
+    await open(tester);
+    await state.updateReminders(ReminderSettings(before24h: false, before6h: false));
+    await state.addManualHomework(course: 'QA reminder', title: 'QA scheduled', dueAt: DateTime.now().add(const Duration(hours: 2)));
+    final item = Storage.homework().firstWhere((h) => h.title == 'QA scheduled');
+    var pending = await plugin.pendingNotificationRequests();
+    expect(pending.where((p) => p.payload == item.id), hasLength(1));
+    await state.dismissHomework(item);
+    pending = await plugin.pendingNotificationRequests();
+    expect(pending.any((p) => p.payload == item.id), isFalse);
+    await state.restoreHomework(item.id);
+    pending = await plugin.pendingNotificationRequests();
+    expect(pending.where((p) => p.payload == item.id), hasLength(1));
+    await state.deleteManualHomework(item.id);
+    pending = await plugin.pendingNotificationRequests();
+    expect(pending.any((p) => p.payload == item.id), isFalse);
+    final liveIDs = Storage.homework().map((h) => h.id).toSet();
+    expect(pending.every((p) => liveIDs.contains(p.payload)), isTrue);
+    await nativeReload();
+    expect(Storage.homework(), hasLength(3));
+    expect(Storage.homework().firstWhere((h) => h.title == 'QA old keep').note, 'keep-note');
+    await screenshot('04-reminder-queue-consistent');
+    report['reminders'] = 'passed: real iOS pending requests follow add/hide/restore/delete; provisional authorization; banner delivery and cold-start click not completed';
+    report['pending_count'] = pending.length;
+    await saveReport();
+  });
+}
