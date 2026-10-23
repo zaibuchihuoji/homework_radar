@@ -31,9 +31,7 @@ void main() {
     );
     await Storage.saveClassReminder(false);
   });
-  for (final style in ThemeStyle.values.where(
-    (s) => !stylePalette(s, Brightness.light).clean,
-  )) {
+  for (final style in ThemeStyle.values) {
     testWidgets(
       '${style.name}: reminder summary follows its control at narrow enlarged layout',
       (tester) async {
@@ -54,7 +52,9 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.textContaining('提醒 0/3 已开启'), findsOneWidget);
+        await tester.tap(find.text('提醒与课表'));
+        await tester.pumpAndSettle();
+        expect(find.text('0/3 项已开启'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.scrollUntilVisible(find.text('截止前 24 小时'), 180);
         await tester.tap(find.text('截止前 24 小时'));
@@ -63,16 +63,14 @@ void main() {
         expect(Storage.reminders().before6h, isFalse);
         expect(Storage.reminders().before1h, isFalse);
         expect(tester.takeException(), isNull);
-        await tester.fling(
-          find.byType(ListView).first,
-          const Offset(0, 1800),
-          2000,
-        );
+        await tester.pageBack();
         await tester.pumpAndSettle();
-        expect(find.textContaining('提醒 1/3 已开启'), findsOneWidget);
+        expect(find.textContaining('截止提醒 1 项'), findsOneWidget);
+        await tester.tap(find.text('外观与小组件'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('界面风格'));
         await tester.pumpAndSettle();
-        expect(find.text('选择适合你的学习氛围'), findsOneWidget);
+        expect(find.text('选择后立即生效'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         state.dispose();

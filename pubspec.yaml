@@ -69,5 +69,6 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   assets:
+    - assets/icon/icon_rounded.png
     - assets/splash/splash_badge.png
     - assets/splash/splash_slogan.png

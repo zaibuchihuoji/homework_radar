@@ -6,6 +6,7 @@ import 'package:homework_radar/main.dart' show buildTheme;
 import 'package:homework_radar/models/course.dart';
 import 'package:homework_radar/pages/course_edit_sheet.dart';
 import 'package:homework_radar/pages/settings_page.dart';
+import 'package:homework_radar/ui/settings_parts.dart';
 import 'package:homework_radar/pages/timetable_import_confirmation.dart';
 import 'package:homework_radar/pages/timetable_page.dart';
 import 'package:homework_radar/services/storage.dart';
@@ -147,10 +148,12 @@ void main() {
         await state.setStyle(style);
         await tester.pumpWidget(_app(style, SettingsPage(state: state)));
         await tester.pumpAndSettle();
+        await tester.tap(find.text('外观与小组件'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('界面风格'));
         await tester.pumpAndSettle();
         expect(find.byType(ThemeModalSurface), findsOneWidget);
-        expect(find.text('选择适合你的学习氛围'), findsOneWidget);
+        expect(find.text('选择后立即生效'), findsOneWidget);
         final lastTheme = find.descendant(
           of: find.byType(ThemeModalSurface),
           matching: find.text(ThemeStyle.values.last.label),
@@ -173,7 +176,7 @@ void main() {
         expect(find.text('添加桌面小组件'), findsOneWidget);
         final guide = find
             .descendant(
-              of: find.byType(ThemedAlertDialog),
+              of: find.byType(SettingsAlertDialog),
               matching: find.byType(SingleChildScrollView),
             )
             .last;
@@ -185,7 +188,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('知道了'));
         await tester.pumpAndSettle();
-        expect(find.byType(ThemedAlertDialog), findsNothing);
+        expect(find.byType(SettingsAlertDialog), findsNothing);
         await tester.pumpWidget(const SizedBox.shrink());
         state.dispose();
       },

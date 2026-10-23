@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../ui/theme_forms.dart';
+import '../ui/settings_parts.dart';
+import '../ui/tokens.dart';
 import '../services/section_times.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
@@ -28,7 +30,8 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
     _times = [...SectionTimes.current()];
   }
 
-  String _hm(int m) => '${(m ~/ 60).toString().padLeft(2, '0')}:'
+  String _hm(int m) =>
+      '${(m ~/ 60).toString().padLeft(2, '0')}:'
       '${(m % 60).toString().padLeft(2, '0')}';
 
   Future<void> _save() async {
@@ -43,6 +46,19 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
     final picked = await showTimePicker(
       context: context,
       initialTime: TimeOfDay(hour: (base ~/ 60) % 24, minute: base % 60),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          timePickerTheme: Theme.of(context).timePickerTheme.copyWith(
+            backgroundColor: modalColor(context),
+            shape: paletteOf(context).clean
+                ? RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(22),
+                  )
+                : themeModalShape(paletteOf(context)),
+          ),
+        ),
+        child: child!,
+      ),
     );
     if (picked == null || !mounted) return;
     // 作息允许末节在24:00结束；选择器只接受0..23小时，用00:00表达日末。
@@ -124,16 +140,16 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
   Future<void> _reset() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => ThemedAlertDialog(
+      builder: (context) => SettingsAlertDialog(
         title: const Text('恢复默认作息'),
         content: const Text('放弃自定义时间，回到内置作息表？'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(context).pop(false),
             child: const Text('取消'),
           ),
           FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.of(context).pop(true),
             child: const Text('恢复'),
           ),
         ],
@@ -146,120 +162,96 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
     await widget.state.refreshClassReminders();
   }
 
-  Widget _addSectionTile(BuildContext context) {
-    final full = _times.length >= 16;
-    return ListTile(
-      leading: Icon(
-        Icons.add_circle_outline_rounded,
-        color: full ? textFaint(context) : _brandOf(context),
-      ),
-      title: Text(
-        full ? '已到 16 节上限' : '添加第${_times.length + 1}节',
+  Widget _timeRow(int index) => LayoutBuilder(
+    builder: (context, constraints) {
+      final (a, b) = _times[index];
+      final label = Text(
+        '第${index + 1}节',
         style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w600,
-          color: full ? textFaint(context) : _brandOf(context),
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: textPrimary(context),
         ),
-      ),
-      subtitle: Text(
-        full ? '与课表网格一致' : '晚课/16 节制学校在这里补齐时刻',
-        style: TextStyle(fontSize: 12, color: textSecondary(context)),
-      ),
-      onTap: full ? null : _addSection,
-    );
-  }
-
-  Color _brandOf(BuildContext context) => Theme.of(context).colorScheme.primary;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('作息时间'),
-        actions: [
-          TextButton(onPressed: _reset, child: const Text('恢复默认')),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      );
+      final controls = Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-            child: Text(
-              '教务课表通常不带具体时间。按自己学校的作息调整后，'
-              '上课提醒和课表时间轴都会使用这里的时间。\n'
-              // 表外节次取不到时刻：对应课程不排上课提醒、小组件/课表
-              // 不显示时间——必须在页面明说，否则用户无从自救
-              '有 13-16 节晚课的学校请在这里补全时刻，'
-              '否则对应课程不排上课提醒。',
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.6,
-                color: textSecondary(context),
+          Expanded(
+            child: TextButton(
+              onPressed: () => _pick(section: index + 1, start: true),
+              child: Text(
+                _hm(a),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w500,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ),
           ),
+          Text('—', style: TextStyle(color: textFaint(context))),
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
-              itemCount: _times.length + 1,
-              itemBuilder: (context, i) {
-                if (i == _times.length) {
-                  return _addSectionTile(context);
-                }
-                final (a, b) = _times[i];
-                return ListTile(
-                  leading: SizedBox(
-                    width: 46,
-                    child: Text(
-                      '第${i + 1}节',
-                        style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                        color: textPrimary(context),
-                      ),
-                    ),
-                  ),
-                  title: Row(
-                    children: [
-                      TextButton(
-                        onPressed: () => _pick(section: i + 1, start: true),
-                        child: Text(
-                          _hm(a),
-                            style: const TextStyle(
-                                fontSize: 16.5,
-                                fontWeight: FontWeight.w700,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          '–',
-                          style: TextStyle(color: textFaint(context)),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => _pick(section: i + 1, start: false),
-                        child: Text(
-                          _hm(b),
-                            style: const TextStyle(
-                                fontSize: 16.5,
-                                fontWeight: FontWeight.w700,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
+            child: TextButton(
+              onPressed: () => _pick(section: index + 1, start: false),
+              child: Text(
+                _hm(b),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w500,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
             ),
           ),
         ],
-      ),
-    );
-  }
+      );
+      final stacked =
+          constraints.maxWidth < 300 ||
+          MediaQuery.textScalerOf(context).scale(14) > 18;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: stacked
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [label, controls],
+              )
+            : Row(
+                children: [
+                  SizedBox(width: 64, child: label),
+                  Expanded(child: controls),
+                ],
+              ),
+      );
+    },
+  );
+
+  @override
+  Widget build(BuildContext context) => SettingsScaffold(
+    title: '作息时间',
+    actions: [
+      TextButton(onPressed: _reset, child: const Text('恢复默认')),
+      const SizedBox(width: 8),
+    ],
+    body: SettingsList(
+      children: [
+        SettingsSection(
+          title: '每节课时间',
+          footer: '点击时间即可修改，课表与上课提醒会一起更新。有 13–16 节晚课的学校请补全时刻，否则对应课程不排上课提醒。',
+          children: [
+            for (var i = 0; i < _times.length; i++) ...[
+              if (i > 0) const SettingsDivider(),
+              _timeRow(i),
+            ],
+            const SettingsDivider(),
+            SettingsRow(
+              icon: Icons.add_rounded,
+              title: _times.length >= 16
+                  ? '已到 16 节上限'
+                  : '添加第${_times.length + 1}节',
+              onTap: _times.length >= 16 ? null : _addSection,
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
 }

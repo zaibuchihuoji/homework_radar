@@ -1,4 +1,4 @@
-/// 设置：提醒开关、同步信息、调试入口。
+/// 设置首页与分类详情；数据操作沿用原有服务。
 library;
 
 import 'dart:convert';
@@ -12,9 +12,11 @@ import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../app_state.dart';
 import '../ui/theme_forms.dart';
+import '../ui/settings_parts.dart';
 import '../models/homework.dart';
 import '../services/backup_service.dart';
 import '../services/notification_service.dart';
@@ -24,10 +26,8 @@ import '../services/app_update_controller.dart';
 import 'update_dialog.dart';
 import '../ui/adaptive.dart';
 import '../ui/ink_wash.dart';
-import '../ui/dashed_line.dart';
-import '../ui/style_background.dart';
 import '../ui/tokens.dart';
-import '../ui/theme_page_parts.dart';
+import '../ui/dashed_line.dart';
 import 'section_times_page.dart';
 import 'notification_settings_page.dart';
 import 'background_sync_settings_page.dart';
@@ -36,334 +36,434 @@ class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.state});
 
   final AppState state;
+  static Future<PackageInfo>? _packageInfo;
 
   @override
-  Widget build(BuildContext context) {
-    return StyleBackground(
-      // 玻璃样式下透明化 Scaffold，露出渐变磨砂底衬
-      child: Scaffold(
-        backgroundColor: scaffoldBgOf(context),
-        appBar: AppBar(title: appBarTitle(context, '设置')),
-        body: ListenableBuilder(
-          listenable: state,
-          builder: (context, _) {
-            final r = Storage.reminders();
-            final lastSync = state.lastSync;
-            final syncText = lastSync == null
-                ? '还没有同步过'
-                : '最后同步于 ${lastSync.month}月${lastSync.day}日 '
-                      '${lastSync.hour}:${lastSync.minute.toString().padLeft(2, '0')}';
-            return ListView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([state, NotificationService.permission]),
+    builder: (context, _) {
+      final reminders = Storage.reminders();
+      final permission = NotificationService.notificationsEnabled;
+      final last = state.lastSync;
+      final sync = last == null
+          ? '尚未同步'
+          : '最近 ${last.hour.toString().padLeft(2, '0')}:${last.minute.toString().padLeft(2, '0')} 同步';
+      return SettingsScaffold(
+        title: '设置',
+        root: true,
+        body: SettingsList(
+          children: [
+            SettingsSection(
+              title: '个性化',
               children: [
-                if (!paletteOf(context).clean)
-                  ThemePageHeader(
-                    compact: true,
-                    title: '偏好设置',
-                    kicker: 'PREFERENCES',
-                    summary:
-                        '提醒 ${r.enabledHours.length}/3 已开启 · 上课提醒${Storage.classReminder() ? '开' : '关'}',
-                    icon: Icons.tune_rounded,
-                  ),
-                _groupLabel(context, '外观'),
-                _groupCard(context, [
-                  _stylePicker(context, state),
-                  _divider(context),
-                  // 深色锁：只有清夏打磨过深色观感，其余主题锁死浅色
-                  //（buildTheme 里同步钳制，跟随系统的深色也不会生效）
-                  () {
-                    final locked =
-                        state.style != ThemeStyle.clean &&
-                        state.style != ThemeStyle.green;
-                    return _tile(
-                      context,
-                      icon: Icons.contrast_rounded,
-                      title: '主题模式',
-                      subtitle: locked
-                          ? '切换深色模式会影响观感，故无法开启深色模式'
-                          : switch (state.themeMode) {
-                              ThemeMode.light => '浅色',
-                              ThemeMode.dark => '深色',
-                              _ => '跟随系统',
-                            },
-                      onTap: locked
-                          ? null
-                          : () => _pickThemeMode(context, state),
-                      trailing: locked
-                          ? Icon(
-                              Icons.lock_outline_rounded,
-                              size: 20,
-                              color: textFaint(context),
-                            )
-                          : const Icon(
-                              Icons.chevron_right_rounded,
-                              color: Color(0xFF9CA3AF),
-                            ),
-                    );
-                  }(),
-                ]),
-                _groupLabel(context, '截止提醒'),
-                ListenableBuilder(
-                  listenable: Listenable.merge([
-                    NotificationService.permission,
-                    NotificationService.scheduleError,
-                  ]),
-                  builder: (context, _) => _groupCard(context, [
-                    if (NotificationService.scheduleError.value != null)
-                      _tile(
-                        context,
-                        icon: Icons.warning_amber_rounded,
-                        title: NotificationService.scheduleError.value!,
-                      ),
-                    if (NotificationService.notificationsEnabled == false)
-                      _tile(
-                        context,
-                        icon: Icons.notifications_off_rounded,
-                        title: '通知权限被拒绝',
-                        subtitle: '全部截止/上课提醒都不会弹出，点这里重新授权',
-                        onTap: () async {
-                          await NotificationService.rerequestPermission();
-                        },
-                      ),
-                    if (defaultTargetPlatform == TargetPlatform.android) ...[
-                      _tile(
-                        context,
-                        icon: Icons.notifications_outlined,
-                        title: '通知横幅与声音',
-                        subtitle: '检查顶部弹出、声音和两类提醒的系统设置',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => NotificationSettingsPage(
-                              homeworkId: state.homework
-                                  .where((h) => h.status != HwStatus.done)
-                                  .firstOrNull
-                                  ?.id,
-                            ),
-                          ),
-                        ),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                      ),
-                      _divider(context),
-                    ],
-                    _switchTile(
-                      context,
-                      icon: Icons.notifications_active_rounded,
-                      title: '截止前 24 小时',
-                      value: r.before24h,
-                      onChanged: (v) => state.updateReminders(r..before24h = v),
-                    ),
-                    _divider(context),
-                    _switchTile(
-                      context,
-                      icon: Icons.schedule_rounded,
-                      title: '截止前 6 小时',
-                      value: r.before6h,
-                      onChanged: (v) => state.updateReminders(r..before6h = v),
-                    ),
-                    _divider(context),
-                    _switchTile(
-                      context,
-                      icon: Icons.alarm_rounded,
-                      title: '截止前 1 小时',
-                      value: r.before1h,
-                      onChanged: (v) => state.updateReminders(r..before1h = v),
-                    ),
-                  ]),
-                ),
-                _groupLabel(context, '课表'),
-                _groupCard(context, [
-                  _switchTile(
-                    context,
-                    icon: Icons.alarm_on_rounded,
-                    title: '上课前 15 分钟提醒',
-                    subtitle:
-                        Storage.classReminder() &&
-                            Storage.semesterStart() == null
-                        ? '还没设置开学日期，上课提醒暂不生效——'
-                              '到「课表」页右上角菜单设置开学日期即可'
-                        : null,
-                    value: Storage.classReminder(),
-                    onChanged: (v) => state.updateClassReminder(v),
-                  ),
-                  _divider(context),
-                  _tile(
-                    context,
-                    icon: Icons.access_time_rounded,
-                    title: '作息时间',
-                    subtitle: '按学校作息调整每节课时间，提醒与课表随之生效',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => SectionTimesPage(state: state),
-                      ),
-                    ),
-                    trailing: const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                  ),
-                ]),
-                _groupLabel(context, '备份'),
-                _groupCard(context, [
-                  _tile(
-                    context,
-                    icon: Icons.file_upload_outlined,
-                    title: '导出数据',
-                    subtitle: '课表、作业、作息与隐藏作业 → JSON 文件（不含账号）',
-                    onTap: () => _exportBackup(context),
-                    trailing: const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                  ),
-                  _divider(context),
-                  _tile(
-                    context,
-                    icon: Icons.file_download_outlined,
-                    title: '导入数据',
-                    subtitle: '从备份文件恢复，会覆盖当前课表与相关设置',
-                    onTap: () => _importBackup(context, state),
-                    trailing: const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                  ),
-                  _divider(context),
-                  _tile(
-                    context,
-                    icon: Icons.inventory_2_outlined,
-                    title: '历史账号数据',
-                    subtitle: '只读查看或导出换号前的数据，不会合入当前账号',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const AccountArchivesPage(),
-                      ),
-                    ),
-                  ),
-                ]),
-                _groupLabel(context, '同步'),
-                _groupCard(context, [
-                  _tile(
-                    context,
-                    icon: Icons.sync_rounded,
-                    title: '后台同步',
-                    subtitle: Storage.syncConfig().enabled
-                        ? '每 ${Storage.syncConfig().minutes} 分钟检查 · 失败自动重试'
-                        : '后台定时已关闭 · 回前台仍会检查',
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            BackgroundSyncSettingsPage(state: state),
-                      ),
-                    ),
-                  ),
-                  _divider(context),
-                  _tile(
-                    context,
-                    icon: Icons.update_rounded,
-                    title: '上次同步',
-                    subtitle: syncText,
-                    // 长按查看原始接口日志（隐藏入口，不给普通用户看见）
-                    onLongPress: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const DebugPage()),
-                    ),
-                  ),
-                  _divider(context),
-                  _tile(
-                    context,
-                    icon: Icons.sync_rounded,
-                    title: '立即同步全部作业',
-                    onTap: state.syncing ? null : () => state.syncAll(),
-                    trailing: state.syncing
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : null,
-                  ),
-                ]),
-                _groupLabel(context, '其他'),
-                _groupCard(context, [
-                  _tile(
-                    context,
-                    icon: Icons.visibility_off_outlined,
-                    title: '已隐藏的作业',
-                    subtitle: '左滑隐藏的作业可在这里恢复',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => HiddenPage(state: state),
-                      ),
-                    ),
-                    trailing: const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                  ),
-                  _divider(context),
-                  _tile(
-                    context,
-                    icon: Icons.widgets_rounded,
-                    title: '桌面小组件',
-                    subtitle: '把最近截止的作业放到手机桌面',
-                    onTap: () => _showWidgetGuide(context),
-                    trailing: const Icon(
-                      Icons.chevron_right_rounded,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                  ),
-                ]),
-                _groupLabel(context, '关于'),
-                _groupCard(context, [
-                  ListenableBuilder(
-                    listenable: AppUpdateController.instance,
-                    builder: (context, _) => _tile(
-                      context,
-                      icon: Icons.system_update_rounded,
-                      title: '检查更新',
-                      subtitle: AppUpdateController.instance.status.label,
-                      onTap: () => checkForAppUpdate(context),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: Color(0xFF9CA3AF),
-                      ),
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 16),
-                _groupLabel(context, '反馈问题'),
-                _groupCard(context, [
-                  for (final email in _feedbackEmails)
-                    _tile(
-                      context,
-                      icon: Icons.mail_outline_rounded,
-                      title: email,
-                      subtitle: '点击复制',
-                      onTap: () => _copyFeedbackEmail(context, email),
-                      trailing: const Icon(
-                        Icons.copy_rounded,
-                        color: Color(0xFF9CA3AF),
-                      ),
-                    ),
-                ]),
-                const SizedBox(height: 16),
-                Text(
-                  '作业通仅读取你自己账号的作业数据，请控制同步频率（应用内置了请求间隔）。',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: textSecondary(context),
-                    height: 1.7,
-                  ),
+                SettingsRow(
+                  icon: Icons.palette_outlined,
+                  title: '外观与小组件',
+                  subtitle: '主题、显示模式与桌面组件',
+                  value: state.style.label,
+                  navigation: true,
+                  onTap: () =>
+                      _openDetail(context, '外观与小组件', _appearanceSettings),
                 ),
               ],
-            );
-          },
+            ),
+            SettingsSection(
+              title: '日常使用',
+              children: [
+                SettingsRow(
+                  icon: Icons.notifications_none_rounded,
+                  title: '提醒与课表',
+                  subtitle: permission == false
+                      ? '通知权限未开启'
+                      : '截止提醒 ${reminders.enabledHours.length} 项 · 上课提醒${Storage.classReminder() ? '已开启' : '已关闭'}',
+                  navigation: true,
+                  onTap: () => _openDetail(context, '提醒与课表', _reminderSettings),
+                ),
+                const SettingsDivider(),
+                SettingsRow(
+                  icon: Icons.sync_rounded,
+                  title: '同步与后台',
+                  subtitle: sync,
+                  navigation: true,
+                  onTap: () => _openDetail(context, '同步与后台', _syncSettings),
+                ),
+              ],
+            ),
+            SettingsSection(
+              title: '管理与支持',
+              children: [
+                SettingsRow(
+                  icon: Icons.folder_open_rounded,
+                  title: '数据管理',
+                  subtitle: '备份、恢复与隐藏作业',
+                  navigation: true,
+                  onTap: () => _openDetail(context, '数据管理', _dataSettings),
+                ),
+                const SettingsDivider(),
+                SettingsRow(
+                  icon: Icons.info_outline_rounded,
+                  title: '关于与帮助',
+                  subtitle: '应用更新与问题反馈',
+                  navigation: true,
+                  onTap: () => _openDetail(context, '关于与帮助', _aboutSettings),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
+
+  void _openDetail(
+    BuildContext context,
+    String title,
+    List<Widget> Function(BuildContext) content,
+  ) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ListenableBuilder(
+          listenable: Listenable.merge([
+            state,
+            NotificationService.permission,
+            NotificationService.scheduleError,
+            AppUpdateController.instance,
+          ]),
+          builder: (context, _) => SettingsScaffold(
+            title: title,
+            body: SettingsList(children: content(context)),
+          ),
         ),
       ),
     );
   }
 
-  /// 反馈邮箱：设置页直接展示，点击复制。
+  List<Widget> _appearanceSettings(BuildContext context) {
+    final locked =
+        state.style != ThemeStyle.clean && state.style != ThemeStyle.green;
+    return [
+      SettingsSection(
+        title: '界面',
+        children: [
+          _stylePicker(context, state),
+          _divider(context),
+          SettingsRow(
+            icon: Icons.contrast_rounded,
+            title: '主题模式',
+            subtitle: locked ? '此主题仅支持浅色' : null,
+            value: locked
+                ? null
+                : switch (state.themeMode) {
+                    ThemeMode.light => '浅色',
+                    ThemeMode.dark => '深色',
+                    _ => '跟随系统',
+                  },
+            onTap: locked ? null : () => _pickThemeMode(context, state),
+            navigation: !locked,
+            trailing: locked
+                ? Icon(
+                    Icons.lock_outline_rounded,
+                    size: 18,
+                    color: textFaint(context),
+                  )
+                : null,
+          ),
+        ],
+      ),
+      SettingsSection(
+        title: '桌面',
+        children: [
+          SettingsRow(
+            icon: Icons.widgets_outlined,
+            title: '桌面小组件',
+            subtitle: '添加方式、透明背景与壁纸',
+            navigation: true,
+            onTap: () => _showWidgetGuide(context),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  List<Widget> _reminderSettings(BuildContext context) {
+    final r = Storage.reminders();
+    return [
+      if (NotificationService.notificationsEnabled == false)
+        SettingsSection(
+          children: [
+            SettingsRow(
+              icon: Icons.notifications_off_outlined,
+              title: '通知权限被拒绝',
+              subtitle: '开启通知权限后，才能收到作业和上课提醒',
+              navigation: true,
+              onTap: () => NotificationService.rerequestPermission(),
+            ),
+          ],
+        ),
+      if (NotificationService.scheduleError.value != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: SettingsNote(
+            NotificationService.scheduleError.value!,
+            warning: true,
+          ),
+        ),
+      SettingsSection(
+        title: '作业截止提醒',
+        footer: '${r.enabledHours.length}/3 项已开启',
+        children: [
+          _switchTile(
+            context,
+            icon: Icons.notifications_active_outlined,
+            title: '截止前 24 小时',
+            value: r.before24h,
+            onChanged: (v) => state.updateReminders(r..before24h = v),
+          ),
+          SettingsDivider(indent: paletteOf(context).clean ? 16 : 62),
+          _switchTile(
+            context,
+            icon: Icons.schedule_rounded,
+            title: '截止前 6 小时',
+            value: r.before6h,
+            onChanged: (v) => state.updateReminders(r..before6h = v),
+          ),
+          SettingsDivider(indent: paletteOf(context).clean ? 16 : 62),
+          _switchTile(
+            context,
+            icon: Icons.alarm_rounded,
+            title: '截止前 1 小时',
+            value: r.before1h,
+            onChanged: (v) => state.updateReminders(r..before1h = v),
+          ),
+        ],
+      ),
+      SettingsSection(
+        title: '课表',
+        children: [
+          _switchTile(
+            context,
+            icon: Icons.school_outlined,
+            title: '上课前 15 分钟提醒',
+            subtitle: Storage.classReminder() && Storage.semesterStart() == null
+                ? '请先在课表页设置开学日期'
+                : null,
+            value: Storage.classReminder(),
+            onChanged: state.updateClassReminder,
+          ),
+          SettingsDivider(indent: paletteOf(context).clean ? 16 : 62),
+          SettingsRow(
+            icon: Icons.access_time_rounded,
+            title: '作息时间',
+            subtitle: '按学校作息调整每节课时间',
+            navigation: true,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => SectionTimesPage(state: state),
+              ),
+            ),
+          ),
+        ],
+      ),
+      if (defaultTargetPlatform == TargetPlatform.android)
+        SettingsSection(
+          title: '系统通知',
+          children: [
+            SettingsRow(
+              icon: Icons.tune_rounded,
+              title: '通知横幅与声音',
+              navigation: true,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => NotificationSettingsPage(
+                    homeworkId: state.homework
+                        .where((h) => h.status != HwStatus.done)
+                        .firstOrNull
+                        ?.id,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+    ];
+  }
+
+  List<Widget> _syncSettings(BuildContext context) {
+    final last = state.lastSync;
+    final syncText = last == null
+        ? '还没有同步过'
+        : '${last.month}月${last.day}日 ${last.hour.toString().padLeft(2, '0')}:${last.minute.toString().padLeft(2, '0')}';
+    return [
+      SettingsSection(
+        title: '同步方式',
+        children: [
+          SettingsRow(
+            icon: Icons.sync_rounded,
+            title: '后台同步',
+            subtitle: Storage.syncConfig().enabled
+                ? '每 ${Storage.syncConfig().minutes} 分钟检查'
+                : '后台定时已关闭',
+            navigation: true,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => BackgroundSyncSettingsPage(state: state),
+              ),
+            ),
+          ),
+        ],
+      ),
+      SettingsSection(
+        title: '同步状态',
+        children: [
+          SettingsRow(
+            icon: Icons.history_rounded,
+            title: '上次同步',
+            subtitle: syncText,
+            onLongPress: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute<void>(builder: (_) => const DebugPage())),
+          ),
+          _divider(context),
+          SettingsRow(
+            icon: Icons.refresh_rounded,
+            title: '立即同步全部作业',
+            onTap: state.syncing ? null : () => state.syncAll(),
+            trailing: state.syncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null,
+          ),
+        ],
+      ),
+    ];
+  }
+
+  List<Widget> _dataSettings(BuildContext context) => [
+    SettingsSection(
+      title: '备份与恢复',
+      footer: '备份包含作业、课表、作息和隐藏记录，不包含账号登录信息。',
+      children: [
+        SettingsRow(
+          icon: Icons.file_upload_outlined,
+          title: '导出数据',
+          subtitle: '将当前数据保存为备份文件',
+          navigation: true,
+          onTap: () => _exportBackup(context),
+        ),
+        _divider(context),
+        SettingsRow(
+          icon: Icons.file_download_outlined,
+          title: '导入数据',
+          subtitle: '从备份文件恢复',
+          navigation: true,
+          onTap: () => _importBackup(context, state),
+        ),
+      ],
+    ),
+    SettingsSection(
+      title: '记录管理',
+      children: [
+        SettingsRow(
+          icon: Icons.visibility_off_outlined,
+          title: '已隐藏的作业',
+          subtitle: '查看与恢复左滑隐藏的作业',
+          navigation: true,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => HiddenPage(state: state)),
+          ),
+        ),
+        _divider(context),
+        SettingsRow(
+          icon: Icons.inventory_2_outlined,
+          title: '历史账号数据',
+          subtitle: '只读查看或导出换号前的记录',
+          navigation: true,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => const AccountArchivesPage(),
+            ),
+          ),
+        ),
+      ],
+    ),
+  ];
+
+  List<Widget> _aboutSettings(BuildContext context) => [
+    Padding(
+      padding: const EdgeInsets.fromLTRB(4, 24, 4, 28),
+      child: Row(
+        children: [
+          Image.asset('assets/icon/icon_rounded.png', width: 54, height: 54),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '作业通',
+                  style: serifTitle(
+                    context,
+                    TextStyle(
+                      fontSize: 23,
+                      fontWeight: FontWeight.w600,
+                      color: textPrimary(context),
+                    ),
+                  ),
+                ),
+                FutureBuilder<PackageInfo>(
+                  future: _packageInfo ??= PackageInfo.fromPlatform(),
+                  builder: (context, snapshot) => snapshot.hasData
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 5),
+                          child: SettingsNote('版本 ${snapshot.data!.version}'),
+                        )
+                      : const SizedBox.shrink(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+    SettingsSection(
+      title: '应用',
+      children: [
+        SettingsRow(
+          icon: Icons.system_update_outlined,
+          title: '检查更新',
+          subtitle: AppUpdateController.instance.status.label,
+          navigation: true,
+          onTap: () => checkForAppUpdate(context),
+        ),
+      ],
+    ),
+    SettingsSection(
+      title: '支持',
+      children: [
+        for (final email in _feedbackEmails)
+          SettingsRow(
+            icon: Icons.mail_outline_rounded,
+            title: '联系开发者',
+            subtitle: email,
+            trailing: Icon(
+              Icons.copy_rounded,
+              size: 18,
+              color: textFaint(context),
+            ),
+            onTap: () => _copyFeedbackEmail(context, email),
+          ),
+      ],
+    ),
+    const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 4),
+      child: SettingsNote('仅同步你已登录账号的作业数据。'),
+    ),
+  ];
+
+  /// 关于与帮助中的反馈地址，点击复制。
   static const List<String> _feedbackEmails = ['yaohuizheng22@gmail.com'];
 
   void _copyFeedbackEmail(BuildContext context, String email) {
@@ -399,7 +499,7 @@ class SettingsPage extends StatelessWidget {
   Future<void> _importBackup(BuildContext context, AppState state) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => ThemedAlertDialog(
+      builder: (context) => SettingsAlertDialog(
         title: const Text('导入备份'),
         content: const Text(
           '将覆盖当前课表、作业与相关设置，'
@@ -442,62 +542,40 @@ class SettingsPage extends StatelessWidget {
 
   void _pickThemeMode(BuildContext context, AppState state) {
     final options = [
-      (ThemeMode.system, '跟随系统', Icons.brightness_auto_rounded),
-      (ThemeMode.light, '浅色', Icons.light_mode_rounded),
-      (ThemeMode.dark, '深色', Icons.dark_mode_rounded),
+      (ThemeMode.system, '跟随系统', Icons.brightness_auto_outlined),
+      (ThemeMode.light, '浅色', Icons.light_mode_outlined),
+      (ThemeMode.dark, '深色', Icons.dark_mode_outlined),
     ];
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => ThemedDialog(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(20, 12, 20, 8),
-                    child: ThemeEditorHeading(
-                      title: '主题模式',
-                      kicker: 'DISPLAY MODE',
-                      icon: Icons.contrast_rounded,
-                    ),
-                  ),
-                  for (final (mode, label, icon) in options)
-                    ListTile(
-                      leading: Icon(icon, color: accentColor(dialogContext)),
-                      title: Text(
-                        label,
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                          color: textPrimary(dialogContext),
-                        ),
-                      ),
-                      trailing: state.themeMode == mode
-                          ? Icon(
-                              Icons.check_rounded,
-                              color: accentColor(dialogContext),
-                            )
-                          : null,
-                      onTap: () {
-                        state.setThemeMode(mode);
-                        Navigator.of(dialogContext).pop();
-                      },
-                    ),
-                ],
+      builder: (dialogContext) => SettingsAlertDialog(
+        title: const Text('主题模式'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (mode, label, icon) in options)
+              SettingsRow(
+                icon: icon,
+                title: label,
+                trailing: state.themeMode == mode
+                    ? Icon(
+                        Icons.check_rounded,
+                        color: accentColor(dialogContext),
+                        size: 20,
+                      )
+                    : null,
+                onTap: () {
+                  state.setThemeMode(mode);
+                  Navigator.of(dialogContext).pop();
+                },
               ),
-            ),
-          ),
+          ],
         ),
       ),
     );
   }
 
-  /// 样式选择：一排迷你预览卡，点按即切（全局立即生效，无需确认）。
-  /// 横向可滚——五个缩略图塞不进一屏宽度。
+  /// 两列主题预览；选择后立即保存并关闭弹层。
   Widget _stylePicker(BuildContext context, AppState state) {
     return _tile(
       context,
@@ -525,14 +603,31 @@ class SettingsPage extends StatelessWidget {
             builder: (_, _) => ListView(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
               children: [
-                const ThemeEditorHeading(
-                  title: '界面风格',
-                  kicker: 'APPEARANCE',
-                  icon: Icons.palette_outlined,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '界面风格',
+                        style: serifTitle(
+                          context,
+                          TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w600,
+                            color: textPrimary(context),
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '关闭',
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      icon: const Icon(Icons.close_rounded, size: 21),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '选择适合你的学习氛围',
+                  '选择后立即生效',
                   style: TextStyle(
                     fontSize: 13,
                     color: textSecondary(sheetContext),
@@ -1164,104 +1259,7 @@ class SettingsPage extends StatelessWidget {
     };
   }
 
-  Widget _groupLabel(BuildContext context, String t) {
-    if (!paletteOf(context).clean) {
-      const groups = ['外观', '截止提醒', '课表', '备份', '同步', '其他', '关于', '反馈问题'];
-      return ThemeSectionHeading(title: t, index: groups.indexOf(t) + 1);
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
-      // 水墨：组头一枚淡墨顿点，与首页分段头同一语言
-      child: Row(
-        children: [
-          if (isInkStyle(context)) ...[
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: textSecondary(context).withValues(alpha: 0.8),
-              ),
-            ),
-            const SizedBox(width: 7),
-          ],
-          Text(
-            t,
-            style: serifTitle(
-              context,
-              TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: textSecondary(context),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _groupCard(BuildContext context, List<Widget> children) {
-    if (!paletteOf(context).clean) {
-      return ThemePanel(
-        padding: EdgeInsets.zero,
-        seed: 'settings',
-        child: Material(
-          type: MaterialType.transparency,
-          child: Column(children: children),
-        ),
-      );
-    }
-    return Container(
-      decoration:
-          inkWashFill(context, cardRadius(context) + 2) ??
-          (isPixelStyle(context)
-              ? BoxDecoration(color: cardColor(context))
-              : isReceiptStyle(context)
-              ? receiptTear(context)
-              : isEditorialStyle(context)
-              ? BoxDecoration(color: cardColor(context))
-              : BoxDecoration(
-                  color: cardColor(context),
-                  borderRadius: BorderRadius.circular(cardRadius(context) + 2),
-                  border: cardBorderOf(context),
-                )),
-      foregroundDecoration: isPixelStyle(context)
-          ? pixelFrame(context, cardRadius(context) + 2)
-          : paperInnerRing(context, cardRadius(context) + 2) ??
-                morandiCream(context, cardRadius(context) + 2) ??
-                editorialRules(context),
-      clipBehavior: Clip.antiAlias,
-      child: Material(
-        type: MaterialType.transparency,
-        child: Column(children: children),
-      ),
-    );
-  }
-
-  Widget _divider(BuildContext context) {
-    // 水墨：分隔线是一笔飞白（淡墨笔触，干笔留白）。
-    if (isInkStyle(context)) {
-      return Padding(
-        padding: const EdgeInsets.only(left: 54, right: 16),
-        child: BrushLine(color: textSecondary(context).withValues(alpha: 0.30)),
-      );
-    }
-    return isPaperStyle(context) ||
-            isReceiptStyle(context) ||
-            isJournalStyle(context) ||
-            isTerminalStyle(context)
-        ? Padding(
-            padding: const EdgeInsets.only(left: 54, right: 16),
-            child: DashedLine(color: dividerColor(context)),
-          )
-        : Divider(
-            height: 1,
-            indent: 54,
-            endIndent: 16,
-            color: dividerColor(context),
-          );
-  }
+  Widget _divider(BuildContext context) => const SettingsDivider();
 
   Widget _switchTile(
     BuildContext context, {
@@ -1270,69 +1268,13 @@ class SettingsPage extends StatelessWidget {
     String? subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
-  }) {
-    if (!paletteOf(context).clean) {
-      return ListTile(
-        onTap: () => onChanged(!value),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        minLeadingWidth: 34,
-        horizontalTitleGap: 12,
-        leading: ThemePreferenceIcon(icon: icon),
-        title: Text(
-          title,
-          style: monoText(
-            context,
-            TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: textPrimary(context),
-            ),
-          ),
-        ),
-        subtitle: subtitle == null
-            ? null
-            : Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: textSecondary(context),
-                  height: 1.5,
-                ),
-              ),
-        trailing: Semantics(
-          label: title,
-          toggled: value,
-          onTap: () => onChanged(!value),
-          child: ExcludeSemantics(
-            child: SizedBox(
-              width: isTerminalStyle(context) ? 72 : 56,
-              child: ThemePreferenceToggle(value: value, onChanged: onChanged),
-            ),
-          ),
-        ),
-      );
-    }
-    return SwitchListTile(
-      value: value,
-      onChanged: onChanged,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      secondary: _icon(context, icon),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14.5,
-          fontWeight: FontWeight.w600,
-          color: textPrimary(context),
-        ),
-      ),
-      subtitle: subtitle == null
-          ? null
-          : Text(
-              subtitle,
-              style: TextStyle(fontSize: 12, color: textSecondary(context)),
-            ),
-    );
-  }
+  }) => SettingsSwitchRow(
+    icon: paletteOf(context).clean ? null : icon,
+    title: title,
+    subtitle: subtitle,
+    value: value,
+    onChanged: onChanged,
+  );
 
   Widget _tile(
     BuildContext context, {
@@ -1342,33 +1284,14 @@ class SettingsPage extends StatelessWidget {
     Widget? trailing,
     VoidCallback? onTap,
     VoidCallback? onLongPress,
-  }) {
-    return ListTile(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      minLeadingWidth: paletteOf(context).clean ? null : 34,
-      horizontalTitleGap: paletteOf(context).clean ? null : 12,
-      leading: paletteOf(context).clean
-          ? _icon(context, icon)
-          : ThemePreferenceIcon(icon: icon),
-      title: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14.5,
-          fontWeight: FontWeight.w600,
-          color: textPrimary(context),
-        ),
-      ),
-      subtitle: subtitle == null
-          ? null
-          : Text(
-              subtitle,
-              style: TextStyle(fontSize: 12, color: textSecondary(context)),
-            ),
-      trailing: trailing,
-    );
-  }
+  }) => SettingsRow(
+    icon: icon,
+    title: title,
+    subtitle: subtitle,
+    trailing: trailing,
+    onTap: onTap,
+    onLongPress: onLongPress,
+  );
 
   /// 小组件没有应用内的开关，添加入口在系统桌面；
   /// 安卓也不开放"直接跳到微件选择器"的 API，只能给步骤引导。
@@ -1385,12 +1308,8 @@ class SettingsPage extends StatelessWidget {
     if (!context.mounted) return;
     showDialog<void>(
       context: context,
-      builder: (dialogContext) => ThemedAlertDialog(
-        backgroundColor: cardColor(dialogContext),
-        title: const Text(
-          '添加桌面小组件',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
-        ),
+      builder: (dialogContext) => SettingsAlertDialog(
+        title: const Text('添加桌面小组件'),
         content: ConstrainedBox(
           constraints: const BoxConstraints(maxHeight: 480),
           child: SingleChildScrollView(
@@ -1613,13 +1532,6 @@ class SettingsPage extends StatelessWidget {
       ),
     );
   }
-
-  Widget _icon(BuildContext context, IconData icon) => Icon(
-    icon,
-    size: 22,
-    // 水墨：列表图标用灰墨，朱砂只留给开关/选中态
-    color: isInkStyle(context) ? textSecondary(context) : accentColor(context),
-  );
 }
 
 class AccountArchivesPage extends StatelessWidget {
@@ -1628,32 +1540,38 @@ class AccountArchivesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final archives = Storage.accountArchives().reversed.toList();
-    return Scaffold(
-      appBar: AppBar(title: const Text('历史账号数据')),
+    return SettingsScaffold(
+      title: '历史账号数据',
       body: archives.isEmpty
-          ? const Center(child: Text('暂无历史归档'))
-          : ListView.builder(
-              itemCount: archives.length,
-              itemBuilder: (context, i) {
-                final archive = archives[i];
-                final homework = archive['homework'] as List? ?? const [];
-                final hidden = archive['hiddenItems'] as Map? ?? const {};
-                final courses = archive['courses'] as List? ?? const [];
-                return ListTile(
-                  title: Text(
-                    '${archive['platform']} · ${archive['createdAt']}',
-                  ),
-                  subtitle: Text(
-                    '${homework.length} 条作业，${hidden.length} 条隐藏作业，${courses.length} 门课程',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => _AccountArchiveDetail(archive: archive),
-                    ),
-                  ),
-                );
-              },
+          ? const Center(child: SettingsNote('暂无历史归档'))
+          : SettingsList(
+              children: [
+                SettingsSection(
+                  title: '只读归档',
+                  footer: '查看与导出不会修改当前账号。',
+                  children: [
+                    for (var i = 0; i < archives.length; i++) ...[
+                      if (i > 0) const SettingsDivider(),
+                      SettingsRow(
+                        icon: Icons.inventory_2_outlined,
+                        title: '${archives[i]['platform']}',
+                        subtitle:
+                            '${archives[i]['createdAt']}\n'
+                            '${(archives[i]['homework'] as List? ?? const []).length} 条作业 · '
+                            '${(archives[i]['hiddenItems'] as Map? ?? const {}).length} 条隐藏作业 · '
+                            '${(archives[i]['courses'] as List? ?? const []).length} 门课程',
+                        navigation: true,
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                _AccountArchiveDetail(archive: archives[i]),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
             ),
     );
   }
@@ -1701,37 +1619,48 @@ class _AccountArchiveDetail extends StatelessWidget {
       }
     }
     final courses = (archive['courses'] as List? ?? const []).whereType<Map>();
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('归档详情（只读）'),
-        actions: [
-          IconButton(
-            tooltip: '导出归档',
-            icon: const Icon(Icons.file_upload_outlined),
-            onPressed: () => _export(context),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+    return SettingsScaffold(
+      title: '归档详情（只读）',
+      actions: [
+        IconButton(
+          tooltip: '导出归档',
+          icon: const Icon(Icons.file_upload_outlined),
+          onPressed: () => _export(context),
+        ),
+      ],
+      body: SettingsList(
         children: [
-          const Text('此处保留换号或替换前的数据。查看与导出不会修改当前账号。'),
-          const SizedBox(height: 12),
-          for (final task in tasks)
-            ListTile(
-              title: Text('${task['title'] ?? '未命名作业'}'),
-              subtitle: Text(
-                '${task['course'] ?? ''}${task['_hidden'] == true ? ' · 已隐藏' : ''}'
-                '${task['note'] == null ? '' : '\n${task['note']}'}',
-              ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(4, 8, 4, 12),
+            child: SettingsNote('此处保留换号或替换前的数据。查看与导出不会修改当前账号。'),
+          ),
+          if (tasks.isNotEmpty)
+            SettingsSection(
+              title: '作业',
+              children: [
+                for (var i = 0; i < tasks.length; i++) ...[
+                  if (i > 0) const SettingsDivider(),
+                  SettingsRow(
+                    title: '${tasks[i]['title'] ?? '未命名作业'}',
+                    subtitle:
+                        '${tasks[i]['course'] ?? ''}${tasks[i]['_hidden'] == true ? ' · 已隐藏' : ''}'
+                        '${tasks[i]['note'] == null ? '' : '\n${tasks[i]['note']}'}',
+                  ),
+                ],
+              ],
             ),
-          for (final course in courses)
-            ListTile(
-              title: Text('${course['name'] ?? '未命名课程'}'),
-              subtitle: Text(
-                '周${course['weekday']} · 第${course['startSection']}-${course['endSection']}节'
-                ' · ${course['room'] ?? ''}\n周次：${course['weeks'] ?? ''}',
-              ),
+          if (courses.isNotEmpty)
+            SettingsSection(
+              title: '课程',
+              children: [
+                for (final course in courses)
+                  SettingsRow(
+                    title: '${course['name'] ?? '未命名课程'}',
+                    subtitle:
+                        '周${course['weekday']} · 第${course['startSection']}-${course['endSection']}节'
+                        ' · ${course['room'] ?? ''}\n周次：${course['weeks'] ?? ''}',
+                  ),
+              ],
             ),
         ],
       ),
@@ -1746,8 +1675,8 @@ class HiddenPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('已隐藏的作业')),
+    return SettingsScaffold(
+      title: '已隐藏的作业',
       body: ListenableBuilder(
         listenable: state,
         builder: (context, _) {
@@ -1801,55 +1730,53 @@ class HiddenPage extends StatelessWidget {
             itemBuilder: (context, i) {
               final entry = items[i];
               final hw = entry.value;
-              return Container(
-                padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-                decoration: BoxDecoration(
-                  color: cardColor(context),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${hw.platform.label} · ${hw.course}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: textSecondary(context),
-                            ),
+              return SettingsSection(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${hw.platform.label} · ${hw.course}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: textSecondary(context),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                hw.title,
+                                style: TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: textPrimary(context),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            hw.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w600,
-                              color: textPrimary(context),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            await state.restoreHomework(entry.key);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  behavior: SnackBarBehavior.floating,
+                                  content: Text('已恢复「${hw.title}」'),
+                                ),
+                              );
+                            }
+                          },
+                          child: const Text('恢复'),
+                        ),
+                      ],
                     ),
-                    TextButton(
-                      onPressed: () async {
-                        await state.restoreHomework(entry.key);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              behavior: SnackBarBehavior.floating,
-                              content: Text('已恢复「${hw.title}」'),
-                            ),
-                          );
-                        }
-                      },
-                      child: const Text('恢复'),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               );
             },
           );

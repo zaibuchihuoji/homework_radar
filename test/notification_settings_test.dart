@@ -9,7 +9,7 @@ import 'package:homework_radar/pages/notification_settings_page.dart';
 import 'package:homework_radar/services/notification_service.dart';
 import 'package:homework_radar/services/storage.dart';
 import 'package:homework_radar/ui/tokens.dart';
-import 'package:homework_radar/ui/theme_page_parts.dart';
+import 'package:homework_radar/ui/settings_parts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -73,6 +73,8 @@ void main() {
         home: SettingsPage(state: state),
       ),
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('提醒与课表'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('通知横幅与声音'), 180);
     await tester.pumpAndSettle();
@@ -236,7 +238,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         final send = find.descendant(
-          of: find.widgetWithText(ThemePanel, '上课提醒'),
+          of: find.widgetWithText(SettingsSection, '上课提醒'),
           matching: find.text('发送一条提醒'),
         );
         await tester.scrollUntilVisible(send, 160);

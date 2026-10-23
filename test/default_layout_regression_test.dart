@@ -115,6 +115,8 @@ void main() {
         ),
       ),
     );
+    await tester.tap(find.text('外观与小组件'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('界面风格'));
     await tester.pumpAndSettle();
     for (final style in ThemeStyle.values) {

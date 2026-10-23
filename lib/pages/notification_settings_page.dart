@@ -2,10 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../services/notification_service.dart';
-import '../ui/adaptive.dart';
-import '../ui/ink_wash.dart';
-import '../ui/style_background.dart';
-import '../ui/theme_page_parts.dart';
+import '../ui/settings_parts.dart';
 
 class NotificationSettingsPage extends StatefulWidget {
   const NotificationSettingsPage({super.key, this.homeworkId});
@@ -114,73 +111,72 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
   }
 
   @override
-  Widget build(BuildContext context) => StyleBackground(
-    child: Scaffold(
-      backgroundColor: scaffoldBgOf(context),
-      appBar: AppBar(title: appBarTitle(context, '通知横幅与声音')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-        children: [
-          ThemePanel(
-            label: '顶部横幅',
-            icon: Icons.notifications_active_outlined,
-            child: const Text('想在屏幕顶部看到提醒，请在系统通知设置中允许横幅或悬浮通知。'),
-          ),
-          const SizedBox(height: 12),
-          ValueListenableBuilder<bool?>(
-            valueListenable: NotificationService.permission,
-            builder: (context, allowed, _) => ThemePanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    allowed == false
-                        ? 'App 通知权限已关闭'
-                        : allowed == true
-                        ? 'App 通知权限已允许'
-                        : 'App 通知权限状态未知',
-                  ),
-                  const SizedBox(height: 4),
-                  const Text('横幅和声音可在系统设置中调整。'),
-                  TextButton(
-                    onPressed: () => _open(),
-                    child: const Text('打开 App 通知设置'),
-                  ),
-                ],
+  Widget build(BuildContext context) => SettingsScaffold(
+    title: '通知横幅与声音',
+    body: SettingsList(
+      children: [
+        ValueListenableBuilder<bool?>(
+          valueListenable: NotificationService.permission,
+          builder: (context, allowed, _) => SettingsSection(
+            title: '通知权限',
+            children: [
+              SettingsRow(
+                icon: allowed == false
+                    ? Icons.notifications_off_outlined
+                    : Icons.notifications_none_rounded,
+                title: allowed == false
+                    ? 'App 通知权限已关闭'
+                    : allowed == true
+                    ? 'App 通知权限已允许'
+                    : 'App 通知权限状态未知',
+                subtitle: '横幅和声音可在系统设置中调整。',
               ),
-            ),
+              const SettingsDivider(),
+              SettingsRow(
+                title: '打开 App 通知设置',
+                navigation: true,
+                onTap: () => _open(),
+              ),
+            ],
           ),
-          for (final channel
-              in NotificationService.androidReminderChannels) ...[
-            const SizedBox(height: 12),
-            ThemePanel(
-              label: channel.name,
-              icon: channel.id == 'homework_due'
-                  ? Icons.assignment_outlined
-                  : Icons.school_outlined,
-              seed: channel.id,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(_status(channel.id)),
-                  const SizedBox(height: 6),
-                  const Text('可分别设置横幅、声音和振动。'),
-                  TextButton(
-                    onPressed: () => _open(channel.id),
-                    child: Text('设置${channel.name}'),
-                  ),
-                  OutlinedButton(
+        ),
+        for (final channel in NotificationService.androidReminderChannels)
+          SettingsSection(
+            title: channel.name,
+            children: [
+              SettingsRow(
+                icon: channel.id == 'homework_due'
+                    ? Icons.assignment_outlined
+                    : Icons.school_outlined,
+                title: '设置${channel.name}',
+                subtitle: _status(channel.id),
+                navigation: true,
+                onTap: () => _open(channel.id),
+              ),
+              const SettingsDivider(),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
                     onPressed: _sending ? null : () => _test(channel.id),
-                    child: const Text('发送一条提醒'),
+                    icon: const Icon(Icons.send_outlined, size: 17),
+                    label: const Text('发送一条提醒'),
                   ),
-                ],
+                ),
               ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          const Text('未收到提醒时，请检查系统通知权限和勿扰模式。'),
-        ],
-      ),
+            ],
+          ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4),
+          child: SettingsNote(
+            '想在屏幕顶部看到提醒，请在系统通知设置中允许横幅或悬浮通知。未收到提醒时，请检查通知权限和勿扰模式。',
+          ),
+        ),
+      ],
     ),
   );
 }

@@ -5,7 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_update_controller.dart';
 import '../services/update_service.dart';
-import '../ui/theme_forms.dart';
+import '../ui/settings_parts.dart';
 
 bool _updateDialogOpen = false;
 bool _checking = false;
@@ -115,7 +115,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       final offer = status.phase == 'idle';
       final info = widget.info;
       final version = offer ? info?.version ?? '' : status.version;
-      return ThemedDialog(
+      return SettingsDialog(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 400),
           child: SingleChildScrollView(
@@ -130,12 +130,19 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                       : offer
                       ? '发现新版本'
                       : '应用更新',
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: const TextStyle(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   '作业通 v$version',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 if (offer) ...[
@@ -165,7 +172,11 @@ class _UpdateDialogState extends State<_UpdateDialog> {
                         : '下载来源：${status.source}',
                   ),
                   const SizedBox(height: 12),
-                  LinearProgressIndicator(value: status.progress),
+                  LinearProgressIndicator(
+                    value: status.progress,
+                    minHeight: 6,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                   const SizedBox(height: 10),
                   Text(
                     '${size(status.bytes)}${status.total > 0 ? ' / ${size(status.total)}' : ''}',
