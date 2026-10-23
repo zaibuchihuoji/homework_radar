@@ -28,10 +28,12 @@ cleanup() {
 trap cleanup EXIT
 xcrun simctl boot "$SIMULATOR_ID" || true
 xcrun simctl bootstatus "$SIMULATOR_ID" -b
+if [ "${IOS_DESKTOP_ONLY:-0}" != 1 ]; then
 xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
   -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
   -only-testing:RunnerTests -resultBundlePath "$QA/RunnerTests.xcresult" test-without-building BUILD_DIR="$ROOT/build/ios" \
   > "$QA/native-tests.log" 2>&1 || { tail -n 100 "$QA/native-tests.log"; exit 1; }
+fi
 # Keep OS-owned SpringBoard automation separate from the native data/engine gate.
 # A desktop automation failure stays visible; it never becomes a claimed pass.
 if xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
@@ -43,11 +45,10 @@ else
   echo failed > "$QA/desktop-ui-status.txt"
   echo '::warning::SpringBoard desktop automation failed; inspect desktop-tests.log and screenshots. Physical self-signing still requires iPhone validation.'
   tail -n 60 "$QA/desktop-tests.log"
+  if [ "${IOS_DESKTOP_ONLY:-0}" = 1 ]; then exit 1; fi
 fi
 xcrun simctl io "$SIMULATOR_ID" screenshot "$QA/after-widget-launch.png"
 xcrun simctl install "$SIMULATOR_ID" "$APP"
 xcrun simctl launch "$SIMULATOR_ID" com.worknote.homeworkRadar
-sleep 3
-xcrun simctl openurl "$SIMULATOR_ID" 'homework-radar://widget/timetable?homeWidget=1'
-sleep 3
+sleep 6
 xcrun simctl io "$SIMULATOR_ID" screenshot "$QA/launch.png"

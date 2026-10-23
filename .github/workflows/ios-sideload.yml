@@ -7,6 +7,10 @@ on:
         description: 'Run native tests (disable only for packaging changes after the same app sources passed)'
         type: boolean
         default: true
+      desktop_only:
+        description: 'Validate desktop automation only; app sources and device IPA already passed'
+        type: boolean
+        default: false
   push:
     branches: [main, fix/ios-sideload-build]
     paths:
@@ -37,8 +41,10 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Verify simulator build, Keychain, Chinese OCR and launch
-        if: github.event_name != 'workflow_dispatch' || inputs.validate_simulator
+        if: github.event_name != 'workflow_dispatch' || inputs.validate_simulator || inputs.desktop_only
         timeout-minutes: 35
+        env:
+          IOS_DESKTOP_ONLY: ${{ inputs.desktop_only && '1' || '0' }}
         run: bash scripts/ios/validate_simulator.sh
       - name: Capture native integration diagnostics on failure
         if: failure()
@@ -50,12 +56,15 @@ jobs:
           xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/runner-settings.txt 2>&1 || true
           xcodebuild -project ios/Pods/Pods.xcodeproj -target Pods-Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/pods-settings.txt 2>&1 || true
       - name: Build unsigned iPhone release
+        if: github.event_name != 'workflow_dispatch' || !inputs.desktop_only
         run: flutter build ios --release --no-codesign
       - name: Package device IPA for Windows self-signing
+        if: github.event_name != 'workflow_dispatch' || !inputs.desktop_only
         run: |
           bash scripts/ios/package_unsigned_ipa.sh
           cp ios/SELF_SIGNING.md build/ios/ipa/SELF_SIGNING.md
       - name: Save IPA and checksum
+        if: github.event_name != 'workflow_dispatch' || !inputs.desktop_only
         uses: actions/upload-artifact@v4
         with:
           name: ios-self-sign-ipa
