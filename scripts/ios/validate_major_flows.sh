@@ -3,7 +3,6 @@ set -euo pipefail
 ROOT=$(pwd)
 QA="$ROOT/build/ios/major-flows"
 mkdir -p "$QA"
-export TZ=Asia/Shanghai
 # A smaller screen reduces simulator memory use. Every run gets a fresh
 # container: no developer/user app database or Keychain is reused or cleared.
 RUNTIME=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; print(next(r["identifier"] for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and "iOS" in r["name"]))')

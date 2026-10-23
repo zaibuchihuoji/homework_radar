@@ -9,7 +9,6 @@ final class MajorFlowsTests: XCTestCase {
 
   override func setUpWithError() throws {
     continueAfterFailure = false
-    app.launchEnvironment["TZ"] = "Asia/Shanghai"
     app.launch()
     allowNotifications()
     XCTAssertTrue(element(containing: "作业标签页").waitForExistence(timeout: 20), app.debugDescription)
@@ -198,7 +197,8 @@ final class MajorFlowsTests: XCTestCase {
     tap("添加作业")
     tap("识别添加")
     let format = DateFormatter()
-    format.timeZone = TimeZone(identifier: "Asia/Shanghai")
+    // Match the simulator's system timezone, as the app's date editor does.
+    format.timeZone = .current
     format.dateFormat = "yyyy-MM-dd HH:mm"
     let due = Date().addingTimeInterval(3600 + 120)
     let text = "【QA Notify】QA reminder 作业，截止" + format.string(from: due)
