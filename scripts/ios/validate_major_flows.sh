@@ -28,11 +28,17 @@ xcrun simctl boot "$SIMULATOR_ID"
 xcrun simctl bootstatus "$SIMULATOR_ID" -b > "$QA/boot.log" 2>&1
 xcrun simctl addmedia "$SIMULATOR_ID" "$ROOT/test/fixtures/ios_homework_screenshot.png"
 # Do not run the WidgetKit/SpringBoard gallery suite or rebuild a device IPA.
+case "${IOS_MAJOR_FLOW:-all}" in
+  all) UI_TARGET=RunnerUITests/MajorFlowsTests ;;
+  notification) UI_TARGET=RunnerUITests/MajorFlowsTests/test04ScheduledReminderDeliveredAndOpensDetail ;;
+  *) echo 'Unknown flow'; exit 1 ;;
+esac
 xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
   -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
-  -only-testing:RunnerUITests/MajorFlowsTests -resultBundlePath "$QA/MainFlows.xcresult" \
+  -only-testing:"$UI_TARGET" -resultBundlePath "$QA/MainFlows.xcresult" \
   test-without-building BUILD_DIR="$ROOT/build/ios" > "$QA/ui-tests.log" 2>&1 \
   || { tail -n 100 "$QA/ui-tests.log"; exit 1; }
+if [ "${IOS_MAJOR_FLOW:-all}" = notification ]; then exit 0; fi
 xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
   -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
   -only-testing:RunnerTests/MajorFlowsPersistenceTests -resultBundlePath "$QA/Persistence.xcresult" \

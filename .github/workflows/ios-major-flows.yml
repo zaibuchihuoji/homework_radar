@@ -2,6 +2,12 @@ name: iOS major flows
 
 on:
   workflow_dispatch:
+    inputs:
+      flow:
+        description: 'Run all main flows, or only the independent notification flow'
+        type: choice
+        options: [all, notification]
+        default: all
   push:
     branches: [fix/ios-sideload-build]
     paths: ['.github/workflows/ios-major-flows.yml']
@@ -23,6 +29,8 @@ jobs:
       - run: flutter pub get --enforce-lockfile
       - name: Run actual iOS main flows in a disposable simulator
         timeout-minutes: 38
+        env:
+          IOS_MAJOR_FLOW: ${{ inputs.flow || 'all' }}
         run: bash scripts/ios/validate_major_flows.sh
       - name: Save screenshots, XCTest results and disposable test data
         if: always()

@@ -201,7 +201,7 @@ final class MajorFlowsTests: XCTestCase {
     format.timeZone = TimeZone(identifier: "Asia/Shanghai")
     format.dateFormat = "yyyy-MM-dd HH:mm"
     let due = Date().addingTimeInterval(3600 + 120)
-    let text = "【QA Notify】QA reminder，截止" + format.string(from: due)
+    let text = "【QA Notify】QA reminder 作业，截止" + format.string(from: due)
     let input = app.textViews.firstMatch
     XCTAssertTrue(input.waitForExistence(timeout: 5))
     input.tap()
