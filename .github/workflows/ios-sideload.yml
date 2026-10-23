@@ -21,19 +21,19 @@ jobs:
     # ML Kit's current pods exclude arm64 for iphonesimulator. Use an Intel
     # simulator host; the separate iphoneos Release build still targets arm64.
     runs-on: macos-15-intel
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.7'
           cache: true
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
-      - name: Build simulator app
-        run: |
-          mkdir -p build/ios/qa
-          flutter build ios --simulator --debug --verbose > build/ios/qa/simulator-build.log 2>&1 || { tail -n 120 build/ios/qa/simulator-build.log; exit 1; }
+      - name: Verify simulator build, Keychain, Chinese OCR and launch
+        timeout-minutes: 25
+        run: bash scripts/ios/validate_simulator.sh
       - name: Capture native integration diagnostics on failure
         if: failure()
         run: |
@@ -43,24 +43,6 @@ jobs:
           find build/ios -name '*Pods*Runner*' > build/ios/qa/pod-products.txt
           xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/runner-settings.txt 2>&1 || true
           xcodebuild -project ios/Pods/Pods.xcodeproj -target Pods-Runner -configuration Debug -sdk iphonesimulator -showBuildSettings > build/ios/qa/pods-settings.txt 2>&1 || true
-      - name: Verify Keychain, Chinese OCR and app launch
-        timeout-minutes: 15
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p build/ios/qa
-          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for v in d.values() for x in v if x["name"].startswith("iPhone")))')
-          xcrun simctl boot "$SIMULATOR_ID" || true
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
-            -resultBundlePath build/ios/qa/RunnerTests.xcresult test BUILD_DIR="$PWD/build/ios" \
-            CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
-            > build/ios/qa/native-tests.log 2>&1 || { tail -n 120 build/ios/qa/native-tests.log; exit 1; }
-          xcrun simctl install "$SIMULATOR_ID" build/ios/iphonesimulator/Runner.app
-          xcrun simctl launch "$SIMULATOR_ID" com.worknote.homeworkRadar
-          sleep 8
-          xcrun simctl io "$SIMULATOR_ID" screenshot build/ios/qa/launch.png
       - name: Build unsigned iPhone release
         run: flutter build ios --release --no-codesign
       - name: Package device IPA for Windows self-signing

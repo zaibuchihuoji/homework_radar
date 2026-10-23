@@ -42,11 +42,9 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.47.7'
           cache: true
       - run: flutter pub get
-      - run: flutter build ios --simulator --debug
-      - name: Run Keychain round trip on an available simulator
-        shell: bash
-        run: |
-          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; print(next(d["udid"] for group in devices.values() for d in group if d["name"].startswith("iPhone")))')
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_ID" test BUILD_DIR="$PWD/build/ios" CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-
+      - name: Verify simulator build, Keychain, Chinese OCR and launch
+        timeout-minutes: 25
+        run: bash scripts/ios/validate_simulator.sh
