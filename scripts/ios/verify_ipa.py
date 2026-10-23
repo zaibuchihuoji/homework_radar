@@ -26,11 +26,21 @@ def verify(path):
         assert magic == 0xFEEDFACF and cpu == 0x0100000C, 'Not an arm64 device executable'
         assert 'Payload/Runner.app/Frameworks/App.framework/App' in names
         assert 'Payload/Runner.app/Frameworks/Flutter.framework/Flutter' in names
+        extension = 'Payload/Runner.app/PlugIns/HomeworkWidgets.appex/'
+        widget_info = plistlib.loads(archive.read(extension + 'Info.plist'))
+        assert widget_info['CFBundleIdentifier'] == info['CFBundleIdentifier'] + '.HomeworkWidgets'
+        assert widget_info['CFBundleVersion'] == info['CFBundleVersion']
+        assert widget_info['NSExtension']['NSExtensionPointIdentifier'] == 'com.apple.widgetkit-extension'
+        assert widget_info['CFBundleSupportedPlatforms'] == ['iPhoneOS']
+        widget_binary = archive.read(extension + widget_info['CFBundleExecutable'])
+        assert struct.unpack_from('<II', widget_binary) == (0xFEEDFACF, 0x0100000C)
+
     result = {
         'file': path.name, 'version': info['CFBundleShortVersionString'],
         'build': info['CFBundleVersion'], 'bundleId': info['CFBundleIdentifier'],
         'minimumIOS': info['MinimumOSVersion'], 'architecture': 'arm64',
-        'requiresSelfSigning': True, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+        'requiresSelfSigning': True, 'temporaryAdHocSignature': True,
+        'widgetExtension': widget_info['CFBundleIdentifier'], 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
     }
     return result
 

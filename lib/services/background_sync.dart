@@ -11,7 +11,7 @@ import 'sync_service.dart';
 import 'timetable_widget.dart';
 import 'widget_theme.dart';
 
-/// Runs in the SAME Dart isolate as the UI, including cold Android jobs.
+/// Runs in the SAME Dart isolate as the UI, including cold native jobs.
 class BackgroundSync {
   BackgroundSync(this.state, {required this.onForeground});
   static const channel = MethodChannel('homework_radar/background_sync');
@@ -99,7 +99,7 @@ class BackgroundSync {
       });
       scheduleError.value = null;
     } on MissingPluginException {
-      // No native background scheduler on iOS/desktop.
+      // Platforms without a native scheduler keep foreground refreshes.
     } catch (_) {
       scheduleError.value = '后台任务安排失败；回到 App 后会重试，请保留手动刷新';
     }

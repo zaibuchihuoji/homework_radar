@@ -7,6 +7,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:home_widget/home_widget.dart';
 
+import 'widget_platform.dart';
+
 import '../ui/tokens.dart';
 
 Map<String, Object> widgetThemeSnapshot(ThemeStyle style, ThemeMode mode) {
@@ -49,13 +51,19 @@ class WidgetTheme {
     final next = _writes.then((_) async {
       if (_published == json) return;
       try {
+        await WidgetPlatform.initialize();
         final saved = await HomeWidget.saveWidgetData<String>(
           'widget_theme',
           json,
         );
         if (saved != true) return;
-        await HomeWidget.updateWidget(androidName: 'HomeworkWidgetProvider');
-        await HomeWidget.updateWidget(androidName: 'TimetableWidgetProvider');
+        if (await WidgetPlatform.refresh(
+              androidName: 'HomeworkWidgetProvider',
+            ) ==
+            false) {
+          return;
+        }
+        await WidgetPlatform.refresh(androidName: 'TimetableWidgetProvider');
         _published = json;
       } catch (_) {
         // Retry on the next appearance/lifecycle event; never block app use.

@@ -2,12 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Simulator-only identity for local ad-hoc signing; never used by iphoneos. -->
-    <key>application-identifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>keychain-access-groups</key>
-    <array><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string></array>
-    <key>get-task-allow</key>
-    <true/>
+	<key>application-identifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.com.worknote.homeworkRadar</string>
+	</array>
+	<key>get-task-allow</key>
+	<true/>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	</array>
 </dict>
 </plist>

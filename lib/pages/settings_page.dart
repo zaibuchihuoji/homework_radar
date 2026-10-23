@@ -10,6 +10,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
+
+import '../services/widget_platform.dart';
+
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -1374,9 +1377,13 @@ class SettingsPage extends StatelessWidget {
   /// 安卓也不开放"直接跳到微件选择器"的 API，只能给步骤引导。
   /// 弹窗里带个性化设置：背景 白卡 / 透明，改完立即刷新桌面小组件。
   Future<void> _showWidgetGuide(BuildContext context) async {
-    final steps = const [
+    final ios = defaultTargetPlatform == TargetPlatform.iOS;
+    final steps = [
       ('回到手机桌面，长按空白处', Icons.touch_app_rounded),
-      ('弹出菜单里点「微件」（部分手机叫「小组件」）', Icons.apps_rounded),
+      (
+        ios ? '点「编辑」或左上角的「＋」，选择添加小组件' : '弹出菜单里点「微件」（部分手机叫「小组件」）',
+        Icons.apps_rounded,
+      ),
       ('找到「作业通」，选择「最近作业」或「今日课表」拖到桌面', Icons.drive_file_move_rounded),
     ];
     var transparent =
@@ -1484,10 +1491,10 @@ class SettingsPage extends StatelessWidget {
                             v,
                           );
                           // 两个小组件都立即重绘
-                          await HomeWidget.updateWidget(
+                          await WidgetPlatform.refresh(
                             androidName: 'HomeworkWidgetProvider',
                           );
-                          await HomeWidget.updateWidget(
+                          await WidgetPlatform.refresh(
                             androidName: 'TimetableWidgetProvider',
                           );
                         },
@@ -1532,10 +1539,10 @@ class SettingsPage extends StatelessWidget {
                                 'glass_bg_path',
                                 dest.path,
                               );
-                              await HomeWidget.updateWidget(
+                              await WidgetPlatform.refresh(
                                 androidName: 'HomeworkWidgetProvider',
                               );
-                              await HomeWidget.updateWidget(
+                              await WidgetPlatform.refresh(
                                 androidName: 'TimetableWidgetProvider',
                               );
                               setDialogState(() => glassBgPath = dest.path);
@@ -1558,10 +1565,10 @@ class SettingsPage extends StatelessWidget {
                                   'glass_bg_path',
                                   '',
                                 );
-                                await HomeWidget.updateWidget(
+                                await WidgetPlatform.refresh(
                                   androidName: 'HomeworkWidgetProvider',
                                 );
-                                await HomeWidget.updateWidget(
+                                await WidgetPlatform.refresh(
                                   androidName: 'TimetableWidgetProvider',
                                 );
                                 setDialogState(() => glassBgPath = '');
@@ -1589,8 +1596,9 @@ class SettingsPage extends StatelessWidget {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        '长按小组件可调整大小，列表可以上下滑动。'
-                        '更换壁纸后，可重新选择玻璃底图。',
+                        ios
+                            ? '可选择小、中、大尺寸，点击作业打开详情。系统会安排刷新时间。自签安装请保留小组件扩展；iOS 透明效果受系统限制，可选择壁纸图作为背景。'
+                            : '长按小组件可调整大小，列表可以上下滑动。更换壁纸后，可重新选择玻璃底图。',
                         style: TextStyle(
                           fontSize: 12,
                           height: 1.45,

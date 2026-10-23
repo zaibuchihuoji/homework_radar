@@ -42,7 +42,9 @@ class BackgroundSyncSettingsPage extends StatelessWidget {
       final config = Storage.syncConfig();
       final accounts = Storage.syncAccounts();
       final statuses = Storage.syncStatuses();
-      final android = defaultTargetPlatform == TargetPlatform.android;
+      final ios = defaultTargetPlatform == TargetPlatform.iOS;
+      final native =
+          !kIsWeb && (ios || defaultTargetPlatform == TargetPlatform.android);
       return StyleBackground(
         child: Scaffold(
           backgroundColor: scaffoldBgOf(context),
@@ -60,17 +62,21 @@ class BackgroundSyncSettingsPage extends StatelessWidget {
                       contentPadding: EdgeInsets.zero,
                       title: const Text('后台自动同步'),
                       subtitle: Text(
-                        android ? '有网络时更新作业、小组件和提醒' : '后台定时同步目前支持 Android',
+                        ios
+                            ? '由 iOS 安排刷新作业、小组件和提醒'
+                            : native
+                            ? '有网络时更新作业、小组件和提醒'
+                            : '当前平台暂不支持后台任务',
                       ),
-                      value: android && config.enabled,
-                      onChanged: android
+                      value: native && config.enabled,
+                      onChanged: native
                           ? (v) => _save(
                               context,
                               SyncConfig(enabled: v, minutes: config.minutes),
                             )
                           : null,
                     ),
-                    const Text('后台检查间隔'),
+                    Text(ios ? '最早后台检查间隔' : '后台检查间隔'),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -84,7 +90,7 @@ class BackgroundSyncSettingsPage extends StatelessWidget {
                                   : '${minutes ~/ 60} 小时',
                             ),
                             selected: config.minutes == minutes,
-                            onSelected: android
+                            onSelected: native
                                 ? (_) => _save(
                                     context,
                                     SyncConfig(
@@ -147,7 +153,11 @@ class BackgroundSyncSettingsPage extends StatelessWidget {
                 Text(SyncService.widgetPublishError.value!),
               ],
               const SizedBox(height: 12),
-              const Text('系统省电可能延迟同步，可在手机设置中允许作业通后台运行。'),
+              Text(
+                ios
+                    ? 'iOS 会根据使用频率、电量和网络决定刷新时间，不能保证按所选间隔准点执行。请开启系统后台 App 刷新；手动划掉 App 后，需重新打开才能恢复后台任务。'
+                    : '系统省电可能延迟同步，可在手机设置中允许作业通后台运行。',
+              ),
             ],
           ),
         ),

@@ -47,20 +47,28 @@ enum SecureBox {
 }
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+@objc class AppDelegate: FlutterAppDelegate {
+  lazy var sharedEngine = FlutterEngine(name: "homework-radar-shared", project: nil, allowHeadlessExecution: true)
+  private(set) var widgetBridge: WidgetBridge!
+  private(set) var backgroundRefresh: BackgroundRefresh!
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    sharedEngine.run()
+    GeneratedPluginRegistrant.register(with: sharedEngine)
+    widgetBridge = WidgetBridge(messenger: sharedEngine.binaryMessenger)
+    backgroundRefresh = BackgroundRefresh(messenger: sharedEngine.binaryMessenger)
+    backgroundRefresh.register()
+    installPlatformChannel(sharedEngine.binaryMessenger)
     UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
-  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+  private func installPlatformChannel(_ messenger: FlutterBinaryMessenger) {
       let channel = FlutterMethodChannel(
         name: "homework_radar/platform",
-        binaryMessenger: engineBridge.applicationRegistrar.messenger())
+        binaryMessenger: messenger)
       channel.setMethodCallHandler { (call, result) in
         switch call.method {
         case "getCookie":

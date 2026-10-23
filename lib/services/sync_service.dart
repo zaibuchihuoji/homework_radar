@@ -5,6 +5,9 @@ library;
 import 'dart:convert';
 
 import 'package:home_widget/home_widget.dart';
+
+import 'widget_platform.dart';
+
 import 'package:flutter/foundation.dart';
 
 import '../models/homework.dart';
@@ -638,6 +641,7 @@ class SyncService {
     // Current Android providers read this single authoritative value. Publish
     // and repaint it before optional compatibility keys, whose failures must
     // never keep a hidden/deleted row visible in the current widget.
+    await WidgetPlatform.initialize();
     var committed = false;
     for (var attempt = 0; attempt < 2 && !committed; attempt++) {
       try {
@@ -656,7 +660,10 @@ class SyncService {
       return;
     }
     try {
-      await HomeWidget.updateWidget(androidName: 'HomeworkWidgetProvider');
+      if (await WidgetPlatform.refresh(androidName: 'HomeworkWidgetProvider') ==
+          false) {
+        throw StateError('Widget shared container unavailable');
+      }
       widgetPublishError.value = null;
     } catch (_) {
       widgetPublishError.value = '小组件重绘失败，缓存已保存，会自动重试';

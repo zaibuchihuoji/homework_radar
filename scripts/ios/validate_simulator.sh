@@ -24,7 +24,12 @@ xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug
   -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
   -resultBundlePath "$QA/RunnerTests.xcresult" test-without-building BUILD_DIR="$ROOT/build/ios" \
   > "$QA/native-tests.log" 2>&1 || { tail -n 100 "$QA/native-tests.log"; exit 1; }
+DATA=$(xcrun simctl get_app_container "$SIMULATOR_ID" com.worknote.homeworkRadar data)
+if [ -d "$DATA/Documents/widget-snapshots" ]; then cp -R "$DATA/Documents/widget-snapshots" "$QA/"; fi
+xcrun simctl io "$SIMULATOR_ID" screenshot "$QA/widget-desktop.png"
 xcrun simctl install "$SIMULATOR_ID" "$APP"
 xcrun simctl launch "$SIMULATOR_ID" com.worknote.homeworkRadar
-sleep 8
+sleep 3
+xcrun simctl openurl "$SIMULATOR_ID" 'homework-radar://widget/timetable?homeWidget=1'
+sleep 3
 xcrun simctl io "$SIMULATOR_ID" screenshot "$QA/launch.png"

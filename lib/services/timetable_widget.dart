@@ -8,6 +8,8 @@ import 'dart:convert';
 
 import 'package:home_widget/home_widget.dart';
 
+import 'widget_platform.dart';
+
 import '../models/course.dart';
 import 'section_times.dart';
 import 'storage.dart';
@@ -18,11 +20,11 @@ class TimetableWidget {
   /// 课表/学期校准/作息变化后调用：重写整周课程并刷新小组件。
   static Future<void> push(List<Course> courses) async {
     try {
+      await WidgetPlatform.initialize();
       final now = DateTime.now();
       final start = Storage.semesterStart();
       final week = start == null ? null : Course.weekNumberOf(start, now);
-      String hm(int m) =>
-          '${m ~/ 60}:${(m % 60).toString().padLeft(2, '0')}';
+      String hm(int m) => '${m ~/ 60}:${(m % 60).toString().padLeft(2, '0')}';
       // 契约：表外节次 slotOf 返回 null → s/e 传空串，原生对空串只是
       // 不显示时间，无崩溃风险。此前钳到末节，13-16 节晚课会被标成
       // 21:45 上课误导用户。
@@ -37,9 +39,8 @@ class TimetableWidget {
       // 没打开，小组件会一直显示旧周的「第N周」和旧周课程（单双周错课）。
       final days = <String, List<Map<String, Object>>>{};
       for (var d = 1; d <= 7; d++) {
-        final dayCourses =
-            courses.where((c) => c.weekday == d).toList()
-              ..sort((a, b) => a.startSection.compareTo(b.startSection));
+        final dayCourses = courses.where((c) => c.weekday == d).toList()
+          ..sort((a, b) => a.startSection.compareTo(b.startSection));
         days['$d'] = [
           for (final c in dayCourses)
             {
@@ -53,16 +54,15 @@ class TimetableWidget {
       }
 
       await HomeWidget.saveWidgetData<String>(
-          'tt_json',
-          jsonEncode({
-            // 兼容 v2 的字段：原生读到 w/start 就按当前周重算并过滤
-            'week': week == null
-                ? '周次未校准'
-                : (week < 1 ? '未开学' : '第$week周'),
-            'start': start?.millisecondsSinceEpoch,
-            'days': days,
-          }));
-      await HomeWidget.updateWidget(androidName: 'TimetableWidgetProvider');
+        'tt_json',
+        jsonEncode({
+          // 兼容 v2 的字段：原生读到 w/start 就按当前周重算并过滤
+          'week': week == null ? '周次未校准' : (week < 1 ? '未开学' : '第$week周'),
+          'start': start?.millisecondsSinceEpoch,
+          'days': days,
+        }),
+      );
+      await WidgetPlatform.refresh(androidName: 'TimetableWidgetProvider');
     } catch (_) {
       // 小组件更新失败不影响主流程
     }

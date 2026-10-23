@@ -5,7 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:home_widget/home_widget.dart';
+
+import 'services/widget_platform.dart';
 
 import 'app_state.dart';
 import 'pages/accounts_page.dart';
@@ -71,6 +72,7 @@ Future<void> main() async {
 
       // 前后台都先加载同一份本地数据；后台任务不创建页面或请求权限。
       await Storage.init();
+      await WidgetPlatform.initialize();
       final state = AppState();
       appStateForHome = state;
       // 先上屏本地已有数据（作业 + 课表），主页一出来就有内容
@@ -799,10 +801,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _widgetNavigation = WidgetNavigation(onDestination: _openWidgetDestination);
     if (widget.widgetLaunchReady) _widgetNavigation.setReady();
     unawaited(
-      _widgetNavigation.bind(
-        HomeWidget.initiallyLaunchedFromHomeWidget(),
-        HomeWidget.widgetClicked,
-      ),
+      _widgetNavigation.bind(WidgetPlatform.initialUrl, WidgetPlatform.clicks),
     );
   }
 
