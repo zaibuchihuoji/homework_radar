@@ -20,6 +20,8 @@ codesign -d -vv "$APP" 2> "$QA/simulator-signing.log"
 cleanup() {
   DATA=$(xcrun simctl get_app_container "$SIMULATOR_ID" com.worknote.homeworkRadar data 2>/dev/null) || true
   if [ -n "${DATA:-}" ] && [ -d "$DATA/Documents/widget-snapshots" ]; then cp -R "$DATA/Documents/widget-snapshots" "$QA/"; fi
+  UI_DATA=$(xcrun simctl get_app_container "$SIMULATOR_ID" com.worknote.homeworkRadar.RunnerUITests.xctrunner data 2>/dev/null) || true
+  if [ -n "${UI_DATA:-}" ] && [ -f "$UI_DATA/Documents/widget-desktop.png" ]; then cp "$UI_DATA/Documents/widget-desktop.png" "$QA/widget-desktop.png"; fi
   xcrun simctl io "$SIMULATOR_ID" screenshot "$QA/last-simulator-state.png" || true
   xcrun simctl shutdown "$SIMULATOR_ID" || true
 }
@@ -28,9 +30,21 @@ xcrun simctl boot "$SIMULATOR_ID" || true
 xcrun simctl bootstatus "$SIMULATOR_ID" -b
 xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
   -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
-  -resultBundlePath "$QA/RunnerTests.xcresult" test-without-building BUILD_DIR="$ROOT/build/ios" \
+  -only-testing:RunnerTests -resultBundlePath "$QA/RunnerTests.xcresult" test-without-building BUILD_DIR="$ROOT/build/ios" \
   > "$QA/native-tests.log" 2>&1 || { tail -n 100 "$QA/native-tests.log"; exit 1; }
-xcrun simctl io "$SIMULATOR_ID" screenshot "$QA/widget-desktop.png"
+# Keep OS-owned SpringBoard automation separate from the native data/engine gate.
+# A desktop automation failure stays visible; it never becomes a claimed pass.
+if xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
+  -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
+  -only-testing:RunnerUITests -resultBundlePath "$QA/DesktopTests.xcresult" \
+  test-without-building BUILD_DIR="$ROOT/build/ios" > "$QA/desktop-tests.log" 2>&1; then
+  echo passed > "$QA/desktop-ui-status.txt"
+else
+  echo failed > "$QA/desktop-ui-status.txt"
+  echo '::warning::SpringBoard desktop automation failed; inspect desktop-tests.log and screenshots. Physical self-signing still requires iPhone validation.'
+  tail -n 60 "$QA/desktop-tests.log"
+fi
+xcrun simctl io "$SIMULATOR_ID" screenshot "$QA/after-widget-launch.png"
 xcrun simctl install "$SIMULATOR_ID" "$APP"
 xcrun simctl launch "$SIMULATOR_ID" com.worknote.homeworkRadar
 sleep 3

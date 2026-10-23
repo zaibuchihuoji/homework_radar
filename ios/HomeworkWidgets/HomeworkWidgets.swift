@@ -10,15 +10,26 @@ struct RadarEntry: TimelineEntry {
   let transparent: Bool
   let image: UIImage?
 
-  static func load(at date: Date, preview: Bool = false) -> RadarEntry {
+  static func load(at requestedDate: Date, preview: Bool = false) -> RadarEntry {
+    let date = preview ? Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: requestedDate)! : requestedDate
     let defaults = WidgetShared.defaults
     var homework = WidgetData.dictionary(defaults?.string(forKey: "homework_snapshot"))
     if homework?["version"] as? Int != 2 || homework?["items"] as? [[String: Any]] == nil { homework = nil }
     var timetable = WidgetData.dictionary(defaults?.string(forKey: "tt_json"))
     if preview {
-      homework = ["items": [["id": "preview", "title": "阅读与写作 · 第四单元", "course": "大学英语", "d": date.addingTimeInterval(7200).timeIntervalSince1970 * 1000]]]
+      homework = ["items": [
+        ["id": "preview", "title": "阅读与写作 · 第四单元", "course": "大学英语", "d": date.addingTimeInterval(7200).timeIntervalSince1970 * 1000],
+        ["id": "preview2", "title": "完成程序设计实验并提交实验报告", "course": "程序设计与软件开发实训", "d": date.addingTimeInterval(14400).timeIntervalSince1970 * 1000],
+        ["id": "preview3", "title": "第五章练习", "course": "计算机网络", "d": date.addingTimeInterval(86400).timeIntervalSince1970 * 1000],
+        ["id": "preview4", "title": "整理课堂学习笔记", "course": "软件工程", "d": date.addingTimeInterval(172800).timeIntervalSince1970 * 1000],
+      ]]
       let weekday = (Calendar.current.component(.weekday, from: date) + 5) % 7 + 1
-      timetable = ["days": [String(weekday): [["n": "程序设计实验", "r": "实验楼 402", "s": "14:30", "e": "16:10", "w": []]]]]
+      timetable = ["start": date.timeIntervalSince1970 * 1000, "days": [String(weekday): [
+        ["n": "程序设计实验", "r": "实验楼 402", "s": "14:30", "e": "16:10", "w": []],
+        ["n": "科技文献检索与研究方法", "r": "图书馆 301", "s": "16:20", "e": "18:00", "w": []],
+        ["n": "软件工程", "r": "教学楼 201", "s": "19:00", "e": "20:30", "w": []],
+        ["n": "自主学习", "r": "自习室", "s": "", "e": "", "w": []],
+      ]]]
     }
     let image = defaults?.string(forKey: "widget_wallpaper").flatMap { name -> UIImage? in
       guard name == "widget-wallpaper.jpg", let path = WidgetShared.container?.appendingPathComponent(name).path else { return nil }
@@ -74,7 +85,10 @@ struct RadarWidgetContent: View {
   private var style: String { entry.theme["style"] as? String ?? "clean" }
   private var small: Bool { family == .systemSmall }
   private var largeText: Bool { sizeCategory.isAccessibilityCategory }
-  private var limit: Int { small || largeText ? 1 : family == .systemLarge ? 4 : 2 }
+  private var limit: Int { small || largeText ? 1 : family == .systemLarge ? 3 : 2 }
+  private var columns: [GridItem] {
+    Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .topLeading), count: family == .systemMedium && !largeText ? 2 : 1)
+  }
   private var font: Font.Design {
     ["pixel", "terminal", "receipt"].contains(style) ? .monospaced : ["paper", "editorial", "journal"].contains(style) ? .serif : style == "comic" ? .rounded : .default
   }
@@ -122,6 +136,7 @@ struct RadarWidgetContent: View {
       // deadline readable; the app remains available for unrestricted text.
       .dynamicTypeSize(...(family == .systemLarge ? DynamicTypeSize.xxxLarge : .xLarge))
       .font(.system(.subheadline, design: font))
+      .multilineTextAlignment(.leading)
       .foregroundColor(ink)
       .shadow(color: entry.transparent ? outline : .clear, radius: 1)
       .widgetURL(WidgetShared.url(timetable: timetable, id: small && !timetable ? tasks.first?.id : nil))
@@ -129,7 +144,7 @@ struct RadarWidgetContent: View {
       .modifier(RadarBackground(entry: entry, surface: color("surface", fallback: 0xfffffbea)))
   }
   private var content: some View {
-    VStack(alignment: .leading, spacing: small ? 7 : 9) {
+    VStack(alignment: .leading, spacing: small ? 7 : family == .systemMedium ? 6 : 9) {
       VStack(alignment: .leading, spacing: 4) {
         HStack(alignment: .firstTextBaseline) {
           Text(title).font(.system(.headline, design: font)).fontWeight(style == "comic" || style == "pixel" ? .heavy : .bold).lineLimit(2).layoutPriority(1)
@@ -164,16 +179,17 @@ struct RadarWidgetContent: View {
     if entry.homework == nil { empty("打开作业通", "同步后在这里查看作业") }
     else if tasks.isEmpty { empty("作业都处理好了", "留一点时间给自己") }
     else {
-      ForEach(Array(tasks.prefix(limit))) { item in
-        Link(destination: WidgetShared.url(timetable: false, id: item.id)) {
-          VStack(alignment: .leading, spacing: 3) {
-            Text(item.title).font(.system(.subheadline, design: font).weight(.semibold)).lineLimit(small ? 2 : 3).layoutPriority(2)
-            Text(dueText(item.due)).foregroundColor(item.due.map { $0 <= entry.date } == true ? .red : secondary)
-              .font(.system(.caption, design: font).weight(.medium)).lineLimit(2).layoutPriority(1)
-            if !small || !largeText { Text(item.course).font(.caption).foregroundColor(secondary).lineLimit(small ? 1 : 2) }
-          }.frame(maxWidth: .infinity, alignment: .leading)
+      LazyVGrid(columns: columns, alignment: .leading, spacing: 9) {
+        ForEach(Array(tasks.prefix(limit))) { item in
+          Link(destination: WidgetShared.url(timetable: false, id: item.id)) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text(item.title).font(.system(.subheadline, design: font).weight(.semibold)).lineLimit(2).layoutPriority(2)
+              Text(dueText(item.due)).foregroundColor(item.due.map { $0 <= entry.date } == true ? .red : secondary)
+                .font(.system(.caption, design: font).weight(.medium)).lineLimit(2).layoutPriority(1)
+              if !small || !largeText { Text(item.course).font(.caption).foregroundColor(secondary).lineLimit(family == .systemLarge ? 2 : 1) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+          }
         }
-        if item.id != tasks.prefix(limit).last?.id { Divider() }
       }
     }
   }
@@ -181,15 +197,16 @@ struct RadarWidgetContent: View {
     if entry.timetable == nil { empty("尚未导入课表", "点开作业通导入课程") }
     else if lessons.isEmpty { empty("今天没有待上课程", "留一点时间给自己") }
     else {
-      ForEach(Array(lessons.prefix(limit))) { lesson in
-        Link(destination: WidgetShared.url(timetable: true)) {
-          VStack(alignment: .leading, spacing: 3) {
-            Text(lesson.title).font(.system(.subheadline, design: font).weight(.semibold)).lineLimit(small ? 2 : 3)
-            Text(lesson.time).font(.system(.caption, design: font).weight(.medium)).lineLimit(2)
-            if !small || !largeText { Text(lesson.room).font(.caption).foregroundColor(secondary).lineLimit(1) }
-          }.frame(maxWidth: .infinity, alignment: .leading)
+      LazyVGrid(columns: columns, alignment: .leading, spacing: 9) {
+        ForEach(Array(lessons.prefix(limit))) { lesson in
+          Link(destination: WidgetShared.url(timetable: true)) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text(lesson.title).font(.system(.subheadline, design: font).weight(.semibold)).lineLimit(2)
+              Text(lesson.time).font(.system(.caption, design: font).weight(.medium)).lineLimit(2)
+              if !small || !largeText { Text(lesson.room).font(.caption).foregroundColor(secondary).lineLimit(1) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+          }
         }
-        if lesson.id != lessons.prefix(limit).last?.id { Divider() }
       }
     }
   }

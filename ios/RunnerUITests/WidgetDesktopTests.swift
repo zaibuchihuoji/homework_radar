@@ -1,7 +1,7 @@
 import XCTest
 
 final class WidgetDesktopTests: XCTestCase {
-  func testAddHomeworkWidgetToHomeScreen() {
+  func testAddHomeworkWidgetToHomeScreen() throws {
     continueAfterFailure = false
     let app = XCUIApplication()
     app.launch()
@@ -30,13 +30,15 @@ final class WidgetDesktopTests: XCTestCase {
       XCTAssertTrue(plus.waitForExistence(timeout: 5), springboard.debugDescription)
       plus.tap()
     }
-    // SpringBoard also exposes an off-screen App Library search field.
-    let search = springboard.searchFields["Search Widgets"]
-    XCTAssertTrue(search.waitForExistence(timeout: 8), springboard.debugDescription)
-    search.tap()
-    search.typeText("作业通")
-    let result = springboard.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "作业通")).firstMatch
-    XCTAssertTrue(result.waitForExistence(timeout: 10), springboard.debugDescription)
+    XCTAssertTrue(springboard.searchFields["Search Widgets"].waitForExistence(timeout: 8), springboard.debugDescription)
+    // The headless simulator gallery search does not acquire keyboard focus.
+    // Exercise the normal list route instead of depending on system text input.
+    let result = springboard.staticTexts["作业通"].firstMatch
+    for _ in 0..<10 {
+      if result.exists && result.isHittable { break }
+      springboard.swipeUp()
+    }
+    XCTAssertTrue(result.exists && result.isHittable, springboard.debugDescription)
     result.tap()
     let addWidget = springboard.buttons["Add Widget"]
     XCTAssertTrue(addWidget.waitForExistence(timeout: 8), springboard.debugDescription)
@@ -46,7 +48,10 @@ final class WidgetDesktopTests: XCTestCase {
     let widgetTitle = springboard.staticTexts["最近作业"].firstMatch
     XCTAssertTrue(widgetTitle.waitForExistence(timeout: 12), springboard.debugDescription)
     XCTAssertTrue(widgetTitle.isHittable, springboard.debugDescription)
-    let attachment = XCTAttachment(screenshot: springboard.screenshot())
+    let screenshot = springboard.screenshot()
+    let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    try screenshot.pngRepresentation.write(to: documents.appendingPathComponent("widget-desktop.png"))
+    let attachment = XCTAttachment(screenshot: screenshot)
     attachment.name = "WidgetKit-home-screen"
     attachment.lifetime = .keepAlways
     add(attachment)
