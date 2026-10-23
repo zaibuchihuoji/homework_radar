@@ -62,6 +62,9 @@ void main() {
     await settle(tester);
   }
   Future<void> open(WidgetTester tester) async {
+    // Device text injection and the real iOS IME can race over editing/metrics.
+    // Use Flutter's testing IME; storage/OCR/cookie/notification plugins remain real.
+    binding.testTextInput.register();
     app.showSplashOnStart = false;
     app.appStateForHome = state;
     await tester.pumpWidget(app.HomeworkRadarApp(state: state));
@@ -112,9 +115,11 @@ void main() {
       'ocr': 'real bundled Chinese ML Kit; synthetic local screenshot selection',
       'sync': 'controlled HTTP responses; no real account login',
       'notifications': 'real UNUserNotificationCenter pending requests; provisional permission',
+      'text_input': 'Flutter testing IME; physical keyboard/keyboard transitions not validated',
     };
     await saveReport();
   });
+  tearDown(() => binding.testTextInput.unregister());
   tearDownAll(() async { state.dispose(); app.appStateForHome = null; });
 
   testWidgets('01 manual create edit hide restore delete and native persistence', (tester) async {
@@ -155,6 +160,7 @@ void main() {
 
   testWidgets('02 native Chinese screenshot OCR review edit confirm without original deletion', (tester) async {
     await open(tester);
+    final before = Storage.homework().map((h) => h.toJson()).toList();
     final due = DateTime.now().add(const Duration(days: 2));
     final day = '${due.year}-${due.month.toString().padLeft(2, '0')}-${due.day.toString().padLeft(2, '0')}';
     final recorder = ui.PictureRecorder();
@@ -181,7 +187,7 @@ void main() {
       expect(find.text('核对识别结果'), findsOneWidget);
       expect(find.byKey(const ValueKey('select_0')), findsOneWidget);
       expect(find.byKey(const ValueKey('select_1')), findsOneWidget);
-      expect(Storage.homework(), hasLength(1));
+      expect(Storage.homework().map((h) => h.toJson()).toList(), before);
       await tester.enterText(find.byKey(const ValueKey('course_0')), 'QA English');
       await tester.enterText(find.byKey(const ValueKey('title_0')), 'QA OCR reading');
       await tester.testTextInput.receiveAction(TextInputAction.done);
@@ -189,10 +195,10 @@ void main() {
       await screenshot('02-real-native-ocr-review');
       await tester.tap(find.byKey(const ValueKey('review_save')));
       await settle(tester);
-      expect(Storage.homework(), hasLength(1));
+      expect(Storage.homework().map((h) => h.toJson()).toList(), before);
       await tap(tester, '确认添加 2 项');
       await nativeReload();
-      expect(Storage.homework(), hasLength(3));
+      expect(Storage.homework(), hasLength(before.length + 2));
       final first = Storage.homework().firstWhere((h) => h.title == 'QA OCR reading');
       expect(first.course, 'QA English');
       expect(first.dueAt, DateTime(due.year, due.month, due.day, 20));
@@ -207,6 +213,7 @@ void main() {
 
   testWidgets('03 native cookie Keychain login commit sync and failure preservation', (tester) async {
     final network = SyntheticHttp();
+    final initial = Storage.homework().map((h) => h.toJson()).toList();
     final due = DateTime.now().add(const Duration(days: 2)).millisecondsSinceEpoch;
     network.handler = (_, uri, _) {
       if (uri.path.contains('getMyLearnedCoursePanelList')) {
@@ -224,7 +231,8 @@ void main() {
       final cookie = (await PlatformCookie.getCookie('https://www.icourse163.org/'))!;
       expect(cookie, contains('STUDY_SESS=qa-ios-only'));
       await state.onMoocLogin(cookie, 'qa-ios-csrf', sync: false);
-      expect(await platform.invokeMethod<String>('secureRead', {'key':'mooc_cookie'}), cookie);
+      final vault = jsonDecode((await platform.invokeMethod<String>('secureRead', {'key':'account_credentials_v2'}))!) as Map;
+      expect(vault['mooc_cookie'], cookie);
       await state.syncAll();
       expect(state.moocState, AccountState.ok);
       expect(Storage.homework().where((h) => h.platform == PlatformKind.mooc), hasLength(1));
@@ -235,10 +243,11 @@ void main() {
       await open(tester);
       await screenshot('03-controlled-sync-failure-keeps-records');
       await state.logoutMooc();
-      expect(Storage.homework(), hasLength(3));
+      expect(Storage.homework().map((h) => h.toJson()).toList(), initial);
       expect(Storage.homework().firstWhere((h) => h.title == 'QA old keep').note, 'keep-note');
       await PlatformCookie.clearPlatformCookies('mooc');
-      expect(await platform.invokeMethod<String>('secureRead', {'key':'mooc_cookie'}), isNull);
+      final loggedOutVault = jsonDecode((await platform.invokeMethod<String>('secureRead', {'key':'account_credentials_v2'}))!) as Map;
+      expect(loggedOutVault.containsKey('mooc_cookie'), isFalse);
       report['login_sync'] = 'passed: real WK cookie store, Keychain commit/delete and sync merge with controlled HTTP; real account authentication not tested';
       await saveReport();
     } finally { HttpOverrides.global = null; }
@@ -246,6 +255,7 @@ void main() {
 
   testWidgets('04 real iOS reminder scheduling edit hide restore and deletion', (tester) async {
     await open(tester);
+    final initial = Storage.homework().map((h) => h.toJson()).toList();
     await state.updateReminders(ReminderSettings(before24h: false, before6h: false));
     await state.addManualHomework(course: 'QA reminder', title: 'QA scheduled', dueAt: DateTime.now().add(const Duration(hours: 2)));
     final item = Storage.homework().firstWhere((h) => h.title == 'QA scheduled');
@@ -263,7 +273,7 @@ void main() {
     final liveIDs = Storage.homework().map((h) => h.id).toSet();
     expect(pending.every((p) => liveIDs.contains(p.payload)), isTrue);
     await nativeReload();
-    expect(Storage.homework(), hasLength(3));
+    expect(Storage.homework().map((h) => h.toJson()).toList(), initial);
     expect(Storage.homework().firstWhere((h) => h.title == 'QA old keep').note, 'keep-note');
     await screenshot('04-reminder-queue-consistent');
     report['reminders'] = 'passed: real iOS pending requests follow add/hide/restore/delete; provisional authorization; banner delivery and cold-start click not completed';
