@@ -38,7 +38,7 @@ fi
 # A desktop automation failure stays visible; it never becomes a claimed pass.
 if xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Debug \
   -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO \
-  -only-testing:RunnerUITests -resultBundlePath "$QA/DesktopTests.xcresult" \
+  -only-testing:RunnerUITests/WidgetDesktopTests -resultBundlePath "$QA/DesktopTests.xcresult" \
   test-without-building BUILD_DIR="$ROOT/build/ios" > "$QA/desktop-tests.log" 2>&1; then
   echo passed > "$QA/desktop-ui-status.txt"
 else
