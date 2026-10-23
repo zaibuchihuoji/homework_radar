@@ -59,6 +59,15 @@ struct RadarWidgetView: View {
   let entry: RadarEntry
   let timetable: Bool
   @Environment(\.widgetFamily) private var family
+  var body: some View {
+    RadarWidgetContent(entry: entry, timetable: timetable, family: family)
+  }
+}
+
+struct RadarWidgetContent: View {
+  let entry: RadarEntry
+  let timetable: Bool
+  let family: WidgetFamily
   @Environment(\.colorScheme) private var colorScheme
   @Environment(\.sizeCategory) private var sizeCategory
 
