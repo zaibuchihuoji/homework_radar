@@ -30,7 +30,8 @@ final class WidgetDesktopTests: XCTestCase {
       XCTAssertTrue(plus.waitForExistence(timeout: 5), springboard.debugDescription)
       plus.tap()
     }
-    let search = springboard.searchFields.firstMatch
+    // SpringBoard also exposes an off-screen App Library search field.
+    let search = springboard.searchFields["Search Widgets"]
     XCTAssertTrue(search.waitForExistence(timeout: 8), springboard.debugDescription)
     search.tap()
     search.typeText("作业通")

@@ -118,6 +118,9 @@ struct RadarWidgetContent: View {
 
   var body: some View {
     content
+      // Widget bounds cannot grow with accessibility text. Keep the complete
+      // deadline readable; the app remains available for unrestricted text.
+      .dynamicTypeSize(...(family == .systemLarge ? DynamicTypeSize.xxxLarge : .xLarge))
       .font(.system(.subheadline, design: font))
       .foregroundColor(ink)
       .shadow(color: entry.transparent ? outline : .clear, radius: 1)
