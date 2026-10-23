@@ -213,6 +213,9 @@ final class MajorFlowsTests: XCTestCase {
     XCTAssertTrue(element(containing: "QA reminder").waitForExistence(timeout: 8))
     capture("04-reminder-scheduled")
     XCUIDevice.shared.press(.home)
+    // Exercise the important cold-start path: the local notification must be
+    // delivered with the process stopped, then open that exact homework.
+    app.terminate()
     let delivered = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'QA reminder' OR label CONTAINS '作业即将截止：QA Notify'")).firstMatch
     XCTAssertTrue(delivered.waitForExistence(timeout: 150), springboard.debugDescription)
     let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("major-flows")
