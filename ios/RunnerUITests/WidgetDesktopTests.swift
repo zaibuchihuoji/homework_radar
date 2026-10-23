@@ -43,11 +43,14 @@ final class WidgetDesktopTests: XCTestCase {
     addWidget.tap()
     let done = springboard.buttons["Done"]
     if done.waitForExistence(timeout: 3) { done.tap() }
-    XCUIDevice.shared.press(.home)
-    XCTAssertTrue(springboard.staticTexts["最近作业"].waitForExistence(timeout: 12), springboard.debugDescription)
+    let widgetTitle = springboard.staticTexts["最近作业"].firstMatch
+    XCTAssertTrue(widgetTitle.waitForExistence(timeout: 12), springboard.debugDescription)
+    XCTAssertTrue(widgetTitle.isHittable, springboard.debugDescription)
     let attachment = XCTAttachment(screenshot: springboard.screenshot())
     attachment.name = "WidgetKit-home-screen"
     attachment.lifetime = .keepAlways
     add(attachment)
+    widgetTitle.tap()
+    XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
   }
 }
