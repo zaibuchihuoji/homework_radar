@@ -2,6 +2,11 @@ name: iOS self-sign IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      validate_simulator:
+        description: 'Run native tests (disable only for packaging changes after the same app sources passed)'
+        type: boolean
+        default: true
   push:
     branches: [main, fix/ios-sideload-build]
     paths:
@@ -32,6 +37,7 @@ jobs:
       - name: Resolve locked dependencies
         run: flutter pub get --enforce-lockfile
       - name: Verify simulator build, Keychain, Chinese OCR and launch
+        if: github.event_name != 'workflow_dispatch' || inputs.validate_simulator
         timeout-minutes: 25
         run: bash scripts/ios/validate_simulator.sh
       - name: Capture native integration diagnostics on failure
