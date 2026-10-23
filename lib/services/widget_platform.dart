@@ -33,8 +33,11 @@ class WidgetPlatform {
     if (!_ios) return HomeWidget.updateWidget(androidName: androidName);
     await initialize();
     if (!_available) return false;
-    if (await _channel.invokeMethod<bool>('prepareAssets') != true) {
-      return false;
+    try {
+      await _channel.invokeMethod<bool>('prepareAssets');
+    } catch (_) {
+      // A presentation image is optional; never let it keep deleted/hidden
+      // homework on the desktop after the authoritative snapshot was saved.
     }
     return HomeWidget.updateWidget(
       iOSName: androidName == 'TimetableWidgetProvider'

@@ -82,7 +82,10 @@ struct RadarWidgetView: View {
   private var accent: Color { color("accent", fallback: 0xffd4a900) }
   private var outline: Color {
     let ink = (colors["ink"] as? NSNumber)?.uint32Value ?? 0xff202428
-    let lightInk = Double((ink >> 16) & 255) * 0.299 + Double((ink >> 8) & 255) * 0.587 + Double(ink & 255) * 0.114 > 140
+    let red = Double((ink >> 16) & 255)
+    let green = Double((ink >> 8) & 255)
+    let blue = Double(ink & 255)
+    let lightInk = red * 0.299 + green * 0.587 + blue * 0.114 > 140.0
     return lightInk ? .black.opacity(0.9) : .white.opacity(0.9)
   }
   private var radius: CGFloat { ["pixel", "receipt", "terminal", "editorial"].contains(style) ? 0 : style == "comic" ? 7 : style == "journal" ? 5 : 12 }

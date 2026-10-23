@@ -7,9 +7,11 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final calls = <MethodCall>[];
   var available = true;
+  var assetsReady = true;
   setUp(() {
     calls.clear();
     available = true;
+    assetsReady = true;
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -22,7 +24,7 @@ void main() {
             'available': available,
           };
         }
-        if (call.method == 'prepareAssets') return available;
+        if (call.method == 'prepareAssets') return assetsReady;
         if (call.method == 'initialUrl') {
           return 'homework-radar://widget/timetable?homeWidget=1';
         }
@@ -63,6 +65,17 @@ void main() {
         false,
       );
       expect(calls.where((c) => c.method == 'updateWidget'), isEmpty);
+    },
+  );
+  test(
+    'a failed optional background image cannot block fresh homework',
+    () async {
+      assetsReady = false;
+      expect(
+        await WidgetPlatform.refresh(androidName: 'HomeworkWidgetProvider'),
+        true,
+      );
+      expect(calls.last.method, 'updateWidget');
     },
   );
   test(

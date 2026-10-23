@@ -20,12 +20,21 @@ final class WidgetRenderTests: XCTestCase {
         }
       }
       for timetable in [false, true] {
-        for family in [WidgetFamily.systemMedium, .systemLarge] {
+        for family in [WidgetFamily.systemSmall, .systemMedium, .systemLarge] {
           let sample = RadarEntry.load(at: Date(), preview: true)
           let renderer = ImageRenderer(content: RadarWidgetView(entry: sample, timetable: timetable)
             .environment(\.widgetFamily, family).environment(\.sizeCategory, .accessibilityLarge)
-            .frame(width: 340, height: family == .systemLarge ? 350 : 160))
+            .frame(width: family == .systemSmall ? 160 : 340, height: family == .systemLarge ? 350 : 160))
           try XCTUnwrap(renderer.uiImage?.pngData()).write(to: folder.appendingPathComponent("large-font-\(timetable)-\(family).png"))
+        }
+        for whiteInk in [false, true] {
+          let sample = RadarEntry.load(at: Date(), preview: true)
+          let theme: [String: Any] = ["style": whiteInk ? "amoled" : "clean", "mode": "light", "light": ["ink": whiteInk ? 0xffffffff : 0xff111111, "secondary": whiteInk ? 0xffdddddd : 0xff333333]]
+          let entry = RadarEntry(date: sample.date, homework: sample.homework, timetable: sample.timetable, theme: theme, transparent: true, image: nil)
+          let renderer = ImageRenderer(content: RadarWidgetView(entry: entry, timetable: timetable)
+            .environment(\.widgetFamily, .systemSmall).frame(width: 160, height: 160)
+            .background(whiteInk ? Color.white : Color.black))
+          try XCTUnwrap(renderer.uiImage?.pngData()).write(to: folder.appendingPathComponent("transparent-\(whiteInk ? "light-wall" : "dark-wall")-\(timetable).png"))
         }
       }
     }

@@ -32,6 +32,8 @@ final class WidgetBridge {
   }
   private func prepareAssets() -> Bool {
     guard let container = WidgetShared.container, let defaults = WidgetShared.defaults else { return false }
+    // Publish the data cache even when optional image decoding or copying fails.
+    defer { defaults.synchronize() }
     let target = container.appendingPathComponent("widget-wallpaper.jpg")
     guard let path = defaults.string(forKey: "glass_bg_path"), !path.isEmpty else {
       defaults.removeObject(forKey: "widget_wallpaper")
