@@ -2,6 +2,9 @@ name: iOS major flows
 
 on:
   workflow_dispatch:
+  push:
+    branches: [fix/ios-sideload-build]
+    paths: ['.github/workflows/ios-major-flows.yml']
 
 permissions:
   contents: read
