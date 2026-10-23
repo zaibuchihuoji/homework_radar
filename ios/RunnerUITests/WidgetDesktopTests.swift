@@ -30,12 +30,24 @@ final class MajorFlowsTests: XCTestCase {
     let target = element(label)
     if scroll {
       for _ in 0..<8 {
-        if target.exists && target.isHittable { break }
+        if target.exists && visible(target) { break }
         app.swipeUp()
       }
     }
-    XCTAssertTrue(target.waitForExistence(timeout: 8) && target.isHittable, "Missing \(label)\n\(app.debugDescription)")
-    target.tap()
+    XCTAssertTrue(target.waitForExistence(timeout: 8) && visible(target), "Missing \(label)\n\(app.debugDescription)")
+    tapFrame(target.frame)
+  }
+
+  private func visible(_ target: XCUIElement) -> Bool {
+    let frame = target.frame
+    return frame.width > 0 && frame.height > 0 && frame.minY >= 0 && frame.maxY <= app.frame.maxY
+  }
+
+  private func tapFrame(_ frame: CGRect) {
+    // Flutter's legacy TextField/Button AX type can disagree with its modern
+    // type and report isHittable=false for a visibly rendered control. Use the
+    // observed frame without re-resolving that unstable AX element during tap.
+    app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
   }
 
   private func tab(_ label: String) {
@@ -68,12 +80,12 @@ final class MajorFlowsTests: XCTestCase {
 
   private func replace(_ field: XCUIElement, with text: String) {
     XCTAssertTrue(field.waitForExistence(timeout: 5), app.debugDescription)
-    field.tap()
+    let old = field.value as? String ?? ""
+    tapFrame(field.frame)
     let keyboardIntro = app.buttons["Continue"]
     if keyboardIntro.exists && keyboardIntro.isHittable { keyboardIntro.tap() }
-    let old = field.value as? String ?? ""
-    if !old.isEmpty { field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
-    field.typeText(text)
+    if !old.isEmpty { app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: old.count)) }
+    app.typeText(text)
   }
 
   private func finishTyping() {
@@ -144,16 +156,14 @@ final class MajorFlowsTests: XCTestCase {
     tap("添加作业")
     tap("识别添加")
     tap("选择截图")
-    // PHPicker also has a grid Other whose label starts with every photo name.
-    // Select the actual Image, never that non-hittable grouping element.
-    let photo = app.images.matching(NSPredicate(format: "label BEGINSWITH 'Photo,' OR label BEGINSWITH '照片' OR label == 'Photo'")).firstMatch
-    if photo.waitForExistence(timeout: 10) && photo.isHittable {
-      photo.tap()
-    } else {
-      let cell = app.collectionViews.cells.firstMatch
-      XCTAssertTrue(cell.waitForExistence(timeout: 5), app.debugDescription)
-      cell.tap()
-    }
+    // iOS 18.5 PHPicker's remote AX snapshot exposes no reliable Image/Cell
+    // role. Both recorded SE screenshots show the imported newest image at
+    // CGRect(0,311.5,124,124), below the Private Access to Photos panel.
+    XCTAssertEqual(app.frame.size, CGSize(width: 375, height: 667))
+    XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 10))
+    sleep(2)
+    capture("02-system-photo-picker")
+    tapFrame(CGRect(x: 0, y: 311.5, width: 124, height: 124))
     XCTAssertTrue(element("核对识别结果").waitForExistence(timeout: 30), app.debugDescription)
     XCTAssertTrue(element(containing: "检查并添加（2）").exists, app.debugDescription)
     capture("02-real-ocr-review")
@@ -209,7 +219,7 @@ final class MajorFlowsTests: XCTestCase {
     format.dateFormat = "yyyy-MM-dd HH:mm"
     let due = Date().addingTimeInterval(3600 + 120)
     let text = "【QA Notify】QA reminder 作业，截止" + format.string(from: due)
-    let input = app.textFields["作业通知"]
+    let input = app.textFields.firstMatch
     XCTAssertTrue(input.waitForExistence(timeout: 5))
     replace(input, with: text)
     tap("识别作业", scroll: true)

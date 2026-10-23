@@ -6,7 +6,7 @@ on:
       flow:
         description: 'Run all main flows, or only the independent notification flow'
         type: choice
-        options: [integration, all, notification]
+        options: [integration, native_edges, all, notification]
         default: integration
   push:
     branches: [fix/ios-sideload-build]
