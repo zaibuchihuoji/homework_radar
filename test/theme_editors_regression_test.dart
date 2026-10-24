@@ -124,7 +124,7 @@ void main() {
       await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
       expect(find.textContaining('23:59'), findsOneWidget);
-      await tester.tap(find.byIcon(Icons.close_rounded));
+      await tester.tap(find.byTooltip('清除截止时间'));
       await tester.pumpAndSettle();
       expect(find.text('未设置截止时间'), findsOneWidget);
       await tester.ensureVisible(find.widgetWithText(FilledButton, '添加'));

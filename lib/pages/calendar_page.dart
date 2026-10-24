@@ -16,6 +16,7 @@ import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
 import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
+import '../ui/focus_parts.dart';
 import 'detail_page.dart';
 
 class CalendarPage extends StatefulWidget {
@@ -73,6 +74,7 @@ class _CalendarPageState extends State<CalendarPage> {
     final dayTitle =
         '${_selected.month}月${_selected.day}日 · ${dayItems.isEmpty ? '没有截止' : '${dayItems.length} 项截止'}';
     final calendar = TableCalendar<HomeworkItem>(
+      headerVisible: !p.sunny,
       firstDay: DateTime.now().subtract(const Duration(days: 120)),
       lastDay: DateTime.now().add(const Duration(days: 400)),
       focusedDay: _selected,
@@ -84,7 +86,11 @@ class _CalendarPageState extends State<CalendarPage> {
           setState(() => _selected = selected),
       // 翻页也回写 focusedDay，防止时钟/外部重建时跳回旧月份。
       onPageChanged: (focused) => setState(() => _selected = focused),
-      rowHeight: p.clean ? 52 : 48,
+      rowHeight: p.sunny
+          ? 48
+          : p.clean
+          ? 52
+          : 48,
       daysOfWeekHeight: p.clean ? 20 : 34,
       headerStyle: HeaderStyle(
         formatButtonVisible: false,
@@ -132,6 +138,15 @@ class _CalendarPageState extends State<CalendarPage> {
       availableGestures: AvailableGestures.horizontalSwipe,
     );
 
+    if (p.sunny) {
+      return _focusCalendar(
+        context,
+        calendar,
+        dayItems,
+        monthCount,
+        monthDays.length,
+      );
+    }
     return StyleBackground(
       child: Scaffold(
         backgroundColor: scaffoldBgOf(context),
@@ -139,7 +154,7 @@ class _CalendarPageState extends State<CalendarPage> {
         body: !_localeReady
             ? const Center(child: CircularProgressIndicator())
             : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
                 children: [
                   if (!p.clean) ...[
                     ThemePageHeader(
@@ -150,12 +165,20 @@ class _CalendarPageState extends State<CalendarPage> {
                       summary: '本月 $monthCount 项截止 · ${monthDays.length} 天有安排',
                     ),
                   ],
+                  if (p.sunny)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        '本月 $monthCount 项截止',
+                        style: TextStyle(fontSize: 12, color: p.ink2),
+                      ),
+                    ),
                   if (p.clean)
                     Container(
                       decoration: BoxDecoration(
                         color: cardColor(context),
                         borderRadius: BorderRadius.circular(18),
-                        border: cardBorderOf(context),
+                        border: p.sunny ? null : cardBorderOf(context),
                       ),
                       clipBehavior: Clip.antiAlias,
                       child: calendar,
@@ -203,6 +226,157 @@ class _CalendarPageState extends State<CalendarPage> {
                         ),
                       ),
                     ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  void _moveMonth(int delta) {
+    final first = DateUtils.dateOnly(
+      DateTime.now().subtract(const Duration(days: 120)),
+    );
+    final last = DateUtils.dateOnly(
+      DateTime.now().add(const Duration(days: 400)),
+    );
+    var target = DateTime(_selected.year, _selected.month + delta, 1);
+    if (target.isBefore(first)) target = first;
+    if (target.isAfter(last)) target = last;
+    setState(() => _selected = target);
+  }
+
+  Widget _focusCalendar(
+    BuildContext context,
+    Widget calendar,
+    List<HomeworkItem> items,
+    int monthCount,
+    int days,
+  ) {
+    final p = paletteOf(context);
+    final first = DateTime.now().subtract(const Duration(days: 120));
+    final last = DateTime.now().add(const Duration(days: 400));
+    final selectedMonth = DateTime(_selected.year, _selected.month);
+    return StyleBackground(
+      child: Scaffold(
+        backgroundColor: scaffoldBgOf(context),
+        appBar: AppBar(
+          title: appBarTitle(context, '作业日历'),
+          actions: [
+            TextButton(
+              onPressed: () => setState(() => _selected = DateTime.now()),
+              child: const Tooltip(message: '返回今天', child: Text('今天')),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
+        body: !_localeReady
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${_selected.year}年',
+                              style: TextStyle(fontSize: 12, color: p.ink2),
+                            ),
+                            Text(
+                              '${_selected.month}月',
+                              style: TextStyle(
+                                fontSize: 32,
+                                height: 1.4,
+                                fontWeight: FontWeight.w600,
+                                color: p.ink,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '上个月',
+                        onPressed:
+                            selectedMonth.isAfter(
+                              DateTime(first.year, first.month),
+                            )
+                            ? () => _moveMonth(-1)
+                            : null,
+                        icon: const Icon(Icons.chevron_left_rounded),
+                      ),
+                      IconButton(
+                        tooltip: '下个月',
+                        onPressed:
+                            selectedMonth.isBefore(
+                              DateTime(last.year, last.month),
+                            )
+                            ? () => _moveMonth(1)
+                            : null,
+                        icon: const Icon(Icons.chevron_right_rounded),
+                      ),
+                    ],
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Row(
+                      children: [
+                        Text(
+                          '$monthCount 项截止',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: p.ink,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Text(
+                          '$days 天有安排',
+                          style: TextStyle(fontSize: 12, color: p.ink2),
+                        ),
+                      ],
+                    ),
+                  ),
+                  calendar,
+                  const SizedBox(height: 20),
+                  FocusSummary(
+                    eyebrow: DateUtils.isSameDay(_selected, DateTime.now())
+                        ? '今天'
+                        : '所选日期',
+                    title: '${_selected.month}月${_selected.day}日',
+                    detail: '${items.length} 项截止',
+                    trailing: Icon(
+                      Icons.event_note_outlined,
+                      color: p.onAccent,
+                      size: 26,
+                    ),
+                  ),
+                  if (items.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 28),
+                      child: Text(
+                        '这一天没有截止作业',
+                        style: TextStyle(fontSize: 15, color: p.ink2),
+                      ),
+                    )
+                  else ...[
+                    const FocusSectionTitle('截止安排'),
+                    for (final hw in items)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: buildHwCard(
+                          context,
+                          hw,
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  HomeworkDetailPage(homeworkId: hw.id),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ],
               ),
       ),

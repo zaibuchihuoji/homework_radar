@@ -24,11 +24,8 @@ class CourseEditSheet extends StatefulWidget {
       backgroundColor: cardColor(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: this,
-        ),
+        constraints: const BoxConstraints(maxWidth: 420, maxHeight: 660),
+        child: this,
       ),
     ),
   );
@@ -99,172 +96,210 @@ class _CourseEditSheetState extends State<CourseEditSheet> {
   Widget build(BuildContext context) {
     const dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
     final weeks = _parsedWeeks;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ThemeEditorHeading(
-            title: _isNew ? '添加课程' : '编辑课程',
-            kicker: 'COURSE / 课程',
-            icon: Icons.school_outlined,
-          ),
-          const SizedBox(height: 14),
-          ThemeFieldGroup(
-            title: '课程信息',
-            child: Column(
-              children: [
-                TextField(
-                  controller: _name,
-                  autofocus: _isNew,
-                  decoration: themedInputDecoration(context, labelText: '课程名'),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 10),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final fields = [
-                      TextField(
-                        controller: _teacher,
-                        decoration: themedInputDecoration(
-                          context,
-                          labelText: '教师',
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ThemeEditorHeading(
+                          title: _isNew ? '添加课程' : '编辑课程',
+                          kicker: 'COURSE / 课程',
+                          icon: Icons.school_outlined,
                         ),
                       ),
-                      TextField(
-                        controller: _room,
-                        decoration: themedInputDecoration(
-                          context,
-                          labelText: '教室',
-                        ),
+                      IconButton(
+                        tooltip: '取消',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded, size: 20),
                       ),
-                    ];
-                    if (constraints.maxWidth < 270 &&
-                        MediaQuery.textScalerOf(context).scale(1) > 1.2) {
-                      return Column(
-                        children: [
-                          fields[0],
-                          const SizedBox(height: 10),
-                          fields[1],
-                        ],
-                      );
-                    }
-                    return Row(
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  ThemeFieldGroup(
+                    title: '课程信息',
+                    child: Column(
                       children: [
-                        Expanded(child: fields[0]),
-                        const SizedBox(width: 10),
-                        Expanded(child: fields[1]),
+                        TextField(
+                          controller: _name,
+                          autofocus: _isNew,
+                          decoration: themedInputDecoration(
+                            context,
+                            labelText: '课程名',
+                          ),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        const SizedBox(height: 10),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final fields = [
+                              TextField(
+                                controller: _teacher,
+                                decoration: themedInputDecoration(
+                                  context,
+                                  labelText: '教师',
+                                ),
+                              ),
+                              TextField(
+                                controller: _room,
+                                decoration: themedInputDecoration(
+                                  context,
+                                  labelText: '教室',
+                                ),
+                              ),
+                            ];
+                            if (constraints.maxWidth < 270 &&
+                                MediaQuery.textScalerOf(context).scale(1) >
+                                    1.2) {
+                              return Column(
+                                children: [
+                                  fields[0],
+                                  const SizedBox(height: 10),
+                                  fields[1],
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: [
+                                Expanded(child: fields[0]),
+                                const SizedBox(width: 10),
+                                Expanded(child: fields[1]),
+                              ],
+                            );
+                          },
+                        ),
                       ],
-                    );
-                  },
-                ),
-              ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  ThemeFieldGroup(
+                    title: '上课时间',
+                    index: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (var d = 1; d <= 7; d++)
+                              ChoiceChip(
+                                label: Text(dayNames[d - 1]),
+                                selected: _weekday == d,
+                                onSelected: (_) => setState(() => _weekday = d),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButtonFormField<int>(
+                                initialValue: _start >= 1 && _start <= 16
+                                    ? _start
+                                    : null,
+                                isExpanded: true,
+                                decoration: themedInputDecoration(
+                                  context,
+                                  labelText: '开始节次',
+                                ),
+                                hint: const Text('请选择'),
+                                items: [
+                                  for (var s = 1; s <= 16; s++)
+                                    DropdownMenuItem(
+                                      value: s,
+                                      child: Text('第$s节'),
+                                    ),
+                                ],
+                                onChanged: (v) => setState(() {
+                                  _start = v ?? _start;
+                                  if (_end < _start || _end > 16) _end = _start;
+                                }),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: DropdownButtonFormField<int>(
+                                // 起始节次变化时重新同步 FormField 的选中值。
+                                key: ValueKey((_start, _end)),
+                                initialValue:
+                                    _end >= _start && _end >= 1 && _end <= 16
+                                    ? _end
+                                    : null,
+                                isExpanded: true,
+                                decoration: themedInputDecoration(
+                                  context,
+                                  labelText: '结束节次',
+                                ),
+                                hint: const Text('请选择'),
+                                items: [
+                                  for (
+                                    var s = _start.clamp(1, 16);
+                                    s <= 16;
+                                    s++
+                                  )
+                                    DropdownMenuItem(
+                                      value: s,
+                                      child: Text('第$s节'),
+                                    ),
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => _end = v ?? _end),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _weeks,
+                          decoration: themedInputDecoration(
+                            context,
+                            labelText: '周次',
+                            hintText: '如 1-16周、3-17(单)、1-8,10-16',
+                          ),
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _name.text.trim().isEmpty
+                              ? '填一下课程名'
+                              : weeks == null
+                              ? '周次没认出来，检查一下格式'
+                              : '识别为：${Course(id: '', name: '', weekday: 1, startSection: 1, endSection: 1, weeks: weeks).weeksText}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _canSave
+                                ? textFaint(context)
+                                : Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 14),
-          ThemeFieldGroup(
-            title: '上课时间',
-            index: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (var d = 1; d <= 7; d++)
-                      ChoiceChip(
-                        label: Text(dayNames[d - 1]),
-                        selected: _weekday == d,
-                        onSelected: (_) => setState(() => _weekday = d),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        initialValue: _start >= 1 && _start <= 16
-                            ? _start
-                            : null,
-                        isExpanded: true,
-                        decoration: themedInputDecoration(
-                          context,
-                          labelText: '开始节次',
-                        ),
-                        hint: const Text('请选择'),
-                        items: [
-                          for (var s = 1; s <= 16; s++)
-                            DropdownMenuItem(value: s, child: Text('第$s节')),
-                        ],
-                        onChanged: (v) => setState(() {
-                          _start = v ?? _start;
-                          if (_end < _start || _end > 16) _end = _start;
-                        }),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        // 起始节次变化时重新同步 FormField 的选中值。
-                        key: ValueKey((_start, _end)),
-                        initialValue: _end >= _start && _end >= 1 && _end <= 16
-                            ? _end
-                            : null,
-                        isExpanded: true,
-                        decoration: themedInputDecoration(
-                          context,
-                          labelText: '结束节次',
-                        ),
-                        hint: const Text('请选择'),
-                        items: [
-                          for (var s = _start.clamp(1, 16); s <= 16; s++)
-                            DropdownMenuItem(value: s, child: Text('第$s节')),
-                        ],
-                        onChanged: (v) => setState(() => _end = v ?? _end),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _weeks,
-                  decoration: themedInputDecoration(
-                    context,
-                    labelText: '周次',
-                    hintText: '如 1-16周、3-17(单)、1-8,10-16',
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _name.text.trim().isEmpty
-                      ? '填一下课程名'
-                      : weeks == null
-                      ? '周次没认出来，检查一下格式'
-                      : '识别为：${Course(id: '', name: '', weekday: 1, startSection: 1, endSection: 1, weeks: weeks).weeksText}',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _canSave
-                        ? textFaint(context)
-                        : Theme.of(context).colorScheme.error,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: SizedBox(
             width: double.infinity,
             child: FilledButton(
               onPressed: _canSave ? _save : null,
               child: Text(_isNew ? '添加到课表' : '保存修改'),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

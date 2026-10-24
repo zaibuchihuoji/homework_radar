@@ -2,21 +2,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
-import '../models/homework.dart';
+import '../ui/sync_status_parts.dart';
 import '../services/background_sync.dart';
 import '../services/storage.dart';
 import '../services/sync_policy.dart';
 import '../services/sync_service.dart';
 import '../ui/adaptive.dart';
 import '../ui/settings_parts.dart';
+import 'accounts_page.dart';
 
 class BackgroundSyncSettingsPage extends StatelessWidget {
   const BackgroundSyncSettingsPage({super.key, required this.state});
   final AppState state;
-
-  static String time(DateTime? at) => at == null
-      ? '尚无完整同步'
-      : '${at.month}/${at.day} ${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
 
   Future<void> _save(BuildContext context, SyncConfig config) async {
     try {
@@ -43,8 +40,62 @@ class BackgroundSyncSettingsPage extends StatelessWidget {
       final android = defaultTargetPlatform == TargetPlatform.android;
       return SettingsScaffold(
         title: '后台同步',
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => AccountsPage(state: state),
+              ),
+            ),
+            child: const Text('账号'),
+          ),
+        ],
         body: SettingsList(
           children: [
+            if (state.syncing)
+              SyncProgressNotice(busy: true, progress: state.syncProgress)
+            else
+              SettingsSection(
+                children: [
+                  SettingsRow(
+                    icon: Icons.sync_rounded,
+                    title: '作业同步',
+                    subtitle: accounts.isEmpty
+                        ? '登录平台后可自动获取作业'
+                        : '已连接 ${accounts.length} 个作业平台',
+                    trailing: IconButton.filledTonal(
+                      tooltip: '立即同步',
+                      onPressed: () => state.syncAll(),
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ),
+                ],
+              ),
+            if (accounts.isEmpty)
+              const SettingsSection(
+                children: [
+                  SettingsRow(
+                    icon: Icons.account_circle_outlined,
+                    title: '尚未登录作业平台',
+                    subtitle: '请在账号页登录；课表仍按本地数据显示和提醒',
+                  ),
+                ],
+              ),
+            for (final platform in accounts)
+              SyncPlatformStatus(
+                platform: platform,
+                status: statuses[platform],
+              ),
+            if (!state.syncing && state.lastSyncMessage.isNotEmpty)
+              SettingsSection(
+                title: '本次同步说明',
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: SettingsNote(state.lastSyncMessage),
+                  ),
+                ],
+              ),
             SettingsSection(
               title: '自动同步',
               footer: '打开 App 时也会检查更新。同步失败后会自动重试，旧记录会保留。',
@@ -100,59 +151,6 @@ class BackgroundSyncSettingsPage extends StatelessWidget {
                       ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            SettingsSection(
-              title: '各平台状态',
-              children: [
-                if (accounts.isEmpty)
-                  const SettingsRow(
-                    icon: Icons.account_circle_outlined,
-                    title: '尚未登录作业平台',
-                    subtitle: '课表仍按本地数据显示和提醒',
-                  ),
-                for (final platform in accounts) ...[
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          platform.label,
-                          style: TextStyle(
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.w500,
-                            color: textPrimary(context),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SettingsNote(
-                          '上次完整同步：${time(statuses[platform]?.lastSuccess)}',
-                        ),
-                        if (statuses[platform]?.lastAttempt != null)
-                          SettingsNote(
-                            '最近尝试：${time(statuses[platform]!.lastAttempt)}',
-                          ),
-                        const SizedBox(height: 6),
-                        SettingsNote(switch (statuses[platform]?.outcome) {
-                          SyncOutcome.success => '已同步',
-                          SyncOutcome.retry =>
-                            '未完整同步，保留旧记录；重试时间 ${time(statuses[platform]?.nextRetry)}',
-                          SyncOutcome.loginExpired => '登录已过期，请到账号页重新登录',
-                          SyncOutcome.signatureRejected =>
-                            '接口校验被拒，请检查 App 更新后手动同步',
-                          null => '等待首次同步',
-                        }),
-                      ],
-                    ),
-                  ),
-                  const SettingsDivider(),
-                ],
-                SettingsRow(
-                  icon: Icons.refresh_rounded,
-                  title: state.syncing ? '正在同步…' : '立即同步',
-                  onTap: state.syncing ? null : () => state.syncAll(),
                 ),
               ],
             ),

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../ui/theme_forms.dart';
 import '../ui/settings_parts.dart';
+import '../ui/focus_parts.dart';
 import '../ui/tokens.dart';
 import '../services/section_times.dart';
 import '../services/storage.dart';
@@ -233,6 +234,12 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
     ],
     body: SettingsList(
       children: [
+        if (paletteOf(context).sunny)
+          FocusSummary(
+            eyebrow: '学校作息',
+            title: '每天 ${_times.length} 节课',
+            detail: '开始与结束时间直接修改，课表和提醒一起更新。',
+          ),
         SettingsSection(
           title: '每节课时间',
           footer: '点击时间即可修改，课表与上课提醒会一起更新。有 13–16 节晚课的学校请补全时刻，否则对应课程不排上课提醒。',

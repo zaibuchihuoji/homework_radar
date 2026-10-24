@@ -19,7 +19,7 @@ class ThemedNavigationBar extends StatelessWidget {
   static const labels = ['作业', '课表', '日历', '账号', '设置'];
   static const icons = <(IconData, IconData)>[
     (Icons.assignment_outlined, Icons.assignment_rounded),
-    (Icons.bento_outlined, Icons.bento_rounded),
+    (Icons.grid_view_outlined, Icons.grid_view_rounded),
     (Icons.calendar_month_outlined, Icons.calendar_month_rounded),
     (Icons.person_outline, Icons.person_rounded),
     (Icons.settings_outlined, Icons.settings_rounded),
@@ -28,11 +28,15 @@ class ThemedNavigationBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pal = paletteOf(context);
-    final indicatorExtent = pal.morandi || pal.paper || pal.terminal
+    final indicatorExtent = pal.sunny
+        ? 32.0
+        : pal.morandi || pal.paper || pal.terminal
         ? 38.0
         : 36.0;
     // Preserve each theme's existing row height, including its old frame inset.
-    final iconArea = pal.comic
+    final iconArea = pal.sunny
+        ? 38.0
+        : pal.comic
         ? 44.0
         : pal.terminal || pal.inkWash || pal.paper
         ? 42.0

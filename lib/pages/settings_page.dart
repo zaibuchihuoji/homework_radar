@@ -17,6 +17,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../app_state.dart';
 import '../ui/theme_forms.dart';
 import '../ui/settings_parts.dart';
+import '../ui/focus_parts.dart';
 import '../models/homework.dart';
 import '../services/backup_service.dart';
 import '../services/notification_service.dart';
@@ -48,6 +49,14 @@ class SettingsPage extends StatelessWidget {
       final sync = last == null
           ? '尚未同步'
           : '最近 ${last.hour.toString().padLeft(2, '0')}:${last.minute.toString().padLeft(2, '0')} 同步';
+      if (paletteOf(context).sunny) {
+        return _focusRoot(
+          context,
+          sync,
+          permission,
+          reminders.enabledHours.length,
+        );
+      }
       return SettingsScaffold(
         title: '设置',
         root: true,
@@ -115,6 +124,120 @@ class SettingsPage extends StatelessWidget {
     },
   );
 
+  Widget _focusRoot(
+    BuildContext context,
+    String sync,
+    bool? permission,
+    int reminders,
+  ) => SettingsScaffold(
+    title: '设置',
+    root: true,
+    body: SettingsList(
+      children: [
+        InkWell(
+          onTap: () => _openDetail(context, '外观与小组件', _appearanceSettings),
+          borderRadius: BorderRadius.circular(12),
+          child: FocusSummary(
+            eyebrow: '当前外观',
+            title: state.style.label,
+            trailing: Icon(
+              Icons.palette_outlined,
+              size: 30,
+              color: paletteOf(context).onAccent,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '外观与小组件',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: paletteOf(context).onAccent,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 20,
+                  color: paletteOf(context).onAccent,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const FocusSectionTitle('学习偏好'),
+        SettingsRow(
+          icon: Icons.notifications_none_rounded,
+          title: '提醒与课表',
+          subtitle: permission == false
+              ? '通知权限未开启'
+              : '截止提醒 $reminders 项 · 上课提醒${Storage.classReminder() ? '已开启' : '已关闭'}',
+          navigation: true,
+          onTap: () => _openDetail(context, '提醒与课表', _reminderSettings),
+        ),
+        const SettingsDivider(indent: 0),
+        SettingsRow(
+          icon: Icons.sync_outlined,
+          title: '同步与后台',
+          subtitle: sync,
+          navigation: true,
+          onTap: () => _openDetail(context, '同步与后台', _syncSettings),
+        ),
+        const FocusSectionTitle('数据与支持'),
+        SettingsRow(
+          icon: Icons.folder_open_outlined,
+          title: '数据管理',
+          subtitle: '备份、恢复与隐藏作业',
+          navigation: true,
+          onTap: () => _openDetail(context, '数据管理', _dataSettings),
+        ),
+        const SettingsDivider(indent: 0),
+        SettingsRow(
+          icon: Icons.info_outline_rounded,
+          title: '关于与帮助',
+          subtitle: '应用更新与问题反馈',
+          navigation: true,
+          onTap: () => _openDetail(context, '关于与帮助', _aboutSettings),
+        ),
+      ],
+    ),
+  );
+
+  Widget _focusDetailIntro(BuildContext context, String title) {
+    final (eyebrow, headline, detail) = switch (title) {
+      '外观与小组件' => ('当前主题', state.style.label, '显示模式、主题与桌面小组件在这里统一设置。'),
+      '提醒与课表' => (
+        '作业截止提醒',
+        '${Storage.reminders().enabledHours.length} 个提醒时点',
+        '按你的习惯安排截止与上课提醒。',
+      ),
+      '同步与后台' => (
+        '作业同步',
+        state.syncing
+            ? '正在同步…'
+            : state.lastSync == null
+            ? '尚未同步'
+            : '最近 ${state.lastSync!.hour.toString().padLeft(2, '0')}:${state.lastSync!.minute.toString().padLeft(2, '0')}',
+        '后台检查、同步记录与平台状态。',
+      ),
+      '数据管理' => (
+        '当前数据',
+        '${state.homework.length} 项作业 · ${state.courses.length} 门课',
+        '导出备份、恢复数据或管理隐藏记录。',
+      ),
+      _ => ('作业通', '关于与帮助', ''),
+    };
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: FocusSummary(
+        eyebrow: eyebrow,
+        title: headline,
+        detail: detail.isEmpty ? null : detail,
+      ),
+    );
+  }
+
   void _openDetail(
     BuildContext context,
     String title,
@@ -131,7 +254,13 @@ class SettingsPage extends StatelessWidget {
           ]),
           builder: (context, _) => SettingsScaffold(
             title: title,
-            body: SettingsList(children: content(context)),
+            body: SettingsList(
+              children: [
+                if (paletteOf(context).sunny && title != '关于与帮助')
+                  _focusDetailIntro(context, title),
+                ...content(context),
+              ],
+            ),
           ),
         ),
       ),

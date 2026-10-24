@@ -223,27 +223,8 @@ class ThemedMasthead extends StatelessWidget {
     }
     if (p.sunny) {
       return column([
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            label('作业通', 23, weight: FontWeight.w700),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-              decoration: BoxDecoration(
-                color: p.accentFill,
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: label(
-                'TODAY',
-                8,
-                color: p.onAccent,
-                weight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
+        label('作业通', 22, weight: FontWeight.w600),
+        const SizedBox(height: 3),
         date,
       ]);
     }

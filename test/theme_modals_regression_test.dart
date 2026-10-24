@@ -206,7 +206,11 @@ void main() {
         await tester.tap(find.text('主题课程').first);
         await tester.pumpAndSettle();
         expect(find.byType(ThemedDialog), findsOneWidget);
-        await tester.tap(find.text('编辑'));
+        await tester.ensureVisible(
+          find.text(style == ThemeStyle.clean ? '编辑课程' : '编辑'),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(style == ThemeStyle.clean ? '编辑课程' : '编辑'));
         await tester.pumpAndSettle();
         expect(find.byType(CourseEditSheet), findsOneWidget);
         await tester.tapAt(const Offset(4, 100));
@@ -228,7 +232,11 @@ void main() {
         expect(Storage.showNonWeekCourses(), isFalse);
         await tester.tap(find.text('主题课程').first);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('删除'));
+        await tester.ensureVisible(
+          find.text(style == ThemeStyle.clean ? '删除课程' : '删除'),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(style == ThemeStyle.clean ? '删除课程' : '删除'));
         await tester.pumpAndSettle();
         expect(state.deletedCourse, same(course));
         expect(find.byType(ThemedDialog), findsNothing);

@@ -9,6 +9,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../ui/focus_parts.dart';
+import '../ui/tokens.dart';
+import '../ui/adaptive.dart';
 import '../models/course.dart';
 import '../services/timetable_xls_parser.dart';
 import 'jw_preview_page.dart';
@@ -65,7 +68,8 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
       if (courses.isEmpty) {
         setState(() {
           _busy = false;
-          _status = '文件里没认出课程。需要含「星期一~星期日」表头的二维表；'
+          _status =
+              '文件里没认出课程。需要含「星期一~星期日」表头的二维表；'
               '先在教务里切到「二维表」视图再导出。';
         });
         return;
@@ -123,7 +127,8 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _status = '解析失败：请确认是 .xlsx / .csv 课表表格'
+          _status =
+              '解析失败：请确认是 .xlsx / .csv 课表表格'
               '（老版二进制 .xls 请先在 Excel/WPS 里另存为 .xlsx）。';
         });
       }
@@ -132,51 +137,62 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
 
   @override
   Widget build(BuildContext context) {
+    final guide = Text(
+      '适合教务能导出课表文件的情况：\n\n'
+      '① 在教务里把课表切到「二维表」，导出/下载表格文件；\n'
+      '② 回到这里选文件，解析后确认导入。\n\n'
+      '支持 .xlsx / .xls / .csv；要求表格里有'
+      '「星期一 ~ 星期日」表头。\n'
+      '老版二进制 .xls 请先另存为 .xlsx。',
+      style: TextStyle(
+        fontSize: 13,
+        height: 1.8,
+        color: textSecondary(context),
+      ),
+    );
     return Scaffold(
+      backgroundColor: scaffoldBgOf(context),
       appBar: AppBar(title: const Text('Excel 导入')),
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        children: [
+          if (paletteOf(context).sunny) ...[
+            const FocusSummary(
+              eyebrow: '文件导入',
+              title: '导入学校课表文件',
+              detail: '支持 .xlsx、文本表格 .xls 和 .csv，解析后再确认。',
+            ),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('使用说明'),
+              children: [guide],
+            ),
+          ] else
+            guide,
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: _busy ? null : _pickAndRun,
+            icon: _busy
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.table_view_rounded),
+            label: Text(_busy ? '处理中…' : '选择课表文件'),
+          ),
+          if (_status.isNotEmpty) ...[
+            const SizedBox(height: 16),
             Text(
-              '适合教务能导出课表文件的情况：\n\n'
-              '① 在教务里把课表切到「二维表」，导出/下载表格文件；\n'
-              '② 回到这里选文件，解析后确认导入。\n\n'
-              '支持 .xlsx / .xls / .csv；要求表格里有'
-              '「星期一 ~ 星期日」表头。\n'
-              '老版二进制 .xls 请先另存为 .xlsx。',
+              _status,
               style: TextStyle(
-                fontSize: 13,
-                height: 1.8,
-                color: Colors.grey.shade600,
+                fontSize: 12.5,
+                height: 1.6,
+                color: textSecondary(context),
               ),
             ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: _busy ? null : _pickAndRun,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.table_view_rounded),
-              label: Text(_busy ? '处理中…' : '选择课表文件'),
-            ),
-            if (_status.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text(
-                _status,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  height: 1.6,
-                  color: Colors.grey.shade700,
-                ),
-              ),
-            ],
           ],
-        ),
+        ],
       ),
     );
   }

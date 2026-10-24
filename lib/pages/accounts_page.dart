@@ -18,6 +18,8 @@ import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
 import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
+import '../ui/focus_parts.dart';
+import '../ui/focus_account_row.dart';
 import 'jw_preview_page.dart';
 import 'timetable_import_confirmation.dart';
 import 'webview_login_page.dart';
@@ -47,7 +49,7 @@ class AccountsPage extends StatelessWidget {
           listenable: state,
           builder: (context, _) => ListView(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            children: [
+            children: _layoutAccounts(context, [
               if (!paletteOf(context).clean) ...[
                 ThemePageHeader(
                   compact: true,
@@ -247,11 +249,69 @@ class AccountsPage extends StatelessWidget {
                   height: 1.7,
                 ),
               ),
-            ],
+            ]),
           ),
         ),
       ),
     );
+  }
+
+  List<Widget> _layoutAccounts(BuildContext context, List<Widget> original) {
+    if (!paletteOf(context).sunny) return original;
+    final rows = original.whereType<FocusAccountRow>().toList();
+    final connected = rows.where((r) => r.state == AccountState.ok).length;
+    final expired = rows
+        .where((r) => r.state == AccountState.needRelogin)
+        .length;
+    return [
+      FocusSummary(
+        eyebrow: '已连接的平台',
+        title: '$connected / ${rows.length}',
+        detail: expired > 0
+            ? '$expired 个平台需要重新登录，原有作业仍保留。'
+            : connected == 0
+            ? '连接学习平台，自动获取你的课程作业。'
+            : _connectionSummary,
+        trailing: Icon(
+          Icons.link_rounded,
+          size: 30,
+          color: paletteOf(context).onAccent,
+        ),
+        child: connected == 0
+            ? null
+            : SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: state.syncing ? null : () => state.syncAll(),
+                  icon: const Icon(Icons.sync_rounded, size: 18),
+                  label: Text(state.syncing ? '正在同步…' : '同步已连接平台'),
+                ),
+              ),
+      ),
+      for (final (value, title) in [
+        (AccountState.needRelogin, '需要重新登录'),
+        (AccountState.ok, '已连接'),
+        (AccountState.notLoggedIn, '可连接的平台'),
+      ]) ...[
+        if (rows.any((r) => r.state == value))
+          FocusSectionTitle(
+            title,
+            detail: '${rows.where((r) => r.state == value).length} 个',
+          ),
+        ...rows.where((r) => r.state == value),
+      ],
+      if (state.lastSync != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 20),
+          child: Text(
+            '最近同步 ${state.lastSync!.month}月${state.lastSync!.day}日 '
+            '${state.lastSync!.hour.toString().padLeft(2, '0')}:${state.lastSync!.minute.toString().padLeft(2, '0')}',
+            style: TextStyle(fontSize: 12, color: textSecondary(context)),
+          ),
+        ),
+      const SizedBox(height: 20),
+      original.last,
+    ];
   }
 
   Future<void> _openLogin(BuildContext context, PlatformKind platform) async {
@@ -728,6 +788,18 @@ class AccountsPage extends StatelessWidget {
       AccountState.needRelogin => ('登录已失效，请重新登录', const Color(0xFFF59E0B)),
       AccountState.notLoggedIn => ('未登录', Colors.grey.shade500),
     };
+
+    if (pal.sunny) {
+      return FocusAccountRow(
+        index: index,
+        title: title,
+        state: state,
+        label: label,
+        extra: extra,
+        onLogin: onLogin,
+        onLogout: onLogout,
+      );
+    }
 
     if (!pal.clean) {
       return _themedAccountCard(

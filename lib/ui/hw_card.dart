@@ -123,6 +123,14 @@ Widget buildHwCard(
   final course = hw.course.trim().isEmpty ? '课程' : hw.course.trim();
   final color = avatarColorFor(course);
 
+  if (pal.sunny) {
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: buildFocusHomeworkRow(context, hw, showCourse: showCourse),
+    );
+  }
+
   if (pal.clean) {
     // 日期信息只承担时间语义，完成状态单独显示；缺失日期保持中性。
     final dateColor = hw.dueAt == null || done ? ink2 : tone.$1;
@@ -627,6 +635,151 @@ Widget buildHwCard(
           ],
         ),
       ),
+    ),
+  );
+}
+
+/// Sunny workbench rows share content hierarchy between home and calendar.
+Widget buildFocusHomeworkRow(
+  BuildContext context,
+  HomeworkItem hw, {
+  bool priority = false,
+  bool showCourse = true,
+}) {
+  final p = paletteOf(context);
+  final ink = priority ? p.onAccent : p.ink;
+  final secondary = priority ? p.onAccent.withValues(alpha: .78) : p.ink2;
+  final due = hw.dueAt;
+  final overdue = hwIsOverdue(hw);
+  final time = due == null ? '截止时间待确认' : HomeworkItem.formatDueTime(due);
+  final compactTime = due == null
+      ? ''
+      : '${due.hour.toString().padLeft(2, '0')}:${due.minute.toString().padLeft(2, '0')}';
+  final large = MediaQuery.textScalerOf(context).scale(15) > 19;
+  final metadata = Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      if (showCourse) ...[
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: avatarColorFor(hw.course),
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+        const SizedBox(width: 7),
+      ],
+      Expanded(
+        child: Text(
+          showCourse ? (hw.course.isEmpty ? '未指定课程' : hw.course) : '',
+          style: TextStyle(fontSize: 12, color: secondary),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Text(
+        hw.platform.label,
+        textAlign: TextAlign.end,
+        style: TextStyle(fontSize: 11, color: secondary),
+      ),
+    ],
+  );
+  final title = Text(
+    hw.title.isEmpty ? '（无标题）' : hw.title,
+    style: TextStyle(
+      fontSize: 16,
+      height: 1.4,
+      fontWeight: FontWeight.w600,
+      color: ink,
+    ),
+  );
+  final deadline = Column(
+    crossAxisAlignment: CrossAxisAlignment.end,
+    children: [
+      Text(
+        compactTime,
+        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ink),
+      ),
+      Text(
+        overdue ? '已截止' : '今天',
+        style: TextStyle(
+          fontSize: 11,
+          color: overdue ? Theme.of(context).colorScheme.error : secondary,
+        ),
+      ),
+    ],
+  );
+  return Container(
+    padding: const EdgeInsets.all(15),
+    decoration: priority
+        ? null
+        : BoxDecoration(
+            color: p.card,
+            border: Border.all(color: p.cardBorder, width: .8),
+            borderRadius: BorderRadius.circular(12),
+          ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        metadata,
+        const SizedBox(height: 8),
+        if (priority && !large)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: title),
+              const SizedBox(width: 12),
+              deadline,
+            ],
+          )
+        else
+          title,
+        if (priority && large) ...[const SizedBox(height: 7), deadline],
+        if (!priority && hw.note?.trim().isNotEmpty == true) ...[
+          const SizedBox(height: 6),
+          Text(
+            hw.note!.trim(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12, color: secondary),
+          ),
+        ],
+        if (!priority) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 4,
+            children: [
+              Text(
+                time,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: overdue
+                      ? Theme.of(context).colorScheme.error
+                      : secondary,
+                ),
+              ),
+              Text(
+                hwStatusLabel(hw),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: overdue
+                      ? Theme.of(context).colorScheme.error
+                      : secondary,
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (hw.score != null)
+          Text(
+            '${HomeworkItem.scoreText(hw.score)} 分',
+            style: TextStyle(fontSize: 11, color: secondary),
+          ),
+      ],
     ),
   );
 }

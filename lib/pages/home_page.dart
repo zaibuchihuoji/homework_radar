@@ -21,7 +21,10 @@ import '../ui/tokens.dart';
 import '../ui/theme_forms.dart';
 import '../ui/themed_masthead.dart';
 import '../ui/study_overview.dart';
+import '../ui/sync_status_parts.dart';
+import 'background_sync_settings_page.dart';
 import 'detail_page.dart';
+import 'homework_edit_dialogs.dart';
 import 'homework_recognition_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -36,6 +39,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   String _filter = 'todo';
+  bool _todayOnly = false;
 
   /// 'time' 按截止时间分段；'course' 按课程分组
   String _sort = 'time';
@@ -100,35 +104,41 @@ class _HomePageState extends State<HomePage> {
       //（2026-10-05 复盘：不透明底色曾把莫兰迪色雾/像素点阵整个盖住）
       child: Scaffold(
         backgroundColor: scaffoldBgOf(context),
-        floatingActionButton: Padding(
-          // 液态玻璃底栏悬浮在内容之上，FAB 需抬到玻璃栏上方
-          padding: EdgeInsets.zero,
-          child: DecoratedBox(
-            // 按钮落影随样式走：漫画=白边贴纸+硬投影，水墨=墨影（印章
-            // 不发光），其余=品牌光晕
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(
-                isComicStyle(context)
-                    ? 18
-                    : (isEditorialStyle(context) || isTerminalStyle(context)
-                          ? 4
-                          : 14),
+        floatingActionButton: paletteOf(context).sunny
+            ? null
+            : Padding(
+                // 液态玻璃底栏悬浮在内容之上，FAB 需抬到玻璃栏上方
+                padding: EdgeInsets.zero,
+                child: DecoratedBox(
+                  // 按钮落影随样式走：漫画=白边贴纸+硬投影，水墨=墨影（印章
+                  // 不发光），其余=品牌光晕
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(
+                      isComicStyle(context)
+                          ? 18
+                          : (isEditorialStyle(context) ||
+                                    isTerminalStyle(context)
+                                ? 4
+                                : 14),
+                    ),
+                    border: isComicStyle(context)
+                        ? Border.all(color: Colors.white, width: 2)
+                        : isTerminalStyle(context)
+                        ? Border.all(color: cardBorderColor(context), width: 1)
+                        : null,
+                    boxShadow: primaryButtonShadow(context),
+                  ),
+                  child: FloatingActionButton(
+                    tooltip: '添加作业',
+                    backgroundColor: paletteOf(context).accentFill,
+                    child: Icon(
+                      Icons.add_rounded,
+                      color: onAccentColor(context),
+                    ),
+                    onPressed: () => _openAddMenu(context),
+                  ),
+                ),
               ),
-              border: isComicStyle(context)
-                  ? Border.all(color: Colors.white, width: 2)
-                  : isTerminalStyle(context)
-                  ? Border.all(color: cardBorderColor(context), width: 1)
-                  : null,
-              boxShadow: primaryButtonShadow(context),
-            ),
-            child: FloatingActionButton(
-              tooltip: '添加作业',
-              backgroundColor: paletteOf(context).accentFill,
-              child: Icon(Icons.add_rounded, color: onAccentColor(context)),
-              onPressed: () => _openAddMenu(context),
-            ),
-          ),
-        ),
         body: SafeArea(
           bottom: false,
           child: RefreshIndicator(
@@ -143,27 +153,17 @@ class _HomePageState extends State<HomePage> {
                 if (_searching) SliverToBoxAdapter(child: _buildSearchBar()),
                 if (state.syncing)
                   SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const LinearProgressIndicator(minHeight: 2),
-                        if (state.syncProgress.isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-                            child: Text(
-                              '正在同步课程 ${state.syncProgress}…',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: textSecondary(context),
-                              ),
-                            ),
-                          ),
-                      ],
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                      child: SyncProgressNotice(
+                        busy: true,
+                        progress: state.syncProgress,
+                      ),
                     ),
                   ),
                 if (state.hasAnyAccount || state.homework.isNotEmpty)
                   SliverToBoxAdapter(child: _buildFilters()),
-                if (state.lastSyncMessage.isNotEmpty)
+                if (!state.syncing && state.lastSyncMessage.isNotEmpty)
                   SliverToBoxAdapter(child: _warnBanner(state.lastSyncMessage)),
                 _buildList(context, state),
               ],
@@ -221,7 +221,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildHeader(AppState state) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+      padding: EdgeInsets.fromLTRB(20, isCleanStyle(context) ? 8 : 14, 20, 0),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -258,52 +258,7 @@ class _HomePageState extends State<HomePage> {
                 }),
               ),
               const SizedBox(width: 4),
-              Container(
-                decoration: _actionDecoration(),
-                child: PopupMenuButton<String>(
-                  tooltip: '排序方式',
-                  color: modalColor(context),
-                  elevation: 4,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  position: PopupMenuPosition.under,
-                  offset: const Offset(0, 8),
-                  icon: Icon(
-                    Icons.sort_rounded,
-                    size: 21,
-                    color: _sort == 'course'
-                        ? accentColor(context)
-                        : textSecondary(context),
-                  ),
-                  onSelected: (value) => setState(() {
-                    _sort = value;
-                    Storage.saveSortMode(value);
-                  }),
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: 'time',
-                      child: _menuRow(
-                        icon: Icons.schedule_rounded,
-                        color: accentColor(context),
-                        title: '按截止时间',
-                        subtitle: '分成今天/本周等段落',
-                        value: 'time',
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'course',
-                      child: _menuRow(
-                        icon: Icons.category_rounded,
-                        color: accentColor(context),
-                        title: '按课程分组',
-                        subtitle: '同一门课的作业放在一起',
-                        value: 'course',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              if (!paletteOf(context).sunny) _buildSortMenu(),
               const SizedBox(width: 4),
               _iconBtn(
                 icon: Icons.refresh_rounded,
@@ -313,12 +268,72 @@ class _HomePageState extends State<HomePage> {
                     ? textFaint(context)
                     : accentColor(context),
               ),
+              if (paletteOf(context).sunny) ...[
+                const SizedBox(width: 6),
+                IconButton.filledTonal(
+                  tooltip: '添加作业',
+                  onPressed: () => _openAddMenu(context),
+                  style: IconButton.styleFrom(
+                    backgroundColor: paletteOf(context).accentFill,
+                    foregroundColor: paletteOf(context).onAccent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.add_rounded, size: 24),
+                ),
+              ],
             ],
           ),
         ],
       ),
     );
   }
+
+  Widget _buildSortMenu() => Container(
+    decoration: _actionDecoration(),
+    child: PopupMenuButton<String>(
+      tooltip: '排序方式',
+      color: modalColor(context),
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 8),
+      icon: Icon(
+        Icons.sort_rounded,
+        size: 21,
+        color: _sort == 'course'
+            ? accentColor(context)
+            : textSecondary(context),
+      ),
+      onSelected: (value) => setState(() {
+        _sort = value;
+        Storage.saveSortMode(value);
+      }),
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'time',
+          child: _menuRow(
+            icon: Icons.schedule_rounded,
+            color: accentColor(context),
+            title: '按截止时间',
+            subtitle: '分成今天/本周等段落',
+            value: 'time',
+          ),
+        ),
+        PopupMenuItem(
+          value: 'course',
+          child: _menuRow(
+            icon: Icons.category_rounded,
+            color: accentColor(context),
+            title: '按课程分组',
+            subtitle: '同一门课的作业放在一起',
+            value: 'course',
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _buildSearchBar() {
     return Padding(
@@ -356,13 +371,31 @@ class _HomePageState extends State<HomePage> {
           d.month == now.month &&
           d.day == now.day;
     }).length;
-    return StudyOverview(pending: pending.length, today: today);
+    if (paletteOf(context).sunny && today > 0) return const SizedBox.shrink();
+    return StudyOverview(
+      pending: pending.length,
+      today: today,
+      todaySelected: _todayOnly,
+      onPendingTap: () => setState(() {
+        _todayOnly = false;
+        _filter = 'todo';
+      }),
+      onTodayTap: () => setState(() {
+        _todayOnly = !_todayOnly;
+        _filter = 'todo';
+      }),
+    );
   }
 
   Widget _buildFilters() {
-    return SingleChildScrollView(
+    final filters = SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        isCleanStyle(context) ? 4 : 12,
+        paletteOf(context).sunny ? 0 : 20,
+        4,
+      ),
       child: Row(
         children: [
           _pill('未完成', 'todo'),
@@ -375,11 +408,67 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+    return paletteOf(context).sunny
+        ? Row(
+            children: [
+              Expanded(child: filters),
+              _buildSortMenu(),
+              const SizedBox(width: 12),
+            ],
+          )
+        : filters;
   }
 
   Widget _pill(String label, String value) {
     final selected = _filter == value;
     final p = paletteOf(context);
+    if (p.sunny) {
+      return Semantics(
+        button: true,
+        selected: selected,
+        child: Container(
+          margin: const EdgeInsets.only(right: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: selected ? p.accentFill : Colors.transparent,
+                width: 3,
+              ),
+            ),
+          ),
+          child: TextButton(
+            onPressed: () => setState(() {
+              _filter = value;
+              _todayOnly = false;
+            }),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+              foregroundColor: selected ? p.ink : p.ink2,
+              minimumSize: const Size(48, 48),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                  ),
+                ),
+                if (value == 'todo') ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '${widget.state.homework.where(_inSemester).where((h) => !_isDone(h)).length}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     final square = p.pixel || p.terminal || p.receipt || p.editorial;
     final radius = square
         ? 2.0
@@ -433,7 +522,10 @@ class _HomePageState extends State<HomePage> {
           child: Material(
             type: MaterialType.transparency,
             child: InkWell(
-              onTap: () => setState(() => _filter = value),
+              onTap: () => setState(() {
+                _filter = value;
+                _todayOnly = false;
+              }),
               borderRadius: BorderRadius.circular(radius),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -470,7 +562,7 @@ class _HomePageState extends State<HomePage> {
         child: _empty(
           icon: Icons.link_rounded,
           title: '还没有绑定账号',
-          subtitle: '右下角 + 可添加手动作业，也可绑定平台自动同步',
+          subtitle: '点 + 添加手动作业，也可绑定平台自动同步',
           action: FilledButton(
             style: FilledButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
@@ -485,6 +577,17 @@ class _HomePageState extends State<HomePage> {
     var filtered = state.homework.where(_inSemester).where(_matchQuery).where((
       hw,
     ) {
+      if (_todayOnly) {
+        final due = hw.dueAt;
+        final now = DateTime.now();
+        if (_isDone(hw) ||
+            due == null ||
+            due.year != now.year ||
+            due.month != now.month ||
+            due.day != now.day) {
+          return false;
+        }
+      }
       return switch (_filter) {
         'todo' => !_isDone(hw),
         'submitted' => hw.status == HwStatus.submitted,
@@ -506,14 +609,20 @@ class _HomePageState extends State<HomePage> {
               ? '正在同步…'
               : _query.isNotEmpty
               ? '没有匹配「$_query」的作业'
+              : _todayOnly
+              ? '今天没有待完成的截止作业'
               : '这里空空的',
           subtitle: state.syncing
               ? '第一次同步要拉取全部课程，稍等片刻'
               : _query.isEmpty
-              ? '右下角 + 可以手动添加作业'
+              ? (_todayOnly ? '点待完成数量或任意状态标签，查看其他作业' : '点 + 可以手动添加作业')
               : null,
         ),
       );
+    }
+
+    if (paletteOf(context).sunny && _sort == 'time') {
+      return _focusList(filtered);
     }
 
     final children = <Widget>[];
@@ -558,6 +667,102 @@ class _HomePageState extends State<HomePage> {
     return SliverPadding(
       padding: EdgeInsets.fromLTRB(20, 4, 20, 96),
       sliver: SliverList(delegate: SliverChildListDelegate(children)),
+    );
+  }
+
+  Widget _focusList(List<HomeworkItem> filtered) {
+    final n = DateTime.now();
+    bool today(HomeworkItem h) =>
+        !_isDone(h) && h.dueAt != null && DateUtils.isSameDay(h.dueAt, n);
+    final urgent = filtered.where(today).toList();
+    final rest = filtered.where((h) => !today(h)).toList();
+    final overdue = rest.where((h) => !_isDone(h) && _isOverdue(h)).toList();
+    final upcoming = rest.where((h) => !_isDone(h) && !_isOverdue(h)).toList();
+    final submitted = rest
+        .where((h) => h.status == HwStatus.submitted)
+        .toList();
+    final done = rest
+        .where((h) => h.status != HwStatus.submitted && _isDone(h))
+        .toList();
+    final p = paletteOf(context);
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      sliver: SliverList(
+        delegate: SliverChildListDelegate([
+          if (urgent.isNotEmpty)
+            Container(
+              key: const ValueKey('focus_today'),
+              decoration: BoxDecoration(
+                color: p.accentFill,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Tooltip(
+                    message: '今天截止 ${urgent.length} 项',
+                    child: InkWell(
+                      onTap: () => setState(() {
+                        _todayOnly = !_todayOnly;
+                        _filter = 'todo';
+                      }),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(15, 14, 15, 12),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.schedule_outlined,
+                              size: 20,
+                              color: p.onAccent,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '今天截止',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: p.onAccent,
+                                ),
+                              ),
+                            ),
+                            Text(
+                              '${urgent.length} 项',
+                              style: TextStyle(fontSize: 12, color: p.onAccent),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  for (var i = 0; i < urgent.length; i++) ...[
+                    Divider(
+                      height: 1,
+                      thickness: .5,
+                      indent: 15,
+                      endIndent: 15,
+                      color: p.onAccent.withValues(alpha: .12),
+                    ),
+                    _hwRow(urgent[i], priority: true),
+                  ],
+                ],
+              ),
+            ),
+          for (final section in [
+            ('已截止', overdue),
+            ('接下来', upcoming),
+            ('已提交', submitted),
+            ('已完成', done),
+          ])
+            if (section.$2.isNotEmpty)
+              _sectionBlock(
+                color: p.hairline,
+                header: _sectionHeader(section.$1, section.$2.length, index: 0),
+                rows: [for (final hw in section.$2) _hwRow(hw)],
+              ),
+        ]),
+      ),
     );
   }
 
@@ -662,17 +867,31 @@ class _HomePageState extends State<HomePage> {
   void _openHw(HomeworkItem hw) {
     // 网页版做作业体验差，点击只看详情，完成操作去官方 App
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => HomeworkDetailPage(homeworkId: hw.id)),
+      MaterialPageRoute(
+        builder: (_) =>
+            HomeworkDetailPage(homeworkId: hw.id, state: widget.state),
+      ),
     );
   }
 
-  Widget _hwRow(HomeworkItem hw, {bool showCourse = true}) {
-    final card = buildHwCard(
-      context,
-      hw,
-      showCourse: showCourse,
-      platformPill: _filter != 'all',
-    );
+  Widget _hwRow(
+    HomeworkItem hw, {
+    bool showCourse = true,
+    bool priority = false,
+  }) {
+    final card = priority
+        ? buildFocusHomeworkRow(
+            context,
+            hw,
+            priority: true,
+            showCourse: showCourse,
+          )
+        : buildHwCard(
+            context,
+            hw,
+            showCourse: showCourse,
+            platformPill: _filter != 'all',
+          );
     // 小票：删除不走滑动——撕纸动画要当着面撕，入口在长按菜单
     //「撕掉这张小票」；句柄按作业 id 缓存，动画中列表重建不打断
     if (isReceiptStyle(context)) {
@@ -855,59 +1074,8 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _openNoteEditor(HomeworkItem hw) {
-    final ctrl = TextEditingController(text: hw.note ?? '');
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => ThemedAlertDialog(
-        backgroundColor: cardColor(context),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const ThemeEditorHeading(
-          title: '备注',
-          kicker: 'NOTE / 备忘',
-          icon: Icons.sticky_note_2_outlined,
-        ),
-        scrollable: true,
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          maxLines: 3,
-          style: TextStyle(fontSize: 14, color: textPrimary(context)),
-          decoration: !isCleanStyle(dialogContext)
-              ? themedInputDecoration(
-                  dialogContext,
-                  hintText: '例如：需要交纸质版 / 小组作业',
-                )
-              : InputDecoration(
-                  hintText: '例如：需要交纸质版 / 小组作业',
-                  hintStyle: TextStyle(fontSize: 13, color: textFaint(context)),
-                  filled: true,
-                  fillColor: bgColor(context),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () {
-              widget.state.updateNote(hw.id, ctrl.text.trim());
-              Navigator.of(dialogContext).pop();
-            },
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    ).whenComplete(() {
-      // 等退场动画走完再释放：立即 dispose 会炸 _dependents 断言
-      Future<void>.delayed(const Duration(milliseconds: 500), ctrl.dispose);
-    });
-  }
+  void _openNoteEditor(HomeworkItem hw) =>
+      showHomeworkNoteEditor(context, widget.state, hw);
 
   Future<void> _openAddMenu(BuildContext context) async {
     final choice = await showDialog<String>(
@@ -983,241 +1151,8 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _openManualEditor(BuildContext context, {HomeworkItem? edit}) {
-    final courseCtrl = TextEditingController(text: edit?.course ?? '');
-    final titleCtrl = TextEditingController(text: edit?.title ?? '');
-    final noteCtrl = TextEditingController(text: edit?.note ?? '');
-    DateTime? due = edit?.dueAt;
-    final existingCourses = widget.state.homework
-        .map((h) => h.course.trim())
-        .where((c) => c.isNotEmpty)
-        .toSet()
-        .toList();
-
-    showDialog<void>(
-      context: context,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setSheet) => ThemedDialog(
-          backgroundColor: cardColor(sheetContext),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ThemeEditorHeading(
-                    title: edit == null ? '添加作业' : '编辑作业',
-                    kicker: 'HOMEWORK / 自定义',
-                    icon: Icons.edit_note_rounded,
-                  ),
-                  const SizedBox(height: 14),
-                  ThemeFieldGroup(
-                    title: '所属课程',
-                    index: 1,
-                    child: TextField(
-                      controller: courseCtrl,
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        color: textPrimary(sheetContext),
-                      ),
-                      decoration: _editorInput(sheetContext, '课程名称'),
-                    ),
-                  ),
-                  if (existingCourses.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: existingCourses
-                          .take(6)
-                          .map(
-                            (c) => GestureDetector(
-                              onTap: () => setSheet(() => courseCtrl.text = c),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: accentColor(sheetContext)
-                                      .withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  c,
-                                  style: TextStyle(
-                                    fontSize: 11.5,
-                                    color: accentColor(sheetContext),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  ThemeFieldGroup(
-                    title: '作业内容',
-                    index: 2,
-                    child: TextField(
-                      controller: titleCtrl,
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        color: textPrimary(sheetContext),
-                      ),
-                      decoration: _editorInput(sheetContext, '作业标题（必填）'),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  ThemeFieldGroup(
-                    title: '补充备注',
-                    index: 3,
-                    child: TextField(
-                      controller: noteCtrl,
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        color: textPrimary(sheetContext),
-                      ),
-                      maxLines: 2,
-                      decoration: _editorInput(sheetContext, '备注（选填）：需要交纸质版等'),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.schedule_rounded,
-                        size: 18,
-                        color: textSecondary(sheetContext),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          due == null
-                              ? '未设置截止时间'
-                              : '${due!.year}-${due!.month.toString().padLeft(2, '0')}-${due!.day.toString().padLeft(2, '0')} '
-                                    '${due!.hour.toString().padLeft(2, '0')}:${due!.minute.toString().padLeft(2, '0')}',
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            color: due == null
-                                ? textFaint(sheetContext)
-                                : textPrimary(sheetContext),
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          final now = DateTime.now();
-                          final d = await showDatePicker(
-                            context: sheetContext,
-                            initialDate: due ?? now,
-                            firstDate: now.subtract(const Duration(days: 365)),
-                            lastDate: now.add(const Duration(days: 730)),
-                          );
-                          if (d == null) return;
-                          if (!sheetContext.mounted) return;
-                          final t = await showTimePicker(
-                            context: sheetContext,
-                            initialTime: TimeOfDay.fromDateTime(due ?? now),
-                          );
-                          if (!sheetContext.mounted) return;
-                          setSheet(
-                            () => due = DateTime(
-                              d.year,
-                              d.month,
-                              d.day,
-                              t?.hour ?? 23,
-                              t?.minute ?? 59,
-                            ),
-                          );
-                        },
-                        child: const Text('选择时间'),
-                      ),
-                      if (due != null)
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                          onPressed: () => setSheet(() => due = null),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: FilledButton(
-                      onPressed: () {
-                        final title = titleCtrl.text.trim();
-                        if (title.isEmpty) return;
-                        final course = courseCtrl.text.trim();
-                        final note = noteCtrl.text.trim();
-                        if (edit == null) {
-                          widget.state.addManualHomework(
-                            course: course,
-                            title: title,
-                            dueAt: due,
-                            note: note,
-                          );
-                        } else {
-                          widget.state.updateManualHomework(
-                            HomeworkItem(
-                              id: edit.id,
-                              platform: PlatformKind.manual,
-                              course: course,
-                              title: title,
-                              dueAt: due,
-                              status: edit.status,
-                              url: edit.url,
-                              score: edit.score,
-                              note: note,
-                              sourceKey: edit.sourceKey,
-                            ),
-                          );
-                        }
-                        Navigator.of(sheetContext).pop();
-                      },
-                      child: Text(edit == null ? '添加' : '保存'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    ).whenComplete(() {
-      // 等退场动画走完再释放：立即 dispose 会炸 _dependents 断言
-      Future<void>.delayed(const Duration(milliseconds: 500), () {
-        courseCtrl.dispose();
-        titleCtrl.dispose();
-        noteCtrl.dispose();
-      });
-    });
-  }
-
-  InputDecoration _editorInput(BuildContext sheetContext, String hint) =>
-      !isCleanStyle(sheetContext)
-      ? themedInputDecoration(sheetContext, hintText: hint)
-      : InputDecoration(
-          hintText: hint,
-          hintStyle: TextStyle(fontSize: 13.5, color: textFaint(sheetContext)),
-          isDense: true,
-          filled: true,
-          fillColor: bgColor(sheetContext),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 12,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-        );
+  void _openManualEditor(BuildContext context, {HomeworkItem? edit}) =>
+      showManualHomeworkEditor(context, widget.state, edit: edit);
 
   Future<void> _dismissHw(HomeworkItem hw) async {
     await widget.state.dismissHomework(hw);
@@ -1240,7 +1175,13 @@ class _HomePageState extends State<HomePage> {
     required List<Widget> rows,
   }) {
     return Padding(
-      padding: EdgeInsets.only(top: isJournalStyle(context) ? 22 : 18),
+      padding: EdgeInsets.only(
+        top: isCleanStyle(context)
+            ? 12
+            : isJournalStyle(context)
+            ? 22
+            : 18,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         spacing: isReceiptStyle(context) ? 12 : 10,
@@ -1652,35 +1593,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _warnBanner(String msg) {
-    final dark = isDark(context);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 10, 20, 0),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: dark ? const Color(0xFF2A2313) : const Color(0xFFFFFBEB),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: dark ? const Color(0xFF5C4A1A) : const Color(0xFFFDE68A),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+      child: SyncProgressNotice(
+        message: msg,
+        onDetails: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => BackgroundSyncSettingsPage(state: widget.state),
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.info_outline_rounded,
-            size: 16,
-            color: Colors.amber.shade800,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              msg,
-              style: TextStyle(
-                fontSize: 12,
-                color: dark ? const Color(0xFFE8C878) : const Color(0xFF92400E),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

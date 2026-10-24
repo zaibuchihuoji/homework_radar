@@ -6,7 +6,8 @@ import '../models/homework_draft.dart';
 import '../services/homework_duplicates.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
-import '../ui/style_background.dart';
+import '../ui/settings_parts.dart';
+import '../ui/capture_parts.dart';
 import '../ui/theme_forms.dart';
 
 class HomeworkRecognitionReviewPage extends StatefulWidget {
@@ -52,7 +53,9 @@ class _HomeworkRecognitionReviewPageState
   }
 
   void _refresh() {
-    if (mounted) setState(() => _existing = Storage.homeworkForDuplicateCheck());
+    if (mounted) {
+      setState(() => _existing = Storage.homeworkForDuplicateCheck());
+    }
   }
 
   @override
@@ -135,7 +138,7 @@ class _HomeworkRecognitionReviewPageState
     try {
       final confirmed = await showDialog<bool>(
         context: context,
-        builder: (context) => ThemedAlertDialog(
+        builder: (context) => SettingsAlertDialog(
           title: const Text('确认添加作业'),
           scrollable: true,
           content: Text(
@@ -171,141 +174,154 @@ class _HomeworkRecognitionReviewPageState
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !_saving,
-    child: StyleBackground(
-      child: Scaffold(
-        backgroundColor: scaffoldBgOf(context),
-        appBar: AppBar(title: const Text('核对识别结果')),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: FilledButton(
-              key: const ValueKey('review_save'),
-              onPressed: _saving || !_rows.any((r) => r.selected)
-                  ? null
-                  : _save,
-              child: Text(
-                _saving
-                    ? '请稍候…'
-                    : '检查并添加（${_rows.where((r) => r.selected).length}）',
-              ),
-            ),
+    child: SettingsScaffold(
+      title: '核对识别结果',
+      bottomNavigationBar: CaptureBottomBar(
+        label:
+            '已选 ${_rows.where((r) => r.selected).length} / ${_rows.length} 项 · 最终确认后保存',
+        child: FilledButton(
+          key: const ValueKey('review_save'),
+          onPressed: _saving || !_rows.any((r) => r.selected) ? null : _save,
+          child: Text(
+            _saving
+                ? '请稍候…'
+                : '检查并添加（${_rows.where((r) => r.selected).length}）',
           ),
         ),
-        body: AbsorbPointer(
-          absorbing: _saving,
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const ThemeEditorHeading(
-                  title: '只添加你选中的',
-                  kicker: 'REVIEW / SELECT',
-                  icon: Icons.checklist,
-                  summary: '不明确的内容已留待确认。标题、课程和截止时间均可修改；点最终确认前不会保存。',
-                ),
-                const SizedBox(height: 12),
-                for (var i = 0; i < _rows.length; i++) _card(_rows[i], i),
-              ],
-            ),
+      ),
+      body: AbsorbPointer(
+        absorbing: _saving,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              CaptureHeading(
+                step: '02 / 核对内容',
+                title: '只添加你选中的',
+                description:
+                    '识别到 ${_rows.length} 项。课程、标题和截止时间均可修改；不明确的内容请补充确认。',
+              ),
+              for (var i = 0; i < _rows.length; i++) _card(_rows[i], i),
+            ],
           ),
         ),
       ),
     ),
   );
-  Widget _card(_Row row, int index) => Card(
-    color: cardColor(context),
-    child: Padding(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Checkbox(
-                key: ValueKey('select_$index'),
-                value: row.selected,
-                onChanged: (v) => setState(() => row.selected = v ?? false),
-              ),
-              Expanded(
-                child: Text(
-                  '第 ${index + 1} 项',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+  Widget _card(_Row row, int index) => SettingsSection(
+    children: [
+      Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Checkbox(
+                  key: ValueKey('select_$index'),
+                  value: row.selected,
+                  onChanged: (v) => setState(() => row.selected = v ?? false),
                 ),
-              ),
-            ],
-          ),
-          if (_duplicate(row))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                '疑似重复：已有同名作业或与本次勾选项相同，请核对',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-          TextField(
-            key: ValueKey('course_$index'),
-            controller: row.course,
-            onChanged: (_) => setState(() {}),
-            decoration: themedInputDecoration(
-              context,
-              labelText: '课程（可修改）',
-              suffixIcon: widget.knownCourses.isEmpty
-                  ? null
-                  : PopupMenuButton<String>(
-                      tooltip: '选择已有课程',
-                      icon: const Icon(Icons.arrow_drop_down),
-                      onSelected: (course) =>
-                          setState(() => row.course.text = course),
-                      itemBuilder: (_) => widget.knownCourses
-                          .map((c) => PopupMenuItem(value: c, child: Text(c)))
-                          .toList(),
+                Expanded(
+                  child: Text(
+                    '作业 ${index + 1}',
+                    style: serifTitle(
+                      context,
+                      monoText(
+                        context,
+                        TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          color: textPrimary(context),
+                        ),
+                      ),
                     ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            key: ValueKey('title_$index'),
-            controller: row.title,
-            minLines: 1,
-            maxLines: 5,
-            onChanged: (_) => setState(() {}),
-            decoration: themedInputDecoration(context, labelText: '作业标题'),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            row.due == null ? '截止时间待确认' : '截止 ${_format(row.due!)}',
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          Wrap(
-            spacing: 8,
-            children: [
-              TextButton.icon(
-                onPressed: () => _date(row),
-                icon: const Icon(Icons.schedule),
-                label: Text(row.due == null ? '设置截止时间' : '修改截止时间'),
-              ),
-              if (row.due != null)
-                TextButton(
-                  onPressed: () => setState(() => row.due = null),
-                  child: const Text('清除时间'),
+                  ),
                 ),
-            ],
-          ),
-          if (row.course.text.trim().isEmpty) const Text('所属课程待确认'),
-          if (row.due == null)
-            ...row.draft.warnings
-                .where((w) => !w.contains('所属课程') && !w.contains('未检测到'))
-                .map((w) => Text(w)),
-          if (!row.draft.likelyHomework) const Text('未检测到明确作业描述，请核对后再勾选'),
-          ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            title: const Text('查看原文'),
-            children: [SelectableText(row.draft.sourceText)],
-          ),
-        ],
+                Text(
+                  row.selected ? '已选' : '未选',
+                  style: TextStyle(fontSize: 12, color: textSecondary(context)),
+                ),
+              ],
+            ),
+            if (_duplicate(row))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '疑似重复：已有同名作业或与本次勾选项相同，请核对',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.6,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+            TextField(
+              key: ValueKey('course_$index'),
+              controller: row.course,
+              onChanged: (_) => setState(() {}),
+              decoration: themedInputDecoration(
+                context,
+                labelText: '课程（可修改）',
+                suffixIcon: widget.knownCourses.isEmpty
+                    ? null
+                    : PopupMenuButton<String>(
+                        tooltip: '选择已有课程',
+                        icon: const Icon(Icons.arrow_drop_down),
+                        onSelected: (course) =>
+                            setState(() => row.course.text = course),
+                        itemBuilder: (_) => widget.knownCourses
+                            .map((c) => PopupMenuItem(value: c, child: Text(c)))
+                            .toList(),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              key: ValueKey('title_$index'),
+              controller: row.title,
+              minLines: 1,
+              maxLines: 5,
+              onChanged: (_) => setState(() {}),
+              decoration: themedInputDecoration(context, labelText: '作业标题'),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              row.due == null ? '截止时间待确认' : '截止 ${_format(row.due!)}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: () => _date(row),
+                  icon: const Icon(Icons.schedule),
+                  label: Text(row.due == null ? '设置截止时间' : '修改截止时间'),
+                ),
+                if (row.due != null)
+                  TextButton(
+                    onPressed: () => setState(() => row.due = null),
+                    child: const Text('清除时间'),
+                  ),
+              ],
+            ),
+            if (row.course.text.trim().isEmpty) const SettingsNote('所属课程待确认'),
+            if (row.due == null)
+              ...row.draft.warnings
+                  .where((w) => !w.contains('所属课程') && !w.contains('未检测到'))
+                  .map((w) => SettingsNote(w)),
+            if (!row.draft.likelyHomework)
+              const SettingsNote('未检测到明确作业描述，请核对后再勾选'),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('查看原文'),
+              children: [SelectableText(row.draft.sourceText)],
+            ),
+          ],
+        ),
       ),
-    ),
+    ],
   );
   String _format(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';

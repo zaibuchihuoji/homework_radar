@@ -92,7 +92,7 @@ void main() {
         find.byKey(const ValueKey('recognition_input')),
         '1. 【数学】原有练习\n2. 【英语】阅读第四单元，截止2026-10-23 20:00',
       );
-      await tester.tap(find.text('识别作业'));
+      await tester.tap(find.text('识别并核对'));
       await tester.pumpAndSettle();
       expect(
         tester.widget<Checkbox>(find.byKey(const ValueKey('select_0'))).value,
@@ -118,7 +118,7 @@ void main() {
       find.byKey(const ValueKey('recognition_input')),
       '1. 【数学】原有练习\n2. 【英语】阅读第四单元，截止2026-10-23 20:00',
     );
-    await tester.tap(find.text('识别作业'));
+    await tester.tap(find.text('识别并核对'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('course_1')), '大学英语');
     await tester.enterText(find.byKey(const ValueKey('title_1')), '修改后的阅读练习');
@@ -149,6 +149,9 @@ void main() {
       );
       await tester.tap(find.text('选择截图'));
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('select_0')), findsNothing);
+      await tester.tap(find.text('识别并核对'));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('select_0')), findsOneWidget);
       expect(find.textContaining('截止时间待确认'), findsOneWidget);
       expect(Storage.homework(), hasLength(1));
@@ -163,7 +166,7 @@ void main() {
       find.byKey(const ValueKey('recognition_input')),
       '【英语】阅读第四单元',
     );
-    await tester.tap(find.text('识别作业'));
+    await tester.tap(find.text('识别并核对'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('设置截止时间'));
     await tester.pumpAndSettle();
@@ -204,7 +207,7 @@ void main() {
       await tester.pumpWidget(harness(HomeworkRecognitionPage(state: state)));
       await tester.tap(find.text('粘贴文字'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('识别作业'));
+      await tester.tap(find.text('识别并核对'));
       await tester.pumpAndSettle();
       expect(
         tester.widget<Checkbox>(find.byKey(const ValueKey('select_0'))).value,

@@ -7,6 +7,7 @@ import 'style_background.dart';
 import 'theme_forms.dart';
 import 'theme_page_parts.dart';
 import 'tokens.dart';
+import 'focus_parts.dart';
 
 /// Settings presentation only. Persistence and actions stay in their pages.
 class SettingsScaffold extends StatelessWidget {
@@ -15,12 +16,14 @@ class SettingsScaffold extends StatelessWidget {
     required this.title,
     required this.body,
     this.actions,
+    this.bottomNavigationBar,
     this.root = false,
   });
 
   final String title;
   final Widget body;
   final List<Widget>? actions;
+  final Widget? bottomNavigationBar;
   final bool root;
 
   @override
@@ -33,10 +36,10 @@ class SettingsScaffold extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         backgroundColor: scaffoldBgOf(context),
         titleSpacing: root ? 24 : null,
-        toolbarHeight: root ? 72 : 64,
+        toolbarHeight: root ? 68 : 60,
         title: DefaultTextStyle.merge(
           style: TextStyle(
-            fontSize: root ? 27 : 20,
+            fontSize: root ? 25 : 19,
             fontWeight: FontWeight.w600,
             color: textPrimary(context),
           ),
@@ -47,6 +50,7 @@ class SettingsScaffold extends StatelessWidget {
         actions: actions,
       ),
       body: body,
+      bottomNavigationBar: bottomNavigationBar,
     ),
   );
 }
@@ -79,6 +83,23 @@ class SettingsSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: children,
     );
+    if (p.sunny) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (title != null) FocusSectionTitle(title!),
+            content,
+            if (footer != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SettingsNote(footer!),
+              ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Column(
@@ -106,8 +127,8 @@ class SettingsSection extends StatelessWidget {
           if (p.clean)
             Container(
               decoration: BoxDecoration(
-                color: cardColor(context),
-                borderRadius: BorderRadius.circular(18),
+                color: p.sunny ? bgColor(context) : cardColor(context),
+                borderRadius: BorderRadius.circular(p.sunny ? 12 : 18),
                 border: Border.all(
                   color: dividerColor(context).withValues(alpha: .5),
                 ),
@@ -192,7 +213,10 @@ class SettingsRow extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 64),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          padding: EdgeInsets.symmetric(
+            horizontal: p.sunny ? 0 : 16,
+            vertical: p.sunny ? 18 : 16,
+          ),
           child: Row(
             children: [
               if (icon != null) ...[
@@ -384,7 +408,7 @@ class SettingsAlertDialog extends StatelessWidget {
         ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(22))
         : themeModalShape(paletteOf(context)),
     insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-    titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 4),
+    titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 4),
     contentPadding: const EdgeInsets.fromLTRB(24, 14, 24, 20),
     actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
   );

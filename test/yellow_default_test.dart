@@ -15,7 +15,7 @@ double contrast(Color a, Color b) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
-    'default keeps the existing persisted key and uses a yellow main action',
+    'default keeps persisted key with dark commands and yellow accents',
     () async {
       SharedPreferences.setMockInitialValues({});
       await Storage.init();
@@ -24,13 +24,13 @@ void main() {
       final t = buildTheme(Brightness.light, style);
       expect(
         t.filledButtonTheme.style!.backgroundColor!.resolve({}),
-        const Color(0xFFFFE044),
+        const Color(0xFF202423),
       );
       expect(
         t.floatingActionButtonTheme.backgroundColor,
         const Color(0xFFFFE044),
       );
-      expect(t.scaffoldBackgroundColor, const Color(0xFFFFFBF0));
+      expect(t.scaffoldBackgroundColor, const Color(0xFFFFFFFF));
     },
   );
   test('green is independently selectable and retains the original light and dark palette', () {

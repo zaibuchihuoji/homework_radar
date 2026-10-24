@@ -286,12 +286,12 @@ class ThemedDialog extends StatelessWidget {
     final p = _formPalette(context);
     return Dialog(
       backgroundColor: p.clean ? backgroundColor : p.modal,
-      surfaceTintColor: p.clean ? null : Colors.transparent,
-      shape: p.clean ? shape : themeModalShape(p),
+      surfaceTintColor: Colors.transparent,
+      shape: p.clean ? (shape ?? themeModalShape(p)) : themeModalShape(p),
       clipBehavior: p.clean ? Clip.none : Clip.antiAlias,
       insetPadding:
           insetPadding ??
-          EdgeInsets.symmetric(horizontal: p.clean ? 40 : 20, vertical: 24),
+          EdgeInsets.symmetric(horizontal: p.clean ? 24 : 20, vertical: 24),
       child: child,
     );
   }
@@ -337,11 +337,13 @@ class ThemedAlertDialog extends StatelessWidget {
       content: content,
       actions: actions,
       backgroundColor: p.clean ? backgroundColor : p.modal,
-      surfaceTintColor: p.clean ? null : Colors.transparent,
-      shape: p.clean ? shape : themeModalShape(p),
+      surfaceTintColor: Colors.transparent,
+      shape: p.clean ? (shape ?? themeModalShape(p)) : themeModalShape(p),
       titlePadding:
           titlePadding ??
-          (p.clean ? null : const EdgeInsets.fromLTRB(20, 18, 20, 12)),
+          (p.clean
+              ? const EdgeInsets.fromLTRB(24, 24, 24, 4)
+              : const EdgeInsets.fromLTRB(20, 18, 20, 12)),
       contentPadding:
           contentPadding ?? const EdgeInsets.fromLTRB(24, 20, 24, 24),
       actionsPadding:
@@ -350,7 +352,7 @@ class ThemedAlertDialog extends StatelessWidget {
       actionsAlignment: actionsAlignment,
       insetPadding:
           insetPadding ??
-          EdgeInsets.symmetric(horizontal: p.clean ? 40 : 20, vertical: 24),
+          EdgeInsets.symmetric(horizontal: p.clean ? 24 : 20, vertical: 24),
       scrollable: scrollable,
     );
   }
@@ -403,9 +405,9 @@ class _ModalHeading extends StatelessWidget {
     );
     final heading = DefaultTextStyle.merge(
       style: TextStyle(
-        fontSize: p.editorial ? 23 : 19,
-        fontWeight: FontWeight.w800,
-        height: 1.25,
+        fontSize: p.editorial ? 23 : 20,
+        fontWeight: p.clean ? FontWeight.w600 : FontWeight.w800,
+        height: 1.35,
         color: p.ink,
         fontFamily: mono
             ? 'monospace'

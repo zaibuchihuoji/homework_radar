@@ -20,6 +20,7 @@ import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
 import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
+import '../ui/focus_parts.dart';
 import 'course_edit_sheet.dart';
 import 'jw_ocr_import_page.dart';
 import 'jw_preview_page.dart';
@@ -110,6 +111,8 @@ class TimetablePage extends StatefulWidget {
 }
 
 class _TimetablePageState extends State<TimetablePage> {
+  bool _agenda = false;
+  int _agendaDay = DateTime.now().weekday;
   int? _week; // 当前查看的周次；null = 跟随本周
   PageController? _pageController;
 
@@ -410,6 +413,10 @@ class _TimetablePageState extends State<TimetablePage> {
         : t0 == null
         ? ' · 时刻待配置'
         : ' · ${two(t0.hour)}:${two(t0.minute)} 开始';
+    if (paletteOf(context).sunny) {
+      _showFocusCourse(c, week, timeTail);
+      return;
+    }
     showDialog(
       context: context,
       builder: (dialogContext) => ThemedDialog(
@@ -658,6 +665,12 @@ class _TimetablePageState extends State<TimetablePage> {
               actions: [
                 IconButton(
                   tooltip: '手动添加课程',
+                  style: paletteOf(context).sunny
+                      ? IconButton.styleFrom(
+                          backgroundColor: paletteOf(context).accentFill,
+                          foregroundColor: paletteOf(context).onAccent,
+                        )
+                      : null,
                   onPressed: _addCourse,
                   icon: const Icon(Icons.add_rounded),
                 ),
@@ -788,6 +801,73 @@ class _TimetablePageState extends State<TimetablePage> {
 
   Widget _emptyPrompt(BuildContext context, AppState state) {
     final loggedIn = state.zfState != AccountState.notLoggedIn;
+    if (paletteOf(context).sunny) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+        children: [
+          FocusSummary(
+            eyebrow: '每周安排',
+            title: '从一张课表开始',
+            detail: loggedIn
+                ? (state.timetableMessage.isEmpty
+                      ? '还没有课表数据，可重新同步或手动添加课程。'
+                      : state.timetableMessage)
+                : '导入学校课表，或先添加一门课程。',
+            trailing: Icon(
+              Icons.calendar_view_week_outlined,
+              size: 30,
+              color: paletteOf(context).onAccent,
+            ),
+          ),
+          const FocusSectionTitle('添加课程'),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _sync,
+              icon: const Icon(Icons.sync_rounded, size: 19),
+              label: const Text('导入教务课表'),
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _addCourse,
+            icon: const Icon(Icons.add_rounded, size: 19),
+            label: const Text('手动添加课程'),
+          ),
+          const FocusSectionTitle('也可以从这里导入'),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.content_paste_outlined),
+            title: const Text('粘贴文本导入'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _fallbackImport(ocr: false),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.photo_outlined),
+            title: const Text('截图导入'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => _fallbackImport(ocr: true),
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.table_view_outlined),
+            title: const Text('导入 Excel 文件'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: _xlsImport,
+          ),
+          const SizedBox(height: 20),
+          Text(
+            '教务登录可能需要校园网或学校 VPN。',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.6,
+              color: textSecondary(context),
+            ),
+          ),
+        ],
+      );
+    }
     if (!isCleanStyle(context)) {
       return Center(
         child: SingleChildScrollView(
@@ -848,7 +928,7 @@ class _TimetablePageState extends State<TimetablePage> {
                   ? (state.timetableMessage.isEmpty
                         ? '点右上角同步按钮重新抓取；\n也可以点右上角 + 手动添加课程。'
                         : state.timetableMessage)
-                  : '像超级课程表一样，输入学校教务网址\n即可读取课程表，与作业截止一起看。\n教务需校园网或 VPN；打不开时可用文本/截图导入。',
+                  : '导入教务课表，或手动添加课程。\n教务需校园网或 VPN；打不开时可用文本/截图导入。',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -876,6 +956,7 @@ class _TimetablePageState extends State<TimetablePage> {
     AppState state,
     int? currentWeek,
   ) {
+    if (paletteOf(context).sunny) return _focusTimetable(state, currentWeek);
     final now = DateTime.now();
     final calibrateNeeded = currentWeek == null;
     final monday = _mondayOf(_displayWeek);
@@ -1035,6 +1116,318 @@ class _TimetablePageState extends State<TimetablePage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _focusTimetable(AppState state, int? currentWeek) {
+    final p = paletteOf(context);
+    final monday = _mondayOf(_displayWeek);
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 12, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  onTap: _pickSemesterStart,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '第 $_displayWeek 周',
+                        style: TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w600,
+                          color: p.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        monday == null
+                            ? '设置开学日期，校准周次'
+                            : '${monday.month}月${monday.day}日 — ${monday.add(const Duration(days: 6)).month}月${monday.add(const Duration(days: 6)).day}日',
+                        style: TextStyle(fontSize: 12, color: p.ink2),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '上一周',
+                onPressed: _displayWeek > 1
+                    ? () => _animateToWeek(_displayWeek - 1)
+                    : null,
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+              IconButton(
+                tooltip: '下一周',
+                onPressed: _displayWeek < _maxWeeks
+                    ? () => _animateToWeek(_displayWeek + 1)
+                    : null,
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: FocusViewSwitch(
+            labels: const ['周视图', '当日清单'],
+            selected: _agenda ? 1 : 0,
+            onChanged: (i) => setState(() => _agenda = i == 1),
+          ),
+        ),
+        if (currentWeek == null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+            child: _calibrateBanner(context),
+          ),
+        if (_agenda)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+            child: Row(
+              children: [
+                for (var d = 1; d <= 7; d++)
+                  Expanded(
+                    child: Semantics(
+                      selected: d == _agendaDay,
+                      child: InkWell(
+                        onTap: () => setState(() => _agendaDay = d),
+                        child: Container(
+                          constraints: const BoxConstraints(minHeight: 44),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: d == _agendaDay ? p.accentFill : null,
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: Text(
+                            '周${_weekdayNames[d - 1]}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: d == _agendaDay ? p.onAccent : p.ink2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        Expanded(
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: _maxWeeks,
+            onPageChanged: (page) => setState(
+              () =>
+                  _week = page + 1 == (_currentWeek() ?? 1).clamp(1, _maxWeeks)
+                  ? null
+                  : page + 1,
+            ),
+            itemBuilder: (context, page) => _agenda
+                ? _focusDayList(state, page + 1)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+                    child: _weekPage(
+                      context,
+                      state,
+                      page + 1,
+                      DateTime.now(),
+                      currentWeek,
+                    ),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _focusDayList(AppState state, int week) {
+    final p = paletteOf(context);
+    final courses =
+        state.courses
+            .where(
+              (c) =>
+                  c.weekday == _agendaDay &&
+                  (c.inWeek(week) || Storage.showNonWeekCourses()),
+            )
+            .toList()
+          ..sort((a, b) => a.startSection.compareTo(b.startSection));
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      children: [
+        FocusSectionTitle(
+          '周${_weekdayNames[_agendaDay - 1]}的安排',
+          detail: '${courses.length} 门课',
+        ),
+        if (courses.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 32),
+            child: Text(
+              '这一天没有课程',
+              style: TextStyle(fontSize: 18, color: p.ink2),
+            ),
+          ),
+        for (final c in courses)
+          InkWell(
+            onTap: () => _showCourseSheet(c, week),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 18),
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: p.hairline, width: .6),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 68,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _sectionTime(c.startSection),
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: p.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${c.startSection}–${c.endSection}节',
+                          style: TextStyle(fontSize: 12, color: p.ink2),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          c.name,
+                          style: TextStyle(
+                            fontSize: 17,
+                            height: 1.4,
+                            fontWeight: FontWeight.w600,
+                            color: p.ink,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          [
+                            if (c.room.isNotEmpty) c.room,
+                            if (c.teacher.isNotEmpty) c.teacher,
+                            if (!c.inWeek(week)) '非本周',
+                          ].join(' · '),
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.5,
+                            color: p.ink2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, size: 19, color: p.ink2),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  String _sectionTime(int section) {
+    final slot = SectionTimes.slotOf(section);
+    if (slot == null) return '待配置';
+    return '${(slot.$1 ~/ 60).toString().padLeft(2, '0')}:${(slot.$1 % 60).toString().padLeft(2, '0')}';
+  }
+
+  void _showFocusCourse(Course c, int week, String timeTail) {
+    showDialog<void>(
+      context: context,
+      builder: (dc) => ThemedDialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420, maxHeight: 660),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '课程详情',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: textSecondary(dc),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '关闭课程详情',
+                      onPressed: () => Navigator.of(dc).pop(),
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                    ),
+                  ],
+                ),
+                Text(
+                  c.name,
+                  style: TextStyle(
+                    fontSize: 24,
+                    height: 1.4,
+                    fontWeight: FontWeight.w600,
+                    color: textPrimary(dc),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FocusSummary(
+                  eyebrow: '周${_weekdayNames[c.weekday - 1]} · 第$week周',
+                  title: '第${c.startSection}–${c.endSection}节',
+                  detail: timeTail.isEmpty
+                      ? '周次未校准'
+                      : timeTail.replaceFirst(' · ', ''),
+                ),
+                const SizedBox(height: 18),
+                _sheetRow(dc, Icons.place_outlined, '教室', c.room),
+                _sheetRow(dc, Icons.person_outline_rounded, '教师', c.teacher),
+                _sheetRow(dc, Icons.date_range_outlined, '周次', c.weeksText),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(dc).pop();
+                      _editCourse(c);
+                    },
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: const Text('编辑课程'),
+                  ),
+                ),
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.of(dc).pop();
+                      _deleteCourse(c);
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(dc).colorScheme.error,
+                    ),
+                    child: const Text('删除课程'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

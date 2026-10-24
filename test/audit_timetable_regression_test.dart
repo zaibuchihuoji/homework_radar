@@ -265,6 +265,7 @@ void main() {
         300,
         scrollable: find.byType(Scrollable).first,
       );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('24:00'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);

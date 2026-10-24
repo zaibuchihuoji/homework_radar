@@ -122,10 +122,12 @@ void main() {
         final state = AppState();
         await show(tester, state, style, narrow: true);
         await tester.tap(
-          find.descendant(
-            of: find.byType(TableCalendar<HomeworkItem>),
-            matching: find.byIcon(Icons.chevron_right),
-          ),
+          style == ThemeStyle.clean
+              ? find.byTooltip('下个月')
+              : find.descendant(
+                  of: find.byType(TableCalendar<HomeworkItem>),
+                  matching: find.byIcon(Icons.chevron_right),
+                ),
         );
         await tester.pumpAndSettle();
         final next = tester

@@ -163,7 +163,7 @@ void main() {
         await tester.tap(settings);
         await tester.pumpAndSettle();
         expect(tester.widget<Semantics>(settings).properties.selected, isTrue);
-        expect(find.text('界面风格'), findsOneWidget);
+        expect(find.text('外观与小组件'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         state.dispose();

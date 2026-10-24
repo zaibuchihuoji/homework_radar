@@ -7,7 +7,9 @@ import 'package:image_picker/image_picker.dart';
 
 /// Bundled Chinese OCR; never uploads images or removes the selected original.
 class ImageTextReader {
-  static Future<String?> chooseAndRead() async {
+  static Future<String?> chooseAndRead({
+    void Function(String path)? onImageSelected,
+  }) async {
     final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
     if (picked == null) return null;
     if (await File(picked.path).length() > 30 * 1024 * 1024) {
@@ -42,8 +44,11 @@ class ImageTextReader {
           path = file.path;
         }
       }
-      return (await recognizer.processImage(InputImage.fromFilePath(path))).text
-          .trim();
+      final text = (await recognizer.processImage(
+        InputImage.fromFilePath(path),
+      )).text.trim();
+      onImageSelected?.call(picked.path);
+      return text;
     } finally {
       image?.dispose();
       codec?.dispose();

@@ -201,7 +201,7 @@ void main() {
     );
     await tester.pump();
     expect(find.text('offline task'), findsOneWidget);
-    expect(find.byType(FloatingActionButton), findsOneWidget);
+    expect(find.byTooltip('添加作业'), findsOneWidget);
     await tester.longPress(find.text('offline task'));
     await tester.pumpAndSettle();
     expect(find.text('标记完成'), findsOneWidget);

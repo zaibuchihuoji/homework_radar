@@ -11,6 +11,7 @@ import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
 import '../ui/theme_forms.dart';
 import '../ui/tokens.dart';
+import '../ui/focus_parts.dart';
 
 class JwSetupPage extends StatefulWidget {
   const JwSetupPage({super.key, this.initial});
@@ -197,6 +198,15 @@ class _JwSetupPageState extends State<JwSetupPage> {
             ? ListView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 children: [
+                  if (p.sunny)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 20),
+                      child: FocusSummary(
+                        eyebrow: '学校连接',
+                        title: '连接你的教务平台',
+                        detail: '填写学校名称和网址，再通过官方页面登录。',
+                      ),
+                    ),
                   Text(
                     '输入学校教务系统的网址，登录和进入课表页在下一步的浏览器里完成。\n'
                     '教务系统通常仅校园网或学校 VPN 可达。',
@@ -213,7 +223,7 @@ class _JwSetupPageState extends State<JwSetupPage> {
                   const SizedBox(height: 8),
                   Text(
                     '常见教务系统都支持：金智青果、正方、强智、URP 等；'
-                    '识别不了的表格格式可用「粘贴文本导入」或「截图导入」兑底。',
+                    '识别不了的表格格式可用「粘贴文本导入」或「截图导入」兜底。',
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.6,

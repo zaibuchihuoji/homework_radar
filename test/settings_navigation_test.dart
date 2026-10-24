@@ -71,6 +71,8 @@ void main() {
           expect(Storage.hiddenItems(), hiddenBefore);
           await tester.pageBack();
           await tester.pumpAndSettle();
+          await tester.ensureVisible(find.text('历史账号数据'));
+          await tester.pumpAndSettle();
           await tester.tap(find.text('历史账号数据'));
           await tester.pumpAndSettle();
           expect(find.text('暂无历史归档'), findsOneWidget);

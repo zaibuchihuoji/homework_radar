@@ -24,54 +24,60 @@ void main() {
     await Storage.init();
   });
 
-  testWidgets('overview counts only current semester unfinished work', (
-    tester,
-  ) async {
-    final now = DateTime.now();
-    final state = AppState()
-      ..homework = [
-        for (final status in HwStatus.values)
+  testWidgets(
+    'priority and filters count only current semester unfinished work',
+    (tester) async {
+      final now = DateTime.now();
+      final state = AppState()
+        ..homework = [
+          for (final status in HwStatus.values)
+            HomeworkItem(
+              id: status.name,
+              platform: PlatformKind.manual,
+              course: '高等数学',
+              title: '任务 ${status.name}',
+              status: status,
+              dueAt: DateTime(now.year, now.month, now.day, 23, 59, 59),
+            ),
           HomeworkItem(
-            id: status.name,
+            id: 'old',
             platform: PlatformKind.manual,
-            course: '高等数学',
-            title: '任务 ${status.name}',
-            status: status,
-            dueAt: DateTime(now.year, now.month, now.day, 23, 59, 59),
+            course: '旧课程',
+            title: '旧学期作业',
+            status: HwStatus.todo,
+            dueAt: DateTime(now.year - 2),
           ),
-        HomeworkItem(
-          id: 'old',
-          platform: PlatformKind.manual,
-          course: '旧课程',
-          title: '旧学期作业',
-          status: HwStatus.todo,
-          dueAt: DateTime(now.year - 2),
+          HomeworkItem(
+            id: 'no-date',
+            platform: PlatformKind.manual,
+            course: '英语',
+            title: '阅读练习',
+            status: HwStatus.todo,
+          ),
+        ];
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.light, ThemeStyle.clean),
+          home: HomePage(state: state, onGoAccounts: () {}),
         ),
-        HomeworkItem(
-          id: 'no-date',
-          platform: PlatformKind.manual,
-          course: '英语',
-          title: '阅读练习',
-          status: HwStatus.todo,
-        ),
-      ];
-    final semantics = tester.ensureSemantics();
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildTheme(Brightness.light, ThemeStyle.clean),
-        home: HomePage(state: state, onGoAccounts: () {}),
-      ),
-    );
-    expect(find.bySemanticsLabel('待完成 3 项，今天截止 2 项'), findsOneWidget);
-    await tester.tap(find.text('已完成'));
-    await tester.pumpAndSettle();
-    expect(find.text('任务 done'), findsOneWidget);
-    expect(find.text('阅读练习'), findsNothing);
-    expect(find.bySemanticsLabel('待完成 3 项，今天截止 2 项'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox());
-    semantics.dispose();
-    state.dispose();
-  });
+      );
+      expect(find.text('3'), findsOneWidget);
+      expect(find.byTooltip('今天截止 2 项'), findsOneWidget);
+      expect(find.text('旧学期作业'), findsNothing);
+      await tester.ensureVisible(find.text('已完成'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('已完成'));
+      await tester.pumpAndSettle();
+      expect(find.text('任务 done'), findsOneWidget);
+      expect(find.text('阅读练习'), findsNothing);
+      expect(find.text('3'), findsOneWidget);
+      expect(find.text('旧学期作业'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      semantics.dispose();
+      state.dispose();
+    },
+  );
 
   testWidgets('add action stays separated from navigation on a narrow phone', (
     tester,
@@ -92,7 +98,7 @@ void main() {
       (w) => w is Semantics && w.properties.label == '作业标签页',
     );
     expect(
-      tester.getRect(find.byType(FloatingActionButton)).bottom,
+      tester.getRect(find.byTooltip('添加作业')).bottom,
       lessThanOrEqualTo(tester.getRect(nav).top - 12),
     );
     await tester.tap(find.byTooltip('添加作业'));
@@ -162,6 +168,8 @@ void main() {
         home: HomePage(state: state, onGoAccounts: () {}),
       ),
     );
+    await tester.ensureVisible(find.text('已完成'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('已完成'));
     await tester.pumpAndSettle();
     expect(find.textContaining('98.5'), findsOneWidget);

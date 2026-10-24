@@ -216,7 +216,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
         : null,
     textTheme: TextTheme(
       bodyLarge: pal.clean
-          ? null
+          ? TextStyle(fontSize: 15, height: 1.5, color: pal.ink)
           : TextStyle(fontSize: 14, color: pal.ink, fontFamily: formFont),
       displayLarge: TextStyle(
         fontSize: 30,
@@ -235,7 +235,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
         fontWeight: FontWeight.w600,
         color: pal.ink,
       ),
-      bodyMedium: TextStyle(fontSize: 13, height: 1.5, color: pal.ink2),
+      bodyMedium: TextStyle(fontSize: 14, height: 1.5, color: pal.ink),
       labelMedium: TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w600,
@@ -247,13 +247,15 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       centerTitle: false,
+      toolbarHeight: 60,
+      titleSpacing: 20,
       foregroundColor: pal.ink,
       systemOverlayStyle: dark
           ? SystemUiOverlayStyle.light
           : SystemUiOverlayStyle.dark,
       titleTextStyle: TextStyle(
         fontSize: 20,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         color: pal.ink,
         fontFamily: pal.paper ? 'serif' : null,
         letterSpacing: pal.inkWash ? 5 : null,
@@ -342,11 +344,15 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
               ? (dark
                     ? Colors.white.withValues(alpha: 0.07)
                     : Colors.black.withValues(alpha: 0.05))
+              : pal.sunny && !dark
+              ? pal.ink
               : pal.accentFill,
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.disabled)
               ? (dark ? Tokens.ink2Dark : Tokens.ink2)
+              : pal.sunny && !dark
+              ? Colors.white
               : pal.onAccent,
         ),
         shape: WidgetStateProperty.all(

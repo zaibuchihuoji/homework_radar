@@ -112,7 +112,7 @@ void main() {
     final amoledLight = stylePalette(ThemeStyle.amoled, Brightness.light);
     expect(
       amoledLight.bg,
-      isNot(stylePalette(ThemeStyle.clean, Brightness.light).bg),
+      isNot(stylePalette(ThemeStyle.green, Brightness.light).bg),
       reason: '墨黑浅色必须是独立水墨语言，不能回退清夏',
     );
     expect(amoledLight.shadow, isNotEmpty, reason: '浅色墨晕负责卡面分层');
