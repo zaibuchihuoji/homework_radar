@@ -16,9 +16,9 @@ import '../services/section_times.dart';
 import '../services/stable_hash.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
+import '../ui/activity_icon.dart';
 import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
-import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
 import '../ui/focus_parts.dart';
 import 'course_edit_sheet.dart';
@@ -111,6 +111,7 @@ class TimetablePage extends StatefulWidget {
 }
 
 class _TimetablePageState extends State<TimetablePage> {
+  bool _syncing = false;
   bool _agenda = false;
   int _agendaDay = DateTime.now().weekday;
   int? _week; // 当前查看的周次；null = 跟随本周
@@ -197,6 +198,16 @@ class _TimetablePageState extends State<TimetablePage> {
   /// 抓取页只负责抓取，抓到后关闭并把结果带回来——校对页由本页推入，
   /// 绝不能垫在 WebView 平台视图之上（其原生视图残留会吞掉底部按钮触摸）。
   Future<void> _sync() async {
+    if (_syncing) return;
+    setState(() => _syncing = true);
+    try {
+      await _importFromSchool();
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  Future<void> _importFromSchool() async {
     if (!JwStore.hasConfig) {
       final cfg = await Navigator.of(
         context,
@@ -413,82 +424,7 @@ class _TimetablePageState extends State<TimetablePage> {
         : t0 == null
         ? ' · 时刻待配置'
         : ' · ${two(t0.hour)}:${two(t0.minute)} 开始';
-    if (paletteOf(context).sunny) {
-      _showFocusCourse(c, week, timeTail);
-      return;
-    }
-    showDialog(
-      context: context,
-      builder: (dialogContext) => ThemedDialog(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(24, 22, 24, 10),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ThemeEditorHeading(
-                    title: c.name,
-                    kicker: 'COURSE DETAILS',
-                    icon: Icons.school_outlined,
-                  ),
-                  const SizedBox(height: 12),
-                  _sheetRow(
-                    dialogContext,
-                    Icons.person_outline_rounded,
-                    '教师',
-                    c.teacher,
-                  ),
-                  _sheetRow(dialogContext, Icons.place_outlined, '教室', c.room),
-                  _sheetRow(
-                    dialogContext,
-                    Icons.view_week_outlined,
-                    '周次',
-                    c.weeksText,
-                  ),
-                  _sheetRow(
-                    dialogContext,
-                    Icons.schedule_rounded,
-                    '时间',
-                    '周${_weekdayNames[c.weekday - 1]} · 第${c.startSection}-${c.endSection}节'
-                        '$timeTail',
-                  ),
-                  Row(
-                    children: [
-                      TextButton.icon(
-                        onPressed: () {
-                          Navigator.of(dialogContext).pop();
-                          _editCourse(c);
-                        },
-                        icon: const Icon(Icons.edit_outlined, size: 18),
-                        label: const Text('编辑'),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: () {
-                          Navigator.of(dialogContext).pop();
-                          _deleteCourse(c);
-                        },
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 18,
-                        ),
-                        label: const Text('删除'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    _showFocusCourse(c, week, timeTail);
   }
 
   Widget _sheetRow(
@@ -665,19 +601,17 @@ class _TimetablePageState extends State<TimetablePage> {
               actions: [
                 IconButton(
                   tooltip: '手动添加课程',
-                  style: paletteOf(context).sunny
-                      ? IconButton.styleFrom(
-                          backgroundColor: paletteOf(context).accentFill,
-                          foregroundColor: paletteOf(context).onAccent,
-                        )
-                      : null,
+                  style: IconButton.styleFrom(
+                    backgroundColor: paletteOf(context).accentFill,
+                    foregroundColor: paletteOf(context).onAccent,
+                  ),
                   onPressed: _addCourse,
                   icon: const Icon(Icons.add_rounded),
                 ),
                 IconButton(
                   tooltip: '登录 / 同步课表',
                   onPressed: _sync,
-                  icon: const Icon(Icons.sync_rounded),
+                  icon: ActivityIcon(Icons.sync_rounded, active: _syncing),
                 ),
                 PopupMenuButton<String>(
                   tooltip: '更多',
@@ -753,201 +687,73 @@ class _TimetablePageState extends State<TimetablePage> {
     );
   }
 
-  /// 空态的几何小构图：白卡上一颗品牌色圆点 + 两条灰线，纯形状不搞插画。
-  Widget _emptyArt(BuildContext context) {
-    final line = dividerColor(context);
-    return Container(
-      width: 76,
-      height: 76,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: cardColor(context),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: Tokens.cardShadow(context),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: _brand(context),
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(height: 7),
-          Container(
-            width: 36,
-            height: 6,
-            decoration: BoxDecoration(
-              color: line,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Container(
-            width: 24,
-            height: 6,
-            decoration: BoxDecoration(
-              color: line,
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _emptyPrompt(BuildContext context, AppState state) {
     final loggedIn = state.zfState != AccountState.notLoggedIn;
-    if (paletteOf(context).sunny) {
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-        children: [
-          FocusSummary(
-            eyebrow: '每周安排',
-            title: '从一张课表开始',
-            detail: loggedIn
-                ? (state.timetableMessage.isEmpty
-                      ? '还没有课表数据，可重新同步或手动添加课程。'
-                      : state.timetableMessage)
-                : '导入学校课表，或先添加一门课程。',
-            trailing: Icon(
-              Icons.calendar_view_week_outlined,
-              size: 30,
-              color: paletteOf(context).onAccent,
-            ),
-          ),
-          const FocusSectionTitle('添加课程'),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _sync,
-              icon: const Icon(Icons.sync_rounded, size: 19),
-              label: const Text('导入教务课表'),
-            ),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _addCourse,
-            icon: const Icon(Icons.add_rounded, size: 19),
-            label: const Text('手动添加课程'),
-          ),
-          const FocusSectionTitle('也可以从这里导入'),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.content_paste_outlined),
-            title: const Text('粘贴文本导入'),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => _fallbackImport(ocr: false),
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.photo_outlined),
-            title: const Text('截图导入'),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => _fallbackImport(ocr: true),
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.table_view_outlined),
-            title: const Text('导入 Excel 文件'),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: _xlsImport,
-          ),
-          const SizedBox(height: 20),
-          Text(
-            '教务登录可能需要校园网或学校 VPN。',
-            style: TextStyle(
-              fontSize: 12,
-              height: 1.6,
-              color: textSecondary(context),
-            ),
-          ),
-        ],
-      );
-    }
-    if (!isCleanStyle(context)) {
-      return Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ThemePageHeader(
-                title: loggedIn ? '还没有课表数据' : '导入教务课表',
-                kicker: 'CLASS SCHEDULE',
-                summary: loggedIn
-                    ? (state.timetableMessage.isEmpty
-                          ? '同步教务课表，或手动添加课程，开始安排每周的学习。'
-                          : state.timetableMessage)
-                    : '读取课程表，与作业截止一起看。教务需校园网或 VPN；打不开时可用文本、截图或 Excel 导入。',
-                icon: Icons.calendar_view_week_outlined,
-              ),
-              const SizedBox(height: 20),
-              if (!loggedIn)
-                FilledButton(onPressed: _sync, child: const Text('导入教务课表')),
-              TextButton.icon(
-                onPressed: _addCourse,
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('手动添加课程'),
-              ),
-            ],
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      children: [
+        FocusSummary(
+          eyebrow: '每周安排',
+          title: '从一张课表开始',
+          detail: loggedIn
+              ? (state.timetableMessage.isEmpty
+                    ? '还没有课表数据，可重新同步或手动添加课程。'
+                    : state.timetableMessage)
+              : '导入学校课表，或先添加一门课程。',
+          trailing: Icon(
+            Icons.calendar_view_week_outlined,
+            size: 30,
+            color: paletteOf(context).onAccent,
           ),
         ),
-      );
-    }
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 水墨：空态挂一幅远山，不用几何小卡
-            if (isInkStyle(context))
-              const SizedBox(
-                width: 260,
-                height: 100,
-                child: InkMountains(height: 100),
-              )
-            else
-              _emptyArt(context),
-            const SizedBox(height: 16),
-            Text(
-              loggedIn ? '还没有课表数据' : '导入教务课表',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: textPrimary(context),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              loggedIn
-                  ? (state.timetableMessage.isEmpty
-                        ? '点右上角同步按钮重新抓取；\n也可以点右上角 + 手动添加课程。'
-                        : state.timetableMessage)
-                  : '导入教务课表，或手动添加课程。\n教务需校园网或 VPN；打不开时可用文本/截图导入。',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.7,
-                color: textSecondary(context),
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (!loggedIn)
-              FilledButton(onPressed: _sync, child: const Text('导入教务课表')),
-            const SizedBox(height: 4),
-            TextButton.icon(
-              onPressed: _addCourse,
-              icon: const Icon(Icons.add_rounded, size: 18),
-              label: const Text('手动添加课程'),
-            ),
-          ],
+        const FocusSectionTitle('添加课程'),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _sync,
+            icon: ActivityIcon(Icons.sync_rounded, active: _syncing, size: 19),
+            label: const Text('导入教务课表'),
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _addCourse,
+          icon: const Icon(Icons.add_rounded, size: 19),
+          label: const Text('手动添加课程'),
+        ),
+        const FocusSectionTitle('也可以从这里导入'),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.content_paste_outlined),
+          title: const Text('粘贴文本导入'),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => _fallbackImport(ocr: false),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.photo_outlined),
+          title: const Text('截图导入'),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => _fallbackImport(ocr: true),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.table_view_outlined),
+          title: const Text('导入 Excel 文件'),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: _xlsImport,
+        ),
+        const SizedBox(height: 20),
+        Text(
+          '教务登录可能需要校园网或学校 VPN。',
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.6,
+            color: textSecondary(context),
+          ),
+        ),
+      ],
     );
   }
 
@@ -956,167 +762,7 @@ class _TimetablePageState extends State<TimetablePage> {
     AppState state,
     int? currentWeek,
   ) {
-    if (paletteOf(context).sunny) return _focusTimetable(state, currentWeek);
-    final now = DateTime.now();
-    final calibrateNeeded = currentWeek == null;
-    final monday = _mondayOf(_displayWeek);
-
-    return Column(
-      children: [
-        // ---- 周切换条（大数字月份 + 箭头 + 周次胶囊）----
-        if (!isCleanStyle(context))
-          _themedWeekBar(context, state, currentWeek, monday)
-        else
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 52,
-                  child: monday == null
-                      ? null
-                      : Text.rich(
-                          TextSpan(
-                            children: [
-                              TextSpan(
-                                text: '${monday.month}',
-                                style: TextStyle(
-                                  fontSize: 26,
-                                  height: 1.1,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: -0.5,
-                                  color: textPrimary(context),
-                                ),
-                              ),
-                              TextSpan(
-                                text: '月',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: textSecondary(context),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  onPressed: _displayWeek > 1
-                      ? () => _animateToWeek(_displayWeek - 1)
-                      : null,
-                  icon: Icon(
-                    Icons.chevron_left_rounded,
-                    size: 22,
-                    color: textSecondary(context),
-                  ),
-                ),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: currentWeek != null
-                        ? () => _animateToWeek(currentWeek)
-                        : _pickSemesterStart,
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            // 小票：周次是打印的方框单号，不是胶囊
-                            borderRadius: BorderRadius.circular(
-                              isReceiptStyle(context) ? 2 : 999,
-                            ),
-                            border: Border.all(
-                              color: _brand(context),
-                              width: currentWeek != null ? 1.2 : 0,
-                            ),
-                            color: currentWeek != null
-                                ? Colors.transparent
-                                : dividerColor(context),
-                          ),
-                          child: Text(
-                            calibrateNeeded ? '周次未校准' : '第$_displayWeek周',
-                            style: monoText(
-                              context,
-                              TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: isReceiptStyle(context)
-                                    ? 1
-                                    : null,
-                                color: currentWeek != null
-                                    ? _brand(context)
-                                    : textSecondary(context),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          monday == null
-                              ? '点击设置开学时间'
-                              : '${monday.month}/${monday.day} - '
-                                    '${monday.add(const Duration(days: 6)).month}/'
-                                    '${monday.add(const Duration(days: 6)).day}'
-                                    '${currentWeek != null && _displayWeek == currentWeek ? ' · 本周' : ''}',
-                          style: monoText(
-                            context,
-                            TextStyle(
-                              fontSize: 11.5,
-                              color: textSecondary(context),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  onPressed: _displayWeek < _maxWeeks
-                      ? () => _animateToWeek(_displayWeek + 1)
-                      : null,
-                  icon: Icon(
-                    Icons.chevron_right_rounded,
-                    size: 22,
-                    color: textSecondary(context),
-                  ),
-                ),
-                const SizedBox(width: 52),
-              ],
-            ),
-          ),
-        if (calibrateNeeded)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: _calibrateBanner(context),
-          ),
-        // ---- 网格主体：整周一页（节次列随内容一起滚动），星期列随周次翻页 ----
-        Expanded(
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(10, 2, 10, 10),
-            clipBehavior: Clip.antiAlias,
-            // 水墨：整张课表是一张墨洗卡（笔锋圆角+浓淡墨渐变）；
-            // 小票：整周课表是一张热敏大单（底边撕纸）
-            decoration: _gridDecoration(context),
-            child: PageView.builder(
-              controller: _pageController,
-              itemCount: _maxWeeks,
-              onPageChanged: (page) => setState(
-                () => _week =
-                    page + 1 == (_currentWeek() ?? 1).clamp(1, _maxWeeks)
-                    ? null
-                    : page + 1,
-              ),
-              itemBuilder: (context, page) =>
-                  _weekPage(context, state, page + 1, now, currentWeek),
-            ),
-          ),
-        ),
-      ],
-    );
+    return _focusTimetable(state, currentWeek);
   }
 
   Widget _focusTimetable(AppState state, int? currentWeek) {
@@ -1147,6 +793,11 @@ class _TimetablePageState extends State<TimetablePage> {
                         monday == null
                             ? '设置开学日期，校准周次'
                             : '${monday.month}月${monday.day}日 — ${monday.add(const Duration(days: 6)).month}月${monday.add(const Duration(days: 6)).day}日',
+                        style: TextStyle(fontSize: 12, color: p.ink2),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${state.courses.where((c) => c.inWeek(_displayWeek)).map((c) => c.name).toSet().length} 门课程',
                         style: TextStyle(fontSize: 12, color: p.ink2),
                       ),
                     ],
@@ -1445,300 +1096,6 @@ class _TimetablePageState extends State<TimetablePage> {
     return p.sunny ? ThemeStyle.clean : ThemeStyle.green;
   }
 
-  Decoration _gridDecoration(BuildContext context) {
-    final p = paletteOf(context);
-    if (p.inkWash) return inkWashFill(context, 12)!;
-    if (p.receipt) return receiptTear(context)!;
-    return BoxDecoration(
-      color: cardColor(context),
-      borderRadius: BorderRadius.circular(
-        p.pixel || p.terminal || p.editorial
-            ? 0
-            : p.morandi
-            ? 22
-            : 12,
-      ),
-      border: p.clean || p.morandi
-          ? null
-          : Border.all(color: p.cardBorder, width: p.comic ? 2 : 1),
-      boxShadow: Tokens.cardShadow(context),
-    );
-  }
-
-  /// Keep the theme's identity in the control strip; all styles share the same
-  /// paging callbacks and leave the timetable's section geometry untouched.
-  Widget _themedWeekBar(
-    BuildContext context,
-    AppState state,
-    int? currentWeek,
-    DateTime? monday,
-  ) {
-    final style = _timetableStyle(context);
-    final p = paletteOf(context);
-    final count = state.courses
-        .where((c) => c.inWeek(_displayWeek))
-        .map((c) => c.name)
-        .toSet()
-        .length;
-    final end = monday?.add(const Duration(days: 6));
-    final date = monday == null
-        ? '点击设置开学时间'
-        : '${monday.month}/${monday.day} — ${end!.month}/${end.day}'
-              '${_displayWeek == currentWeek ? ' · 本周' : ''}';
-    final heading = switch (style) {
-      ThemeStyle.morandi => 'WEEKLY PALETTE',
-      ThemeStyle.pixel => 'STAGE / ${_displayWeek.toString().padLeft(2, '0')}',
-      ThemeStyle.amoled => '课 · 记',
-      ThemeStyle.paper => 'WEEKLY STUDY NOTES',
-      ThemeStyle.comic => '这周的上课计划！',
-      ThemeStyle.receipt => 'COURSE RECEIPT',
-      ThemeStyle.editorial => 'THE WEEK / 课程编排',
-      ThemeStyle.terminal => '> timetable --week $_displayWeek',
-      ThemeStyle.journal => 'MY STUDY JOURNAL',
-      ThemeStyle.clean || ThemeStyle.green => '',
-    };
-    final mono =
-        style == ThemeStyle.pixel ||
-        style == ThemeStyle.receipt ||
-        style == ThemeStyle.terminal;
-    final serif =
-        style == ThemeStyle.paper ||
-        style == ThemeStyle.amoled ||
-        style == ThemeStyle.editorial;
-    final ink = p.ink;
-    final titleStyle = TextStyle(
-      color: ink,
-      fontSize: style == ThemeStyle.editorial ? 22 : 17,
-      fontWeight: FontWeight.w800,
-      fontFamily: mono
-          ? 'monospace'
-          : serif
-          ? 'serif'
-          : null,
-      letterSpacing: style == ThemeStyle.receipt ? 2 : null,
-      height: 1.15,
-    );
-    final title = GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: currentWeek != null
-          ? () => _animateToWeek(currentWeek)
-          : _pickSemesterStart,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: style == ThemeStyle.receipt
-            ? CrossAxisAlignment.center
-            : CrossAxisAlignment.start,
-        children: [
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              currentWeek == null ? '周次未校准' : '第$_displayWeek周',
-              style: titleStyle,
-            ),
-          ),
-          const SizedBox(height: 3),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              date,
-              style: TextStyle(
-                color: p.ink2,
-                fontSize: 10,
-                fontFamily: mono ? 'monospace' : null,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-    Widget arrow(bool next) => IconButton(
-      tooltip: next ? '下一周' : '上一周',
-      onPressed: (next ? _displayWeek < _maxWeeks : _displayWeek > 1)
-          ? () => _animateToWeek(_displayWeek + (next ? 1 : -1))
-          : null,
-      icon: Icon(
-        next ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
-        color: p.ink2,
-        size: 22,
-      ),
-    );
-    final controls = Row(
-      children: [
-        arrow(false),
-        Expanded(child: title),
-        const SizedBox(width: 6),
-        Flexible(
-          flex: 0,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              '$count 门课程',
-              style: TextStyle(
-                fontSize: 10,
-                fontFamily: mono ? 'monospace' : null,
-                fontWeight: FontWeight.w600,
-                color: p.ink2,
-              ),
-            ),
-          ),
-        ),
-        arrow(true),
-      ],
-    );
-    final frame = switch (style) {
-      ThemeStyle.morandi => BoxDecoration(
-        color: p.card,
-        borderRadius: BorderRadius.circular(22),
-        gradient: LinearGradient(
-          colors: [p.card, p.accentFill.withValues(alpha: .09)],
-        ),
-      ),
-      ThemeStyle.pixel => BoxDecoration(
-        color: p.card,
-        border: Border.all(color: p.ink, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: p.ink.withValues(alpha: .18),
-            offset: const Offset(3, 3),
-          ),
-        ],
-      ),
-      ThemeStyle.amoled => inkWashFill(context, 10)!,
-      ThemeStyle.paper => BoxDecoration(
-        color: p.card,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: p.cardBorder),
-      ),
-      ThemeStyle.comic => BoxDecoration(
-        color: Color.alphaBlend(p.accentFill.withValues(alpha: .13), p.card),
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-          bottomRight: Radius.circular(20),
-          bottomLeft: Radius.circular(3),
-        ),
-        border: Border.all(color: p.ink, width: 2),
-        boxShadow: [BoxShadow(color: p.ink, offset: const Offset(2, 3))],
-      ),
-      ThemeStyle.receipt => receiptTear(context)!,
-      ThemeStyle.editorial => BoxDecoration(
-        color: p.card,
-        border: Border(
-          left: BorderSide(color: p.accent, width: 4),
-          bottom: BorderSide(color: p.ink, width: 2),
-        ),
-      ),
-      ThemeStyle.terminal => BoxDecoration(
-        color: p.card,
-        border: Border.all(color: p.accentFill.withValues(alpha: .6)),
-      ),
-      ThemeStyle.journal => BoxDecoration(
-        color: p.card,
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: p.cardBorder),
-        boxShadow: [
-          BoxShadow(
-            color: p.ink.withValues(alpha: .10),
-            offset: const Offset(2, 3),
-          ),
-        ],
-      ),
-      ThemeStyle.clean || ThemeStyle.green => const BoxDecoration(),
-    };
-    final cap = Row(
-      mainAxisAlignment: style == ThemeStyle.receipt
-          ? MainAxisAlignment.center
-          : MainAxisAlignment.start,
-      children: [
-        if (style == ThemeStyle.morandi) ...[
-          for (final color in [p.accent, p.ink3, p.cardBorder])
-            Container(
-              width: 9,
-              height: 9,
-              margin: const EdgeInsets.only(right: 4),
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-          const SizedBox(width: 4),
-        ],
-        if (style == ThemeStyle.pixel || style == ThemeStyle.terminal) ...[
-          Icon(
-            style == ThemeStyle.pixel
-                ? Icons.videogame_asset_outlined
-                : Icons.terminal,
-            color: style == ThemeStyle.pixel ? p.card : p.accent,
-            size: 12,
-          ),
-          const SizedBox(width: 6),
-        ],
-        Flexible(
-          child: Text(
-            heading,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 9,
-              height: 1.3,
-              letterSpacing: mono ? .5 : 1,
-              fontFamily: mono
-                  ? 'monospace'
-                  : serif
-                  ? 'serif'
-                  : null,
-              fontWeight: FontWeight.w700,
-              color: style == ThemeStyle.pixel ? p.card : p.ink2,
-            ),
-          ),
-        ),
-        if (style == ThemeStyle.amoled) ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.all(2),
-            color: p.accent,
-            child: Text('课', style: TextStyle(fontSize: 9, color: p.onAccent)),
-          ),
-        ],
-      ],
-    );
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 9),
-      decoration: frame,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: double.infinity,
-            margin: EdgeInsets.only(
-              left: style == ThemeStyle.journal ? 28 : 0,
-              right: style == ThemeStyle.journal ? 28 : 0,
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: style == ThemeStyle.pixel
-                  ? p.ink
-                  : style == ThemeStyle.journal
-                  ? p.accentFill.withValues(alpha: .13)
-                  : null,
-              border:
-                  style == ThemeStyle.paper ||
-                      style == ThemeStyle.receipt ||
-                      style == ThemeStyle.terminal
-                  ? Border(bottom: BorderSide(color: p.cardBorder))
-                  : null,
-            ),
-            child: cap,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: controls,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 一周的整页：星期表头 + 节次列 + 7 列网格（同一滚动容器，
-  /// 左侧节次/时间栏与课程行永远对齐——固定栏的老实现不随网格滚动，
-  /// 小屏第 9 节以后被 Stack 硬裁剪、滚动后与课程行错位）。
   Widget _weekPage(
     BuildContext context,
     AppState state,
@@ -2089,85 +1446,7 @@ class _TimetablePageState extends State<TimetablePage> {
     final dateText = monday == null
         ? ''
         : '${monday.add(Duration(days: d - 1)).day}';
-    if (!isCleanStyle(context)) {
-      final p = paletteOf(context);
-      final mono = p.pixel || p.receipt || p.terminal;
-      final dateFirst = p.editorial || p.paper || p.journal;
-      final fg = isToday ? p.accent : p.ink2;
-      final day = Text(
-        p.terminal ? '[${_weekdayNames[d - 1]}]' : '周${_weekdayNames[d - 1]}',
-        maxLines: 1,
-        style: TextStyle(
-          fontSize: 10,
-          height: 1.1,
-          fontFamily: mono
-              ? 'monospace'
-              : p.paper
-              ? 'serif'
-              : null,
-          fontWeight: isToday ? FontWeight.w800 : FontWeight.w500,
-          color: fg,
-        ),
-      );
-      final date = Container(
-        constraints: const BoxConstraints(minWidth: 20),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-        decoration: BoxDecoration(
-          color: isToday && !p.editorial ? p.accentFill : null,
-          border: isToday && (p.journal || p.comic)
-              ? Border.all(color: p.ink, width: 1)
-              : null,
-          borderRadius: BorderRadius.circular(
-            p.pixel || p.receipt || p.terminal || p.inkWash
-                ? 1
-                : p.morandi
-                ? 99
-                : 4,
-          ),
-        ),
-        child: Text(
-          dateText.isEmpty ? '·' : dateText,
-          style: TextStyle(
-            fontSize: p.editorial ? 17 : 13,
-            height: 1.0,
-            fontFamily: mono
-                ? 'monospace'
-                : p.paper || p.inkWash
-                ? 'serif'
-                : null,
-            fontWeight: FontWeight.w700,
-            color: isToday && !p.editorial ? p.onAccent : p.ink,
-          ),
-        ),
-      );
-      return Container(
-        alignment: Alignment.center,
-        margin: const EdgeInsets.symmetric(horizontal: 1),
-        decoration: BoxDecoration(
-          color: p.pixel || p.terminal ? p.ink.withValues(alpha: .05) : null,
-          border: p.editorial || p.paper || p.receipt || p.journal
-              ? Border(
-                  bottom: BorderSide(
-                    color: isToday ? p.accent : p.cardBorder,
-                    width: isToday ? 2 : 1,
-                  ),
-                )
-              : null,
-        ),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (dateFirst) date else day,
-              const SizedBox(height: 2),
-              if (dateFirst) day else date,
-            ],
-          ),
-        ),
-      );
-    }
+
     return FittedBox(
       fit: BoxFit.scaleDown,
       child: Column(

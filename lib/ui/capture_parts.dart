@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'adaptive.dart';
 import 'settings_parts.dart';
-import 'tokens.dart';
 
 /// Shared presentation for capture and review; all actions stay in the pages.
 class CaptureHeading extends StatelessWidget {
@@ -20,19 +19,6 @@ class CaptureHeading extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!paletteOf(context).sunny)
-          Text(
-            step,
-            style: monoText(
-              context,
-              TextStyle(
-                fontSize: 11,
-                color: textSecondary(context),
-                letterSpacing: .8,
-              ),
-            ),
-          ),
-        if (!paletteOf(context).sunny) const SizedBox(height: 9),
         Text(
           title,
           style: serifTitle(
@@ -40,7 +26,7 @@ class CaptureHeading extends StatelessWidget {
             monoText(
               context,
               TextStyle(
-                fontSize: paletteOf(context).sunny ? 21 : 24,
+                fontSize: 21,
                 height: 1.35,
                 fontWeight: FontWeight.w600,
                 color: textPrimary(context),

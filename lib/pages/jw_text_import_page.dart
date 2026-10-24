@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../ui/focus_parts.dart';
-import '../ui/tokens.dart';
 import '../ui/adaptive.dart';
 import '../models/course.dart';
 import '../services/timetable_text_parser.dart';
@@ -146,7 +145,7 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
               children: [
-                if (paletteOf(context).sunny) ...[
+                ...[
                   const FocusSummary(
                     eyebrow: '文本导入',
                     title: '粘贴课表，核对后添加',
@@ -157,8 +156,7 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
                     title: const Text('使用说明'),
                     children: [guide],
                   ),
-                ] else
-                  guide,
+                ],
                 const SizedBox(height: 12),
                 TextField(
                   controller: _ctrl,

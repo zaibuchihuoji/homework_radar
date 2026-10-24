@@ -17,7 +17,6 @@ import '../services/zhihuishu_service.dart';
 import '../ui/adaptive.dart';
 import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
-import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
 
 class WebviewLoginPage extends StatefulWidget {
@@ -314,90 +313,6 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
     }
   }
 
-  Widget _themedBody(BuildContext context) {
-    final p = paletteOf(context);
-    return LayoutBuilder(
-      builder: (context, constraints) => Column(
-        children: [
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: p.card,
-                border: cardBorderOf(context),
-                borderRadius: BorderRadius.circular(
-                  p.pixel || p.terminal || p.receipt || p.editorial ? 0 : 10,
-                ),
-              ),
-              foregroundDecoration: pixelFrame(context, 0),
-              child: WebViewWidget(controller: _controller),
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: constraints.maxHeight * .42,
-              ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: ThemePanel(
-                  seed: 'login-status',
-                  label: p.terminal
-                      ? '~/login/status'
-                      : p.pixel
-                      ? 'LOGIN / STATUS'
-                      : '账号登录 · 状态',
-                  icon: Icons.lock_outline_rounded,
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_trying)
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: p.accent,
-                          ),
-                        )
-                      else
-                        Icon(
-                          _saveFailed
-                              ? Icons.error_outline_rounded
-                              : Icons.info_outline_rounded,
-                          size: 17,
-                          color: p.accent,
-                        ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          _status,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            height: 1.4,
-                            color: p.ink2,
-                            fontFamily: p.terminal || p.receipt || p.pixel
-                                ? 'monospace'
-                                : p.paper || p.journal
-                                ? 'serif'
-                                : null,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final p = paletteOf(context);
@@ -427,53 +342,51 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
             ),
           ],
         ),
-        body: p.clean
-            ? Column(
-                children: [
-                  Expanded(child: WebViewWidget(controller: _controller)),
-                  SafeArea(
-                    top: false,
-                    child: Container(
-                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: cardColor(context),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x14101828),
-                            blurRadius: 14,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        children: [
-                          const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              _status,
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                color: Colors.grey.shade700,
-                              ),
-                            ),
-                          ),
-                        ],
+        body: Column(
+          children: [
+            Expanded(child: WebViewWidget(controller: _controller)),
+            SafeArea(
+              top: false,
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: cardColor(context),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x14101828),
+                      blurRadius: 14,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _status,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: textSecondary(context),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              )
-            : _themedBody(context),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

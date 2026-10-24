@@ -11,7 +11,6 @@ import 'package:image_picker/image_picker.dart';
 
 import '../app_state.dart';
 import '../ui/focus_parts.dart';
-import '../ui/tokens.dart';
 import '../ui/adaptive.dart';
 import '../models/course.dart';
 import '../services/timetable_ocr.dart';
@@ -230,7 +229,7 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: [
-          if (paletteOf(context).sunny) ...[
+          ...[
             const FocusSummary(
               eyebrow: '截图导入',
               title: '从截图读取课程',
@@ -241,8 +240,7 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
               title: const Text('使用说明'),
               children: [guide],
             ),
-          ] else
-            guide,
+          ],
           const SizedBox(height: 20),
           FilledButton.icon(
             onPressed: _busy ? null : _pickAndRun,

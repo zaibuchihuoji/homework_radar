@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'adaptive.dart';
-import 'dashed_line.dart';
-import 'ink_wash.dart';
 import 'tokens.dart';
 
 StylePalette _formPalette(BuildContext context) =>
@@ -291,7 +288,7 @@ class ThemedDialog extends StatelessWidget {
       clipBehavior: p.clean ? Clip.none : Clip.antiAlias,
       insetPadding:
           insetPadding ??
-          EdgeInsets.symmetric(horizontal: p.clean ? 24 : 20, vertical: 24),
+          const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: child,
     );
   }
@@ -333,7 +330,7 @@ class ThemedAlertDialog extends StatelessWidget {
               kicker: 'CONFIRM / OPTIONS',
               icon: icon,
             ),
-      icon: p.clean ? icon : null,
+      icon: icon,
       content: content,
       actions: actions,
       backgroundColor: p.clean ? backgroundColor : p.modal,
@@ -341,18 +338,14 @@ class ThemedAlertDialog extends StatelessWidget {
       shape: p.clean ? (shape ?? themeModalShape(p)) : themeModalShape(p),
       titlePadding:
           titlePadding ??
-          (p.clean
-              ? const EdgeInsets.fromLTRB(24, 24, 24, 4)
-              : const EdgeInsets.fromLTRB(20, 18, 20, 12)),
+          const EdgeInsets.fromLTRB(24, 24, 24, 4),
       contentPadding:
           contentPadding ?? const EdgeInsets.fromLTRB(24, 20, 24, 24),
-      actionsPadding:
-          actionsPadding ??
-          (p.clean ? null : const EdgeInsets.fromLTRB(16, 0, 16, 12)),
+      actionsPadding: actionsPadding,
       actionsAlignment: actionsAlignment,
       insetPadding:
           insetPadding ??
-          EdgeInsets.symmetric(horizontal: p.clean ? 24 : 20, vertical: 24),
+          const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       scrollable: scrollable,
     );
   }
@@ -392,168 +385,28 @@ class _ModalHeading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = _formPalette(context);
-    final mono = p.pixel || p.receipt || p.terminal;
-    final label = Text(
-      kicker,
-      style: TextStyle(
-        fontSize: 8.5,
-        height: 1.3,
-        letterSpacing: .6,
-        color: p.ink2,
-        fontFamily: mono ? 'monospace' : null,
-      ),
-    );
-    final heading = DefaultTextStyle.merge(
-      style: TextStyle(
-        fontSize: p.editorial ? 23 : 20,
-        fontWeight: p.clean ? FontWeight.w600 : FontWeight.w800,
-        height: 1.35,
-        color: p.ink,
-        fontFamily: mono
-            ? 'monospace'
-            : p.paper || p.journal || p.inkWash
-            ? 'serif'
-            : null,
-      ),
-      child: title,
-    );
-    if (p.clean) return heading;
-    Widget top = label;
-    if (p.pixel || p.terminal) {
-      top = Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        color: p.ink,
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                kicker,
-                style: TextStyle(
-                  color: p.modal,
-                  fontSize: 9,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-            ExcludeSemantics(
-              child: Text(
-                p.pixel ? '▪ ▪' : '— □ ×',
-                style: TextStyle(color: p.modal, fontSize: 9),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    Widget body = Column(
+    return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: p.receipt
-          ? CrossAxisAlignment.center
-          : CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        top,
-        const SizedBox(height: 7),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            if (p.terminal || p.pixel) ...[
-              Text(
-                p.terminal ? '> ' : '+ ',
-                style: TextStyle(
-                  color: p.accent,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              const SizedBox(width: 2),
-            ],
-            if (p.editorial)
-              Container(
-                width: 3,
-                height: 24,
-                color: p.accent,
-                margin: const EdgeInsets.only(right: 9),
-              ),
-            if (icon != null && !p.receipt) ...[
-              IconTheme(
-                data: IconThemeData(color: p.accent, size: 19),
-                child: icon!,
-              ),
-              const SizedBox(width: 8),
-            ],
-            Expanded(
-              child: DefaultTextStyle.merge(
-                textAlign: p.receipt ? TextAlign.center : TextAlign.start,
-                child: heading,
-              ),
-            ),
-            if (p.inkWash)
-              const Padding(
-                padding: EdgeInsets.only(left: 8),
-                child: InkSealChip(glyph: '记', size: 19),
-              ),
-          ],
+        DefaultTextStyle.merge(
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: p.comic ? FontWeight.w800 : FontWeight.w600,
+            height: 1.35,
+            color: p.ink,
+          ),
+          child: title,
         ),
         if (summary != null) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Text(
             summary!,
-            style: TextStyle(fontSize: 11.5, color: p.ink2, height: 1.45),
+            style: TextStyle(fontSize: 13, height: 1.5, color: p.ink2),
           ),
         ],
-        const SizedBox(height: 9),
-        if (p.paper || p.receipt)
-          DashedLine(color: p.cardBorder)
-        else if (p.inkWash)
-          BrushLine(color: p.ink.withValues(alpha: .4))
-        else if (p.editorial || p.terminal)
-          Container(height: p.editorial ? 2 : 1, color: p.ink)
-        else if (p.morandi)
-          Row(
-            children: [
-              for (final c in [p.accent, p.ink3, p.cardBorder])
-                Container(
-                  width: 20,
-                  height: 3,
-                  margin: const EdgeInsets.only(right: 4),
-                  color: c,
-                ),
-            ],
-          ),
       ],
     );
-    if (p.comic) {
-      body = Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BubbleDecoration(
-          fillColor: Color.alphaBlend(
-            p.accentFill.withValues(alpha: .075),
-            p.modal,
-          ),
-          borderColor: p.ink,
-          borderWidth: 1.5,
-        ),
-        child: body,
-      );
-    }
-    if (p.journal) {
-      body = Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            top: -5,
-            right: 8,
-            child: ExcludeSemantics(
-              child: journalTape(context, kicker, width: 44),
-            ),
-          ),
-          body,
-        ],
-      );
-    }
-    return body;
   }
 }
 

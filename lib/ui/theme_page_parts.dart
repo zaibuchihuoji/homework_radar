@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/stable_hash.dart';
 import 'adaptive.dart';
+import 'activity_icon.dart';
 import 'dashed_line.dart';
 import 'ink_wash.dart';
 import 'tokens.dart';
@@ -613,13 +614,18 @@ class ThemePanel extends StatelessWidget {
 }
 
 class ThemePreferenceIcon extends StatelessWidget {
-  const ThemePreferenceIcon({super.key, required this.icon});
+  const ThemePreferenceIcon({
+    super.key,
+    required this.icon,
+    this.spinning = false,
+  });
   final IconData icon;
+  final bool spinning;
   @override
   Widget build(BuildContext context) {
     final p = paletteOf(context);
     if (p.clean || p.receipt || p.inkWash) {
-      return Icon(icon, size: 21, color: p.accent);
+      return ActivityIcon(icon, active: spinning, size: 21, color: p.accent);
     }
     return Container(
       padding: const EdgeInsets.all(7),
@@ -643,8 +649,9 @@ class ThemePreferenceIcon extends StatelessWidget {
               )
             : null,
       ),
-      child: Icon(
+      child: ActivityIcon(
         icon,
+        active: spinning,
         size: 18,
         color: p.editorial || p.terminal ? p.card : p.accent,
       ),

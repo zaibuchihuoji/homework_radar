@@ -28,57 +28,6 @@ void main() {
     );
   });
 
-  testWidgets('comic week caption contrasts with its painted shadow backdrop', (
-    tester,
-  ) async {
-    final state = AppState()
-      ..courses = [
-        Course(
-          id: 'contrast',
-          name: '主题课程',
-          weekday: 1,
-          startSection: 1,
-          endSection: 2,
-          weeks: [1],
-        ),
-      ];
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildTheme(Brightness.light, ThemeStyle.comic),
-        home: TimetablePage(state: state),
-      ),
-    );
-    await tester.pumpAndSettle();
-    final caption = find.text('这周的上课计划！');
-    final container = find
-        .ancestor(
-          of: caption,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is Container &&
-                widget.decoration is BoxDecoration &&
-                ((widget.decoration! as BoxDecoration).boxShadow?.isNotEmpty ??
-                    false),
-          ),
-        )
-        .first;
-    final frame =
-        tester.widget<Container>(container).decoration! as BoxDecoration;
-    final background = Color.alphaBlend(
-      frame.color!,
-      frame.boxShadow!.first.color,
-    );
-    final foreground = tester.widget<Text>(caption).style!.color!;
-    final light = background.computeLuminance();
-    final dark = foreground.computeLuminance();
-    final contrast =
-        ((light > dark ? light : dark) + .05) /
-        ((light < dark ? light : dark) + .05);
-    expect(contrast, greaterThanOrEqualTo(4.5));
-    await tester.pumpWidget(const SizedBox.shrink());
-    state.dispose();
-  });
-
   for (final style in ThemeStyle.values.where(
     (s) => !stylePalette(s, Brightness.light).clean,
   )) {
@@ -102,7 +51,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.widgetWithText(FilledButton, '导入教务课表'), findsOneWidget);
-      expect(find.widgetWithText(TextButton, '手动添加课程'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, '手动添加课程'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       state.dispose();
@@ -162,7 +111,7 @@ void main() {
       await tester.tap(find.text('主题课程').first);
       await tester.pumpAndSettle();
       expect(find.text('教学楼301'), findsWidgets);
-      expect(find.text('编辑'), findsOneWidget);
+      expect(find.text('编辑课程'), findsOneWidget);
       await tester.tapAt(const Offset(8, 100));
       await tester.pumpAndSettle();
       await tester.longPress(find.text('主题课程').first);
@@ -173,18 +122,18 @@ void main() {
 
       await tester.tap(find.byTooltip('下一周'));
       await tester.pumpAndSettle();
-      expect(find.text('第2周'), findsOneWidget);
+      expect(find.text('第 2 周'), findsOneWidget);
       expect(find.text('2 门课程'), findsOneWidget);
       expect(find.text('回到本周'), findsOneWidget);
       await tester.tap(find.text('回到本周'));
       await tester.pumpAndSettle();
-      expect(find.text('第1周'), findsOneWidget);
+      expect(find.text('第 1 周'), findsOneWidget);
       await tester.drag(find.byType(PageView), const Offset(-270, 0));
       await tester.pumpAndSettle();
-      expect(find.text('第2周'), findsOneWidget);
+      expect(find.text('第 2 周'), findsOneWidget);
       await tester.tap(find.byTooltip('上一周'));
       await tester.pumpAndSettle();
-      expect(find.text('第1周'), findsOneWidget);
+      expect(find.text('第 1 周'), findsOneWidget);
 
       await tester.tap(find.byTooltip('更多'));
       await tester.pumpAndSettle();

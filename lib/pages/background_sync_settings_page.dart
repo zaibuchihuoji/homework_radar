@@ -8,6 +8,7 @@ import '../services/storage.dart';
 import '../services/sync_policy.dart';
 import '../services/sync_service.dart';
 import '../ui/adaptive.dart';
+import '../ui/activity_icon.dart';
 import '../ui/settings_parts.dart';
 import 'accounts_page.dart';
 
@@ -66,7 +67,10 @@ class BackgroundSyncSettingsPage extends StatelessWidget {
                     trailing: IconButton.filledTonal(
                       tooltip: '立即同步',
                       onPressed: () => state.syncAll(),
-                      icon: const Icon(Icons.refresh_rounded),
+                      icon: ActivityIcon(
+                        Icons.refresh_rounded,
+                        active: state.syncing,
+                      ),
                     ),
                   ),
                 ],

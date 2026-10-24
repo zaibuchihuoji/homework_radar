@@ -4,6 +4,7 @@ import '../models/homework.dart';
 import '../services/sync_policy.dart';
 import 'account_platform_icon.dart';
 import 'adaptive.dart';
+import 'activity_icon.dart';
 import 'settings_parts.dart';
 
 String syncTime(DateTime? at) {
@@ -34,8 +35,9 @@ class SyncProgressNotice extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
+              ActivityIcon(
                 busy ? Icons.sync_rounded : Icons.info_outline_rounded,
+                active: busy,
                 size: 20,
                 color: textSecondary(context),
               ),

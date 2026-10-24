@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -8,17 +9,19 @@ import '../services/update_service.dart';
 import '../ui/settings_parts.dart';
 
 bool _updateDialogOpen = false;
-bool _checking = false;
+final _checking = ValueNotifier(false);
+ValueListenable<bool> get appUpdateChecking => _checking;
 
 Future<void> checkForAppUpdate(BuildContext context) async {
-  if (_checking || _updateDialogOpen) return;
-  _checking = true;
+  if (_checking.value || _updateDialogOpen) return;
+  _checking.value = true;
   final controller = AppUpdateController.instance;
   final messenger = ScaffoldMessenger.of(context);
   try {
     await controller.refresh();
     if (!context.mounted) return;
     if (controller.status.phase != 'idle') {
+      _checking.value = false;
       await showAppUpdateDialog(context);
       return;
     }
@@ -31,6 +34,7 @@ Future<void> checkForAppUpdate(BuildContext context) async {
       localVersion: pkg.version,
     );
     if (!context.mounted) return;
+    _checking.value = false;
     if (info == null) {
       messenger.showSnackBar(const SnackBar(content: Text('暂时无法检查更新，请稍后再试')));
     } else if (!info.isNewerThan(pkg.version)) {
@@ -46,7 +50,7 @@ Future<void> checkForAppUpdate(BuildContext context) async {
   } catch (_) {
     messenger.showSnackBar(const SnackBar(content: Text('无法读取更新信息，请稍后再试')));
   } finally {
-    _checking = false;
+    _checking.value = false;
   }
 }
 

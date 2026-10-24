@@ -13,6 +13,7 @@ import '../ui/adaptive.dart';
 import '../ui/hw_card.dart';
 import '../ui/settings_parts.dart';
 import '../ui/tokens.dart';
+import '../ui/focus_parts.dart';
 import 'homework_edit_dialogs.dart';
 
 class HomeworkDetailPage extends StatefulWidget {
@@ -89,187 +90,7 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
         body: Center(child: Text('作业不存在或已被隐藏')),
       );
     }
-    final state = _state;
-    final manual = hw.platform == PlatformKind.manual;
-    final note = hw.note?.trim() ?? '';
-    if (paletteOf(context).sunny) return _focusContent(context, hw, state);
-    final dueColor = hw.dueAt == null || hwIsDone(hw)
-        ? textSecondary(context)
-        : hwDueTone(hw, dark: isDark(context)).$1;
-    return SettingsScaffold(
-      title: '作业详情',
-      body: SettingsList(
-        children: [
-          SettingsSection(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      hw.course.isEmpty ? '未指定课程' : hw.course,
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.4,
-                        color: textSecondary(context),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SelectableText(
-                      hw.title,
-                      style: TextStyle(
-                        fontSize: 23,
-                        height: 1.35,
-                        fontWeight: FontWeight.w600,
-                        color: textPrimary(context),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SettingsDivider(indent: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 16,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Icon(
-                        Icons.schedule_rounded,
-                        size: 20,
-                        color: dueColor,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '截止时间',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: textSecondary(context),
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            hw.dueAt == null
-                                ? '未设置截止时间'
-                                : HomeworkItem.formatDueTime(hw.dueAt!),
-                            style: TextStyle(
-                              fontSize: 17,
-                              height: 1.4,
-                              fontWeight: FontWeight.w600,
-                              color: dueColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SettingsDivider(indent: 20),
-              SettingsRow(
-                icon: Icons.info_outline_rounded,
-                title: '状态',
-                value: hwStatusLabel(hw),
-              ),
-              const SettingsDivider(),
-              SettingsRow(
-                icon: Icons.link_rounded,
-                title: '来源',
-                value: hw.platform.label,
-              ),
-              if (hw.score != null) ...[
-                const SettingsDivider(),
-                SettingsRow(
-                  icon: Icons.grade_outlined,
-                  title: '得分',
-                  value: '${HomeworkItem.scoreText(hw.score)} 分',
-                ),
-              ],
-            ],
-          ),
-          if (note.isNotEmpty || state != null)
-            SettingsSection(
-              title: '我的备注',
-              children: [
-                if (note.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: SelectableText(
-                      note,
-                      style: TextStyle(
-                        fontSize: 14,
-                        height: 1.6,
-                        color: textPrimary(context),
-                      ),
-                    ),
-                  ),
-                if (state != null)
-                  SettingsRow(
-                    icon: Icons.sticky_note_2_outlined,
-                    title: note.isEmpty ? '添加备注' : '编辑备注',
-                    subtitle: note.isEmpty ? '记录提交要求、分工或待办事项' : null,
-                    navigation: true,
-                    onTap: () => showHomeworkNoteEditor(context, state, hw),
-                  ),
-              ],
-            ),
-          if (state != null)
-            SettingsSection(
-              title: '作业操作',
-              footer: manual
-                  ? '手动作业的完成状态仅保存在本机。'
-                  : '平台状态由同步更新。作答与提交请在${hw.platform.label}官方 App 中完成。',
-              children: [
-                if (manual) ...[
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        icon: Icon(
-                          hwIsDone(hw)
-                              ? Icons.undo_rounded
-                              : Icons.check_rounded,
-                        ),
-                        label: Text(hwIsDone(hw) ? '标记未完成' : '标记完成'),
-                        onPressed: () => state.setHomeworkStatus(
-                          hw.id,
-                          hwIsDone(hw) ? HwStatus.todo : HwStatus.done,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SettingsRow(
-                    icon: Icons.edit_outlined,
-                    title: '编辑作业',
-                    subtitle: '修改课程、内容和截止时间',
-                    navigation: true,
-                    onTap: () =>
-                        showManualHomeworkEditor(context, state, edit: hw),
-                  ),
-                  const SettingsDivider(),
-                ],
-                SettingsRow(
-                  icon: Icons.visibility_off_outlined,
-                  title: '隐藏这条作业',
-                  subtitle: '停止提醒，可在设置的数据管理中恢复',
-                  onTap: () => _hide(hw),
-                ),
-              ],
-            ),
-        ],
-      ),
-    );
+    return _focusContent(context, hw, _state);
   }
 
   Widget _focusContent(BuildContext context, HomeworkItem hw, AppState? state) {
@@ -331,9 +152,9 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
                                       ? Icons.undo_rounded
                                       : Icons.check_circle_outline_rounded,
                                   size: 20,
-                                  color: isDark(context)
-                                      ? p.onAccent
-                                      : p.accentFill,
+                                  color: p.sunny && !isDark(context)
+                                      ? p.accentFill
+                                      : p.onAccent,
                                 ),
                                 label: Text(hwIsDone(hw) ? '标记未完成' : '标记完成'),
                               ),
@@ -398,15 +219,11 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
                   ],
                 ),
                 const SizedBox(height: 24),
-                Container(
-                  width: double.infinity,
+                WorkbenchPanel(
+                  accent: true,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 18,
-                  ),
-                  decoration: BoxDecoration(
-                    color: p.accentFill,
-                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,

@@ -77,6 +77,20 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> revealCard(WidgetTester tester, Finder card) async {
+    tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position
+        .jumpTo(0);
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      card,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+  }
+
   testWidgets(
     'connection summary counts valid sessions separately from expired ones',
     (tester) async {
@@ -86,11 +100,13 @@ void main() {
         ..zfState = AccountState.ok;
       addTearDown(state.dispose);
       await showAccounts(tester, state, ThemeStyle.morandi);
-      expect(find.text('已连接 2 / 6 · 待重新登录 1'), findsOneWidget);
+      expect(find.text('2 / 6'), findsOneWidget);
+      expect(find.textContaining('1 个平台需要重新登录'), findsOneWidget);
       state.chaoxingState = AccountState.needRelogin;
       state.notifyListeners();
       await tester.pumpAndSettle();
-      expect(find.text('已连接 1 / 6 · 待重新登录 2'), findsOneWidget);
+      expect(find.text('1 / 6'), findsOneWidget);
+      expect(find.textContaining('2 个平台需要重新登录'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -113,7 +129,13 @@ void main() {
             ..lastSync = DateTime(2026, 10, 17, 12, 34);
           addTearDown(state.dispose);
           await showAccounts(tester, state, style, brightness: brightness);
-          expect(find.text('已连接 3 / 6 · 待重新登录 2'), findsOneWidget);
+          expect(find.text('3 / 6'), findsOneWidget);
+          expect(find.textContaining('2 个平台需要重新登录'), findsOneWidget);
+          await tester.scrollUntilVisible(
+            find.textContaining('10月17日 12:34'),
+            200,
+          );
+          await tester.pumpAndSettle();
           expect(find.textContaining('10月17日 12:34'), findsOneWidget);
           const names = [
             '学习通',
@@ -133,8 +155,7 @@ void main() {
           ];
           for (var i = 0; i < names.length; i++) {
             final card = find.byKey(ValueKey('account-${i + 1}'));
-            await tester.scrollUntilVisible(card, 220);
-            await tester.pumpAndSettle();
+            await revealCard(tester, card);
             expect(
               find.descendant(of: card, matching: find.text(names[i])),
               findsOneWidget,
@@ -146,35 +167,23 @@ void main() {
               ),
               findsOneWidget,
             );
+            await tester.tap(
+              find.descendant(of: card, matching: find.byType(IconButton)),
+            );
+            await tester.pumpAndSettle();
             expect(
-              find.descendant(
-                of: card,
-                matching: find.text(i == 2 ? '登录' : '重新登录'),
-              ),
+              find.text(i == 2 ? '登录${names[i]}' : '重新登录'),
               findsOneWidget,
             );
-            expect(
-              find.descendant(of: card, matching: find.text('退出')),
-              i == 2 ? findsNothing : findsOneWidget,
-            );
+            expect(find.text('退出账号'), i == 2 ? findsNothing : findsOneWidget);
             if (i == 0) {
-              expect(
-                find.descendant(
-                  of: card,
-                  matching: find.text('UID 123456789012345'),
-                ),
-                findsOneWidget,
-              );
+              expect(find.text('UID 123456789012345'), findsOneWidget);
             }
             if (i == 5) {
-              expect(
-                find.descendant(
-                  of: card,
-                  matching: find.text('学号 202610170012345'),
-                ),
-                findsOneWidget,
-              );
+              expect(find.text('学号 202610170012345'), findsOneWidget);
             }
+            await tester.tap(find.byTooltip('关闭账号详情'));
+            await tester.pumpAndSettle();
             expect(
               tester.takeException(),
               isNull,
@@ -182,12 +191,15 @@ void main() {
             );
           }
           // The themed action must still enter the real destructive-action guard.
-          final exit = find.descendant(
-            of: find.byKey(const ValueKey('account-6')),
-            matching: find.widgetWithText(TextButton, '退出'),
+          final card = find.byKey(const ValueKey('account-6'));
+          await revealCard(tester, card);
+          await tester.tap(
+            find.descendant(of: card, matching: find.byType(IconButton)),
           );
-          await tester.ensureVisible(exit);
-          await tester.tap(exit);
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(find.text('退出账号'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('退出账号'));
           await tester.pumpAndSettle();
           expect(find.text('退出教务系统'), findsOneWidget);
           expect(find.textContaining('手动添加的课程会保留'), findsOneWidget);

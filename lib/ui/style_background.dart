@@ -21,6 +21,15 @@ class StyleBackground extends StatelessWidget {
 
   final Widget child;
 
+  Widget _withArtwork(List<Widget> artwork) => Stack(
+    children: [
+      Positioned.fill(
+        child: RepaintBoundary(child: Stack(children: artwork)),
+      ),
+      child,
+    ],
+  );
+
   @override
   Widget build(BuildContext context) {
     final pal = paletteOf(context);
@@ -38,115 +47,97 @@ class StyleBackground extends StatelessWidget {
               (Color(0xFFC9D2BC), 210.0, Offset(0.85, 0.45)),
               (Color(0xFFFBF7F0), 170.0, Offset(0.40, 0.88)),
             ];
-      return Stack(
-        children: [
-          Positioned.fill(child: ColoredBox(color: pal.bg)),
-          for (final (color, radius, pos) in blobs)
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    center: Alignment(pos.dx * 2 - 1, pos.dy * 2 - 1),
-                    radius: radius / 400,
-                    colors: [
-                      color.withValues(alpha: dark ? 0.55 : 0.85),
-                      color.withValues(alpha: 0),
-                    ],
-                  ),
+      return _withArtwork([
+        Positioned.fill(child: ColoredBox(color: pal.bg)),
+        for (final (color, radius, pos) in blobs)
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(pos.dx * 2 - 1, pos.dy * 2 - 1),
+                  radius: radius / 400,
+                  colors: [
+                    color.withValues(alpha: dark ? 0.55 : 0.85),
+                    color.withValues(alpha: 0),
+                  ],
                 ),
               ),
             ),
-          child,
-        ],
-      );
+          ),
+      ]);
     }
     if (pal.pixel) {
       // 像素屏：点阵背景（LCD 像素格），内容浮在「屏幕」上
       final dark = Theme.of(context).brightness == Brightness.dark;
-      return Stack(
-        children: [
-          Positioned.fill(child: ColoredBox(color: pal.bg)),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _DotMatrixPainter(
-                color: dark
-                    ? Colors.white.withValues(alpha: 0.05)
-                    : Colors.black.withValues(alpha: 0.06),
-              ),
+      return _withArtwork([
+        Positioned.fill(child: ColoredBox(color: pal.bg)),
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _DotMatrixPainter(
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.06),
             ),
           ),
-          child,
-        ],
-      );
+        ),
+      ]);
     }
     if (pal.editorial) {
       // 杂志：纯纸面 + 左缘一道通天「书脊」——装订边把整页锚在纸面上
-      return Stack(
-        children: [
-          Positioned.fill(child: ColoredBox(color: pal.bg)),
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 5,
-            child: ColoredBox(color: pal.cardBorder),
-          ),
-          child,
-        ],
-      );
+      return _withArtwork([
+        Positioned.fill(child: ColoredBox(color: pal.bg)),
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 5,
+          child: ColoredBox(color: pal.cardBorder),
+        ),
+      ]);
     }
     if (pal.receipt) {
       // 柜台上的热敏纸：极淡的横向纸纹（打印介质自己的肌理）
       final dark = Theme.of(context).brightness == Brightness.dark;
-      return Stack(
-        children: [
-          Positioned.fill(child: ColoredBox(color: pal.bg)),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _GrainPainter(
-                color: dark
-                    ? Colors.white.withValues(alpha: 0.03)
-                    : Colors.black.withValues(alpha: 0.035),
-              ),
+      return _withArtwork([
+        Positioned.fill(child: ColoredBox(color: pal.bg)),
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _GrainPainter(
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.03)
+                  : Colors.black.withValues(alpha: 0.035),
             ),
           ),
-          child,
-        ],
-      );
+        ),
+      ]);
     }
     if (pal.terminal) {
       // CRT 扫描线：文本模式的介质感，淡到不抢读
       final dark = Theme.of(context).brightness == Brightness.dark;
-      return Stack(
-        children: [
-          Positioned.fill(child: ColoredBox(color: pal.bg)),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _ScanlinePainter(
-                color: dark
-                    ? Colors.white.withValues(alpha: 0.035)
-                    : Colors.black.withValues(alpha: 0.045),
-              ),
+      return _withArtwork([
+        Positioned.fill(child: ColoredBox(color: pal.bg)),
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _ScanlinePainter(
+              color: dark
+                  ? Colors.white.withValues(alpha: 0.035)
+                  : Colors.black.withValues(alpha: 0.045),
             ),
           ),
-          child,
-        ],
-      );
+        ),
+      ]);
     }
     if (pal.journal) {
       // 活页本摊开：横格纸 + 左侧装订孔 + 页边线
       final dark = Theme.of(context).brightness == Brightness.dark;
-      return Stack(
-        children: [
-          Positioned.fill(child: ColoredBox(color: pal.bg)),
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _RuledPaperPainter(dark: dark, pal: pal),
-            ),
+      return _withArtwork([
+        Positioned.fill(child: ColoredBox(color: pal.bg)),
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _RuledPaperPainter(dark: dark, pal: pal),
           ),
-          child,
-        ],
-      );
+        ),
+      ]);
     }
     return child;
   }
@@ -248,8 +239,9 @@ class _RuledPaperPainter extends CustomPainter {
         center,
         5.5,
         Paint()
-          ..color = (dark ? Colors.black : const Color(0xFF8A7A5A))
-              .withValues(alpha: 0.35)
+          ..color = (dark ? Colors.black : const Color(0xFF8A7A5A)).withValues(
+            alpha: 0.35,
+          )
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.2,
       );

@@ -94,7 +94,7 @@ class _JwSetupPageState extends State<JwSetupPage> {
     textInputAction: TextInputAction.next,
     decoration: themedInputDecoration(
       context,
-      isDense: !isCleanStyle(context),
+      isDense: false,
       labelText: '学校名 / 备注（选填）',
       hintText: '如：郑州轻工业大学',
       suffixIcon: _name.text.isEmpty
@@ -116,7 +116,7 @@ class _JwSetupPageState extends State<JwSetupPage> {
     autofocus: widget.initial == null,
     decoration: themedInputDecoration(
       context,
-      isDense: !isCleanStyle(context),
+      isDense: false,
       labelText: '教务系统网址',
       hintText: 'jw.xxx.edu.cn 或 http://jw.xxx.edu.cn',
       errorText: _error,
@@ -134,54 +134,6 @@ class _JwSetupPageState extends State<JwSetupPage> {
     onSubmitted: (_) => _save(),
   );
 
-  Widget _themedBody(BuildContext context, bool editing) => ListView(
-    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-    children: [
-      const ThemeEditorHeading(
-        title: '连接学校教务',
-        kicker: 'CAMPUS / 01',
-        icon: Icons.school_outlined,
-        summary: '记下教务入口，下一步登录并打开课表。校园网或学校 VPN 可能是必需的。',
-      ),
-      ThemeFieldGroup(
-        title: '学校与入口',
-        child: Column(
-          children: [
-            _nameField(context),
-            const SizedBox(height: 16),
-            _urlField(context),
-          ],
-        ),
-      ),
-      const SizedBox(height: 14),
-      Text(
-        '支持金智青果、正方、强智、URP 等教务系统。无法识别时，可使用「粘贴文本导入」或「截图导入」。',
-        style: TextStyle(
-          fontSize: 12,
-          height: 1.6,
-          color: textSecondary(context),
-        ),
-      ),
-      const SizedBox(height: 24),
-      FilledButton.icon(
-        onPressed: _url.text.trim().isNotEmpty ? _save : null,
-        icon: const Icon(Icons.login_rounded),
-        label: Text(editing ? '保存并进入抓取' : '下一步：登录教务'),
-      ),
-      if (editing) ...[
-        const SizedBox(height: 10),
-        TextButton.icon(
-          onPressed: _delete,
-          style: TextButton.styleFrom(
-            foregroundColor: Theme.of(context).colorScheme.error,
-          ),
-          icon: const Icon(Icons.delete_outline_rounded, size: 18),
-          label: const Text('删除该教务配置'),
-        ),
-      ],
-    ],
-  );
-
   @override
   Widget build(BuildContext context) {
     final editing = widget.initial != null;
@@ -194,64 +146,61 @@ class _JwSetupPageState extends State<JwSetupPage> {
               ? Text(editing ? '更换教务平台' : '添加教务平台')
               : appBarTitle(context, editing ? '更换教务平台' : '添加教务平台'),
         ),
-        body: p.clean
-            ? ListView(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                children: [
-                  if (p.sunny)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 20),
-                      child: FocusSummary(
-                        eyebrow: '学校连接',
-                        title: '连接你的教务平台',
-                        detail: '填写学校名称和网址，再通过官方页面登录。',
-                      ),
-                    ),
-                  Text(
-                    '输入学校教务系统的网址，登录和进入课表页在下一步的浏览器里完成。\n'
-                    '教务系统通常仅校园网或学校 VPN 可达。',
-                    style: TextStyle(
-                      fontSize: 13,
-                      height: 1.7,
-                      color: textSecondary(context),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  _nameField(context),
-                  const SizedBox(height: 14),
-                  _urlField(context),
-                  const SizedBox(height: 8),
-                  Text(
-                    '常见教务系统都支持：金智青果、正方、强智、URP 等；'
-                    '识别不了的表格格式可用「粘贴文本导入」或「截图导入」兜底。',
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.6,
-                      color: textFaint(context),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    // 只看网址：只填了学校名、网址为空时点保存必然触发网址校验报错，
-                    // 入口与校验逻辑此前自相矛盾
-                    onPressed: _url.text.trim().isNotEmpty ? _save : null,
-                    icon: const Icon(Icons.login_rounded),
-                    label: Text(editing ? '保存并进入抓取' : '下一步：登录教务'),
-                  ),
-                  if (editing) ...[
-                    const SizedBox(height: 10),
-                    TextButton.icon(
-                      onPressed: _delete,
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.red.shade400,
-                      ),
-                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                      label: const Text('删除该教务配置'),
-                    ),
-                  ],
-                ],
-              )
-            : _themedBody(context, editing),
+        body: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(bottom: 20),
+              child: FocusSummary(
+                eyebrow: '学校连接',
+                title: '连接你的教务平台',
+                detail: '填写学校名称和网址，再通过官方页面登录。',
+              ),
+            ),
+            Text(
+              '输入学校教务系统的网址，登录和进入课表页在下一步的浏览器里完成。\n'
+              '教务系统通常仅校园网或学校 VPN 可达。',
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.7,
+                color: textSecondary(context),
+              ),
+            ),
+            const SizedBox(height: 20),
+            _nameField(context),
+            const SizedBox(height: 14),
+            _urlField(context),
+            const SizedBox(height: 8),
+            Text(
+              '常见教务系统都支持：金智青果、正方、强智、URP 等；'
+              '识别不了的表格格式可用「粘贴文本导入」或「截图导入」兜底。',
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.6,
+                color: textFaint(context),
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              // 只看网址：只填了学校名、网址为空时点保存必然触发网址校验报错，
+              // 入口与校验逻辑此前自相矛盾
+              onPressed: _url.text.trim().isNotEmpty ? _save : null,
+              icon: const Icon(Icons.login_rounded),
+              label: Text(editing ? '保存并进入抓取' : '下一步：登录教务'),
+            ),
+            if (editing) ...[
+              const SizedBox(height: 10),
+              TextButton.icon(
+                onPressed: _delete,
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.red.shade400,
+                ),
+                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                label: const Text('删除该教务配置'),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

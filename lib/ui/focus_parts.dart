@@ -3,7 +3,92 @@ import 'package:flutter/material.dart';
 import 'adaptive.dart';
 import 'tokens.dart';
 
-/// Presentation primitives for the selected sunny workbench. No stored state.
+Decoration workbenchDecoration(BuildContext context, {bool accent = false}) {
+  final p = paletteOf(context);
+  final square = p.pixel || p.terminal || p.receipt || p.editorial;
+  final radius = square
+      ? 1.0
+      : p.journal
+      ? 6.0
+      : p.morandi
+      ? 20.0
+      : 12.0;
+  final material = !accent
+      ? inkWashFill(context, radius) ?? receiptTear(context)
+      : null;
+  return material ??
+      BoxDecoration(
+        color: accent ? p.accentFill : p.card,
+        borderRadius: BorderRadius.circular(radius),
+        border: p.sunny && accent
+            ? null
+            : Border.all(
+                color: p.cardBorder,
+                width: p.comic || p.pixel ? 1.5 : .8,
+              ),
+        boxShadow: p.comic || p.pixel
+            ? [BoxShadow(color: p.cardBorder, offset: const Offset(2, 2))]
+            : p.morandi
+            ? p.shadow
+            : null,
+      );
+}
+
+/// One workbench layout; palette, typography and materials remain theme-owned.
+class WorkbenchPanel extends StatelessWidget {
+  const WorkbenchPanel({
+    super.key,
+    required this.child,
+    this.accent = false,
+    this.padding = const EdgeInsets.all(15),
+    this.seed = 'workbench',
+  });
+  final Widget child;
+  final bool accent;
+  final EdgeInsetsGeometry padding;
+  final String seed;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = paletteOf(context);
+    final radius = p.pixel || p.terminal || p.receipt || p.editorial
+        ? 1.0
+        : p.journal
+        ? 6.0
+        : p.morandi
+        ? 20.0
+        : 12.0;
+    final body = Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: workbenchDecoration(context, accent: accent),
+      foregroundDecoration: p.pixel
+          ? pixelFrame(context, radius)
+          : !accent
+          ? paperInnerRing(context, radius) ??
+                editorialRules(context) ??
+                morandiCream(context, radius)
+          : null,
+      child: child,
+    );
+    return p.journal
+        ? Stack(
+            clipBehavior: Clip.none,
+            children: [
+              body,
+              Positioned(
+                top: -5,
+                right: 16,
+                child: ExcludeSemantics(
+                  child: journalTape(context, seed, width: 46),
+                ),
+              ),
+            ],
+          )
+        : body;
+  }
+}
+
 class FocusSummary extends StatelessWidget {
   const FocusSummary({
     super.key,
@@ -22,13 +107,9 @@ class FocusSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = paletteOf(context);
     final ink = yellow ? p.onAccent : p.ink;
-    return Container(
-      width: double.infinity,
+    return WorkbenchPanel(
+      accent: yellow,
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: yellow ? p.accentFill : p.ink.withValues(alpha: .035),
-        borderRadius: BorderRadius.circular(12),
-      ),
       child: DefaultTextStyle.merge(
         style: TextStyle(color: ink),
         child: Column(

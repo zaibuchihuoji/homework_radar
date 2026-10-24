@@ -18,7 +18,6 @@ import '../services/timetable_parser.dart';
 import '../ui/adaptive.dart';
 import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
-import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
 import 'jw_setup_page.dart';
 
@@ -389,133 +388,6 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
     } catch (_) {}
   }
 
-  Widget _themedBody(BuildContext context) {
-    final p = paletteOf(context);
-    return LayoutBuilder(
-      builder: (context, constraints) => Column(
-        children: [
-          Expanded(
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: p.card,
-                border: cardBorderOf(context),
-                borderRadius: BorderRadius.circular(
-                  p.pixel || p.terminal || p.receipt || p.editorial ? 0 : 10,
-                ),
-              ),
-              foregroundDecoration: pixelFrame(context, 0),
-              child: _config == null
-                  ? Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: p.accent,
-                      ),
-                    )
-                  : _hideWebview
-                  ? const SizedBox.expand()
-                  : WebViewWidget(controller: _controller),
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: constraints.maxHeight * .42,
-              ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                child: ThemePanel(
-                  seed: 'timetable-login-status',
-                  label: p.terminal
-                      ? '~/timetable/probe'
-                      : p.pixel
-                      ? 'TIMETABLE / STATUS'
-                      : '登录 → 打开课表 → 自动抓取',
-                  icon: Icons.table_chart_outlined,
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (_status.startsWith('正在') ||
-                              _status.startsWith('抓到') ||
-                              _status.startsWith('课表抓取成功'))
-                            SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: p.accent,
-                              ),
-                            )
-                          else
-                            Icon(
-                              Icons.info_outline_rounded,
-                              size: 17,
-                              color: p.accent,
-                            ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              _status,
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                height: 1.4,
-                                color: p.ink2,
-                                fontFamily: p.terminal || p.receipt || p.pixel
-                                    ? 'monospace'
-                                    : p.paper || p.journal
-                                    ? 'serif'
-                                    : null,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_status.contains('解析失败')) ...[
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: _exitToTextImport,
-                              icon: const Icon(
-                                Icons.content_paste_rounded,
-                                size: 16,
-                              ),
-                              label: const Text('粘贴文本导入'),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('试试在教务里切到「表格视图/周课表」页面再点检测'),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.refresh_rounded, size: 16),
-                              label: const Text('换个页面'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final p = paletteOf(context);
@@ -550,115 +422,123 @@ class _ZfLoginPageState extends State<ZfLoginPage> {
             ),
           ],
         ),
-        body: p.clean
-            ? Column(
-                children: [
-                  Expanded(
-                    child: _config == null
-                        ? const Center(
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : _hideWebview
-                        ? const SizedBox.expand()
-                        : WebViewWidget(controller: _controller),
-                  ),
-                  SafeArea(
-                    top: false,
-                    child: Container(
-                      margin: const EdgeInsets.fromLTRB(16, 8, 16, 14),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: cardColor(context),
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x14101828),
-                            blurRadius: 14,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
+        body: Column(
+          children: [
+            Expanded(
+              child: _config == null
+                  ? const Center(
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : _hideWebview
+                  ? const SizedBox.expand()
+                  : WebViewWidget(controller: _controller),
+            ),
+            SafeArea(
+              top: false,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight:
+                      (MediaQuery.sizeOf(context).height -
+                          MediaQuery.viewInsetsOf(context).bottom -
+                          kToolbarHeight) *
+                      .45,
+                ),
+                child: SingleChildScrollView(
+                  child: Container(
+                    margin: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: cardColor(context),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x14101828),
+                          blurRadius: 14,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            if (_status.startsWith('正在') ||
+                                _status.startsWith('抓到') ||
+                                _status.startsWith('课表抓取成功'))
+                              const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            else
+                              Icon(
+                                Icons.info_outline_rounded,
+                                size: 15,
+                                color: Colors.grey.shade500,
+                              ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _status,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: textSecondary(context),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        // 解析失败 → 兜底导入入口
+                        if (_status.contains('解析失败')) ...[
+                          const SizedBox(height: 10),
                           Row(
                             children: [
-                              if (_status.startsWith('正在') ||
-                                  _status.startsWith('抓到') ||
-                                  _status.startsWith('课表抓取成功'))
-                                const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: _exitToTextImport,
+                                  icon: const Icon(
+                                    Icons.content_paste_rounded,
+                                    size: 16,
                                   ),
-                                )
-                              else
-                                Icon(
-                                  Icons.info_outline_rounded,
-                                  size: 15,
-                                  color: Colors.grey.shade500,
+                                  label: const Text('粘贴文本导入'),
                                 ),
+                              ),
                               const SizedBox(width: 10),
                               Expanded(
-                                child: Text(
-                                  _status,
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    color: Colors.grey.shade700,
+                                child: OutlinedButton.icon(
+                                  onPressed: () {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          '试试在教务里切到「表格视图/周课表」页面再点检测',
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.explore_outlined,
+                                    size: 16,
                                   ),
+                                  label: const Text('换个页面'),
                                 ),
                               ),
                             ],
                           ),
-                          // 解析失败 → 兜底导入入口
-                          if (_status.contains('解析失败')) ...[
-                            const SizedBox(height: 10),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: _exitToTextImport,
-                                    icon: const Icon(
-                                      Icons.content_paste_rounded,
-                                      size: 16,
-                                    ),
-                                    label: const Text('粘贴文本导入'),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: () {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                            const SnackBar(
-                                              content: Text(
-                                                '试试在教务里切到「表格视图/周课表」页面再点检测',
-                                              ),
-                                            ),
-                                          );
-                                    },
-                                    icon: const Icon(
-                                      Icons.refresh_rounded,
-                                      size: 16,
-                                    ),
-                                    label: const Text('换个页面'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
                         ],
-                      ),
+                      ],
                     ),
                   ),
-                ],
-              )
-            : _themedBody(context),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

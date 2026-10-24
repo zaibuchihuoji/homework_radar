@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'adaptive.dart';
+import 'activity_icon.dart';
 import 'dashed_line.dart';
 import 'ink_wash.dart';
 import 'style_background.dart';
@@ -78,73 +79,20 @@ class SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final p = paletteOf(context);
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: children,
     );
-    if (p.sunny) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 22),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (title != null) FocusSectionTitle(title!),
-            content,
-            if (footer != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: SettingsNote(footer!),
-              ),
-          ],
-        ),
-      );
-    }
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.only(bottom: 22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (title != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 12, 4, 10),
-              child: Text(
-                title!,
-                style: serifTitle(
-                  context,
-                  monoText(
-                    context,
-                    TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: p.terminal || p.pixel ? .5 : .2,
-                      color: textSecondary(context),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (p.clean)
-            Container(
-              decoration: BoxDecoration(
-                color: p.sunny ? bgColor(context) : cardColor(context),
-                borderRadius: BorderRadius.circular(p.sunny ? 12 : 18),
-                border: Border.all(
-                  color: dividerColor(context).withValues(alpha: .5),
-                ),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Material(type: MaterialType.transparency, child: content),
-            )
-          else
-            ThemePanel(
-              seed: title ?? 'settings',
-              padding: EdgeInsets.zero,
-              child: Material(type: MaterialType.transparency, child: content),
-            ),
+          if (title != null) FocusSectionTitle(title!),
+          content,
           if (footer != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(4, 9, 4, 0),
+              padding: const EdgeInsets.only(top: 12),
               child: SettingsNote(footer!),
             ),
         ],
@@ -194,6 +142,7 @@ class SettingsRow extends StatelessWidget {
     this.onTap,
     this.onLongPress,
     this.navigation = false,
+    this.iconSpinning = false,
   });
 
   final String title;
@@ -202,6 +151,7 @@ class SettingsRow extends StatelessWidget {
   final Widget? trailing;
   final VoidCallback? onTap, onLongPress;
   final bool navigation;
+  final bool iconSpinning;
 
   @override
   Widget build(BuildContext context) {
@@ -213,18 +163,26 @@ class SettingsRow extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 64),
         child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: p.sunny ? 0 : 16,
-            vertical: p.sunny ? 18 : 16,
-          ),
+          padding: EdgeInsets.symmetric(horizontal: 0, vertical: 18),
           child: Row(
             children: [
               if (icon != null) ...[
                 SizedBox(
-                  width: p.clean ? 26 : 34,
+                  width: 26,
                   child: p.clean
-                      ? Icon(icon, size: 21, color: textSecondary(context))
-                      : ThemePreferenceIcon(icon: icon!),
+                      ? ActivityIcon(
+                          icon!,
+                          active: iconSpinning,
+                          size: 21,
+                          color: textSecondary(context),
+                        )
+                      : FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: ThemePreferenceIcon(
+                            icon: icon!,
+                            spinning: iconSpinning,
+                          ),
+                        ),
                 ),
                 const SizedBox(width: 12),
               ],

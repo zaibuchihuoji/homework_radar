@@ -102,6 +102,25 @@ void main() {
     }
   }
 
+  Future<void> reveal(WidgetTester tester, Finder control) async {
+    if (control.evaluate().isEmpty) {
+      await tester.scrollUntilVisible(
+        control,
+        140,
+        scrollable: find.byType(Scrollable).first,
+      );
+    } else {
+      await tester.ensureVisible(control);
+    }
+    await tester.pump();
+  }
+
+  Future<void> enterUrl(WidgetTester tester, String value) async {
+    final field = find.widgetWithText(TextField, '教务系统网址');
+    await reveal(tester, field);
+    await tester.enterText(field, value);
+  }
+
   Widget app(
     ThemeStyle style,
     Widget page, {
@@ -206,6 +225,7 @@ void main() {
           greaterThan(140),
         );
         await tester.ensureVisible(find.text('粘贴文本导入'));
+        await tester.pump();
         await tester.tap(find.text('粘贴文本导入'));
         await advance(tester);
         expect(routeResults.last, ZfExit.openTextImport);
@@ -224,7 +244,8 @@ void main() {
         await tester.pumpWidget(app(style, const JwSetupPage(initial: config)));
         await tester.tap(find.text('open'));
         await advance(tester);
-        await tester.ensureVisible(find.text('删除该教务配置'));
+        await reveal(tester, find.text('删除该教务配置'));
+        await tester.pump();
         await tester.tap(find.text('删除该教务配置'));
         await advance(tester);
         await tester.tap(find.text('取消'));
@@ -251,19 +272,18 @@ void main() {
         await tester.pumpWidget(app(style, const JwSetupPage()));
         await tester.tap(find.text('open'));
         await advance(tester);
-        await tester.enterText(find.byType(TextField).last, 'invalid');
+        await enterUrl(tester, 'invalid');
         await tester.pump();
-        await tester.ensureVisible(find.text('下一步：登录教务'));
+        await reveal(tester, find.text('下一步：登录教务'));
+        await tester.pump();
         await tester.tap(find.text('下一步：登录教务'));
         await advance(tester);
         expect(find.textContaining('网址看起来不对'), findsOneWidget);
         expect(Storage.jwConfigRaw(), isNull);
-        await tester.enterText(
-          find.byType(TextField).last,
-          'jw.synthetic.edu.cn',
-        );
+        await enterUrl(tester, 'jw.synthetic.edu.cn');
         await tester.pump();
-        await tester.ensureVisible(find.text('下一步：登录教务'));
+        await reveal(tester, find.text('下一步：登录教务'));
+        await tester.pump();
         await tester.tap(find.text('下一步：登录教务'));
         await advance(tester);
         expect(JwStore.load()?.url, 'https://jw.synthetic.edu.cn');
@@ -271,10 +291,7 @@ void main() {
         expect(find.byType(JwSetupPage), findsNothing);
         await tester.tap(find.text('open'));
         await advance(tester);
-        await tester.enterText(
-          find.byType(TextField).last,
-          'changed.synthetic.edu.cn',
-        );
+        await enterUrl(tester, 'changed.synthetic.edu.cn');
         await tester.pageBack();
         await advance(tester);
         expect(JwStore.load()?.url, 'https://jw.synthetic.edu.cn');

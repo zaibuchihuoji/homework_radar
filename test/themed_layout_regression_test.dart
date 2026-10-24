@@ -119,7 +119,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.bySemanticsLabel('待完成 1 项，今天截止 1 项'), findsOneWidget);
+        expect(find.text('1'), findsOneWidget);
+        expect(find.byTooltip('今天截止 1 项'), findsOneWidget);
         expect(find.text('需要完整说明要求的阅读与写作练习'), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('已提交'));
@@ -154,7 +155,7 @@ void main() {
           (w) => w is Semantics && w.properties.label == '作业标签页',
         );
         expect(
-          tester.getRect(find.byType(FloatingActionButton)).bottom,
+          tester.getRect(find.byTooltip('添加作业')).bottom,
           lessThanOrEqualTo(tester.getRect(nav).top - 12),
         );
         final settings = find.byWidgetPredicate(

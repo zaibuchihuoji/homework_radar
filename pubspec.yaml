@@ -1,7 +1,7 @@
 name: homework_radar
 description: "作业雷达 — 汇总学习通与中国大学MOOC的作业与截止时间"
 publish_to: 'none'
-version: 1.3.0+9
+version: 1.3.1+10
 
 environment:
   sdk: ^3.13.4

@@ -65,7 +65,8 @@ void main() {
         task('undated', null),
       ];
     await show(tester, state, ThemeStyle.pixel);
-    expect(find.text('本月 3 项截止 · 2 天有安排'), findsOneWidget);
+    expect(find.text('3 项截止'), findsOneWidget);
+    expect(find.text('2 天有安排'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     state.dispose();
   });
@@ -121,14 +122,7 @@ void main() {
       (tester) async {
         final state = AppState();
         await show(tester, state, style, narrow: true);
-        await tester.tap(
-          style == ThemeStyle.clean
-              ? find.byTooltip('下个月')
-              : find.descendant(
-                  of: find.byType(TableCalendar<HomeworkItem>),
-                  matching: find.byIcon(Icons.chevron_right),
-                ),
-        );
+        await tester.tap(find.byTooltip('下个月'));
         await tester.pumpAndSettle();
         final next = tester
             .widget<TableCalendar<HomeworkItem>>(

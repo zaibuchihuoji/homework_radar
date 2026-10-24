@@ -241,7 +241,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
         fontWeight: FontWeight.w600,
         color: pal.ink2,
       ),
-    ),
+    ).apply(fontFamily: formFont),
     appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
@@ -600,11 +600,20 @@ class HomeworkRadarApp extends StatefulWidget {
 
 class _HomeworkRadarAppState extends State<HomeworkRadarApp>
     with WidgetsBindingObserver {
+  late (ThemeStyle, ThemeMode) _appearance;
+  void _stateChanged() {
+    final next = (widget.state.style, widget.state.themeMode);
+    if (next == _appearance) return;
+    setState(() => _appearance = next);
+    _syncWidgetTheme();
+  }
+
   @override
   void initState() {
     super.initState();
+    _appearance = (widget.state.style, widget.state.themeMode);
     WidgetsBinding.instance.addObserver(this);
-    widget.state.addListener(_syncWidgetTheme);
+    widget.state.addListener(_stateChanged);
     _syncWidgetTheme();
     // 进程冷启动：首帧上屏后放行启动屏
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -625,8 +634,9 @@ class _HomeworkRadarAppState extends State<HomeworkRadarApp>
   void didUpdateWidget(HomeworkRadarApp oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.state != widget.state) {
-      oldWidget.state.removeListener(_syncWidgetTheme);
-      widget.state.addListener(_syncWidgetTheme);
+      oldWidget.state.removeListener(_stateChanged);
+      widget.state.addListener(_stateChanged);
+      _appearance = (widget.state.style, widget.state.themeMode);
       _syncWidgetTheme();
     }
   }
@@ -655,38 +665,35 @@ class _HomeworkRadarAppState extends State<HomeworkRadarApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.state.removeListener(_syncWidgetTheme);
+    widget.state.removeListener(_stateChanged);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: widget.state,
-      builder: (context, _) => MaterialApp(
-        title: '作业通',
-        debugShowCheckedModeBanner: false,
-        locale: const Locale('zh'),
-        supportedLocales: const [Locale('zh'), Locale('en')],
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        navigatorKey: _navigatorKey,
-        theme: buildTheme(Brightness.light, widget.state.style),
-        darkTheme: buildTheme(Brightness.dark, widget.state.style),
-        themeMode: widget.state.themeMode,
-        // 切样式/深浅时整树颜色平滑演变（StylePalette 有逐字段 lerp），
-        // 350ms easeOutCubic 比默认 200ms linear 更有"换肤"的仪式感
-        themeAnimationDuration: const Duration(milliseconds: 350),
-        themeAnimationCurve: Curves.easeOutCubic,
-        // 冷启动首帧 = 海报盖在主壳上（首帧只有海报，原生压屏尽快放行）。
-        // 通知冷启动拉起时，启动页撤除后跳详情（onSplashFinished）。
-        home: showSplashOnStart
-            ? const _SplashHome()
-            : MainShell(state: widget.state),
-      ),
+    return MaterialApp(
+      title: '作业通',
+      debugShowCheckedModeBanner: false,
+      locale: const Locale('zh'),
+      supportedLocales: const [Locale('zh'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      navigatorKey: _navigatorKey,
+      theme: buildTheme(Brightness.light, widget.state.style),
+      darkTheme: buildTheme(Brightness.dark, widget.state.style),
+      themeMode: widget.state.themeMode,
+      // 切样式/深浅时整树颜色平滑演变（StylePalette 有逐字段 lerp），
+      // 350ms easeOutCubic 比默认 200ms linear 更有"换肤"的仪式感
+      themeAnimationDuration: const Duration(milliseconds: 350),
+      themeAnimationCurve: Curves.easeOutCubic,
+      // 冷启动首帧 = 海报盖在主壳上（首帧只有海报，原生压屏尽快放行）。
+      // 通知冷启动拉起时，启动页撤除后跳详情（onSplashFinished）。
+      home: showSplashOnStart
+          ? const _SplashHome()
+          : MainShell(state: widget.state),
     );
   }
 }

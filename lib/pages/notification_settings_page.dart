@@ -3,7 +3,6 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../services/notification_service.dart';
 import '../ui/settings_parts.dart';
-import '../ui/tokens.dart';
 import '../ui/focus_parts.dart';
 
 class NotificationSettingsPage extends StatefulWidget {
@@ -117,12 +116,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
     title: '通知横幅与声音',
     body: SettingsList(
       children: [
-        if (paletteOf(context).sunny)
-          const FocusSummary(
-            eyebrow: '系统提醒',
-            title: '让提醒及时出现',
-            detail: '分别设置作业和上课通知的横幅、声音与测试提醒。',
-          ),
+        const FocusSummary(
+          eyebrow: '系统提醒',
+          title: '让提醒及时出现',
+          detail: '分别设置作业和上课通知的横幅、声音与测试提醒。',
+        ),
         ValueListenableBuilder<bool?>(
           valueListenable: NotificationService.permission,
           builder: (context, allowed, _) => SettingsSection(

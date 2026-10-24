@@ -10,7 +10,6 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../ui/focus_parts.dart';
-import '../ui/tokens.dart';
 import '../ui/adaptive.dart';
 import '../models/course.dart';
 import '../services/timetable_xls_parser.dart';
@@ -156,7 +155,7 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
         children: [
-          if (paletteOf(context).sunny) ...[
+          ...[
             const FocusSummary(
               eyebrow: '文件导入',
               title: '导入学校课表文件',
@@ -167,8 +166,7 @@ class _JwXlsImportPageState extends State<JwXlsImportPage> {
               title: const Text('使用说明'),
               children: [guide],
             ),
-          ] else
-            guide,
+          ],
           const SizedBox(height: 20),
           FilledButton.icon(
             onPressed: _busy ? null : _pickAndRun,

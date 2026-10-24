@@ -636,7 +636,9 @@ class MoocService {
         }
         done++;
         onProgress?.call(done, cs.length);
-        await Future.delayed(const Duration(milliseconds: 800));
+        if (queue.isNotEmpty) {
+          await Future.delayed(const Duration(milliseconds: 800));
+        }
       }
     }
 

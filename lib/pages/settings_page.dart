@@ -49,77 +49,11 @@ class SettingsPage extends StatelessWidget {
       final sync = last == null
           ? '尚未同步'
           : '最近 ${last.hour.toString().padLeft(2, '0')}:${last.minute.toString().padLeft(2, '0')} 同步';
-      if (paletteOf(context).sunny) {
-        return _focusRoot(
-          context,
-          sync,
-          permission,
-          reminders.enabledHours.length,
-        );
-      }
-      return SettingsScaffold(
-        title: '设置',
-        root: true,
-        body: SettingsList(
-          children: [
-            SettingsSection(
-              title: '个性化',
-              children: [
-                SettingsRow(
-                  icon: Icons.palette_outlined,
-                  title: '外观与小组件',
-                  subtitle: '主题、显示模式与桌面组件',
-                  value: state.style.label,
-                  navigation: true,
-                  onTap: () =>
-                      _openDetail(context, '外观与小组件', _appearanceSettings),
-                ),
-              ],
-            ),
-            SettingsSection(
-              title: '日常使用',
-              children: [
-                SettingsRow(
-                  icon: Icons.notifications_none_rounded,
-                  title: '提醒与课表',
-                  subtitle: permission == false
-                      ? '通知权限未开启'
-                      : '截止提醒 ${reminders.enabledHours.length} 项 · 上课提醒${Storage.classReminder() ? '已开启' : '已关闭'}',
-                  navigation: true,
-                  onTap: () => _openDetail(context, '提醒与课表', _reminderSettings),
-                ),
-                const SettingsDivider(),
-                SettingsRow(
-                  icon: Icons.sync_rounded,
-                  title: '同步与后台',
-                  subtitle: sync,
-                  navigation: true,
-                  onTap: () => _openDetail(context, '同步与后台', _syncSettings),
-                ),
-              ],
-            ),
-            SettingsSection(
-              title: '管理与支持',
-              children: [
-                SettingsRow(
-                  icon: Icons.folder_open_rounded,
-                  title: '数据管理',
-                  subtitle: '备份、恢复与隐藏作业',
-                  navigation: true,
-                  onTap: () => _openDetail(context, '数据管理', _dataSettings),
-                ),
-                const SettingsDivider(),
-                SettingsRow(
-                  icon: Icons.info_outline_rounded,
-                  title: '关于与帮助',
-                  subtitle: '应用更新与问题反馈',
-                  navigation: true,
-                  onTap: () => _openDetail(context, '关于与帮助', _aboutSettings),
-                ),
-              ],
-            ),
-          ],
-        ),
+      return _focusRoot(
+        context,
+        sync,
+        permission,
+        reminders.enabledHours.length,
       );
     },
   );
@@ -179,6 +113,7 @@ class SettingsPage extends StatelessWidget {
         const SettingsDivider(indent: 0),
         SettingsRow(
           icon: Icons.sync_outlined,
+          iconSpinning: state.syncing,
           title: '同步与后台',
           subtitle: sync,
           navigation: true,
@@ -251,13 +186,13 @@ class SettingsPage extends StatelessWidget {
             NotificationService.permission,
             NotificationService.scheduleError,
             AppUpdateController.instance,
+            appUpdateChecking,
           ]),
           builder: (context, _) => SettingsScaffold(
             title: title,
             body: SettingsList(
               children: [
-                if (paletteOf(context).sunny && title != '关于与帮助')
-                  _focusDetailIntro(context, title),
+                if (title != '关于与帮助') _focusDetailIntro(context, title),
                 ...content(context),
               ],
             ),
@@ -348,7 +283,7 @@ class SettingsPage extends StatelessWidget {
             value: r.before24h,
             onChanged: (v) => state.updateReminders(r..before24h = v),
           ),
-          SettingsDivider(indent: paletteOf(context).clean ? 16 : 62),
+          SettingsDivider(indent: 16),
           _switchTile(
             context,
             icon: Icons.schedule_rounded,
@@ -356,7 +291,7 @@ class SettingsPage extends StatelessWidget {
             value: r.before6h,
             onChanged: (v) => state.updateReminders(r..before6h = v),
           ),
-          SettingsDivider(indent: paletteOf(context).clean ? 16 : 62),
+          SettingsDivider(indent: 16),
           _switchTile(
             context,
             icon: Icons.alarm_rounded,
@@ -379,7 +314,7 @@ class SettingsPage extends StatelessWidget {
             value: Storage.classReminder(),
             onChanged: state.updateClassReminder,
           ),
-          SettingsDivider(indent: paletteOf(context).clean ? 16 : 62),
+          SettingsDivider(indent: 16),
           SettingsRow(
             icon: Icons.access_time_rounded,
             title: '作息时间',
@@ -428,6 +363,7 @@ class SettingsPage extends StatelessWidget {
         children: [
           SettingsRow(
             icon: Icons.sync_rounded,
+            iconSpinning: state.syncing,
             title: '后台同步',
             subtitle: Storage.syncConfig().enabled
                 ? '每 ${Storage.syncConfig().minutes} 分钟检查'
@@ -455,15 +391,10 @@ class SettingsPage extends StatelessWidget {
           _divider(context),
           SettingsRow(
             icon: Icons.refresh_rounded,
+            iconSpinning: state.syncing,
             title: '立即同步全部作业',
             onTap: state.syncing ? null : () => state.syncAll(),
-            trailing: state.syncing
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
+            subtitle: state.syncing ? '正在同步…' : null,
           ),
         ],
       ),
@@ -561,11 +492,21 @@ class SettingsPage extends StatelessWidget {
       title: '应用',
       children: [
         SettingsRow(
-          icon: Icons.system_update_outlined,
+          icon: Icons.update_rounded,
+          iconSpinning:
+              appUpdateChecking.value ||
+              const [
+                'queued',
+                'downloading',
+              ].contains(AppUpdateController.instance.status.phase),
           title: '检查更新',
-          subtitle: AppUpdateController.instance.status.label,
+          subtitle: appUpdateChecking.value
+              ? '正在检查更新…'
+              : AppUpdateController.instance.status.label,
           navigation: true,
-          onTap: () => checkForAppUpdate(context),
+          onTap: appUpdateChecking.value
+              ? null
+              : () => checkForAppUpdate(context),
         ),
       ],
     ),

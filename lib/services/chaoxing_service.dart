@@ -18,6 +18,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/homework.dart';
 import 'safe_http.dart';
+import 'async_limiter.dart';
 
 class _CourseRef {
   String name;
@@ -58,6 +59,7 @@ class ChaoxingService {
   ChaoxingService({this.cookie});
 
   final Map<String, _WorkParams> _paramsCache = {};
+  final _requests = AsyncLimiter(2);
 
   /// 课程列表请求失败（区分「真没课」与「没拉到」，供同步层决定能否清理旧条目）。
   bool listFailed = false;
@@ -90,7 +92,13 @@ class ChaoxingService {
         : null;
   }
 
-  Future<http.Response?> _get(String url, {bool followRedirects = true}) async {
+  Future<http.Response?> _get(String url, {bool followRedirects = true}) =>
+      _requests.run(() => _getResponse(url, followRedirects: followRedirects));
+
+  Future<http.Response?> _getResponse(
+    String url, {
+    bool followRedirects = true,
+  }) async {
     var target = _cxUri(url);
     final visited = <Uri>{};
     var redirects = 0;
@@ -148,6 +156,16 @@ class ChaoxingService {
     final queue = List<_CourseRef>.of(courses);
     var done = 0;
 
+    Future<List<HomeworkItem>?> readPart(
+      Future<List<HomeworkItem>?> Function() fetch,
+    ) async {
+      try {
+        return await fetch();
+      } catch (_) {
+        return null;
+      }
+    }
+
     Future<void> worker() async {
       while (queue.isNotEmpty) {
         final c = queue.removeAt(0);
@@ -158,16 +176,20 @@ class ChaoxingService {
             // 同步层据此误判「完整抓取」把该课旧作业清光。
             _courseFailed(c.name, '课程信息不完整');
           } else {
-            final list = await _workList(c.name, params);
+            // Independent lists overlap latency; the shared HTTP permits keep
+            // the existing two-request cap, including redirects/parameter reads.
+            final parts = await Future.wait([
+              readPart(() => _workList(c.name, params)),
+              Future<void>.delayed(const Duration(milliseconds: 400))
+                  .then((_) => readPart(() => _examList(c.name, params))),
+            ]);
+            final list = parts[0];
             if (list == null) {
               _courseFailed(c.name, '作业列表获取或解析失败');
             } else {
               items.addAll(list);
             }
-            // 考试列表与作业列表同课双拉：单路限速内多隔一拍再打，
-            // 请求太密容易触发风控
-            await Future.delayed(const Duration(milliseconds: 400));
-            final exams = await _examList(c.name, params);
+            final exams = parts[1];
             if (exams == null) {
               _courseFailed(c.name, '考试列表获取或解析失败');
             } else {
@@ -179,7 +201,9 @@ class ChaoxingService {
         }
         done++;
         onProgress?.call(done, courses.length);
-        await Future.delayed(const Duration(milliseconds: 700));
+        if (queue.isNotEmpty) {
+          await Future.delayed(const Duration(milliseconds: 700));
+        }
       }
     }
 

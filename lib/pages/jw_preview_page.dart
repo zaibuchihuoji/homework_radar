@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../models/course.dart';
 import '../ui/adaptive.dart';
-import '../ui/tokens.dart';
 import 'course_edit_sheet.dart';
 
 class JwPreviewPage extends StatefulWidget {
@@ -184,12 +183,10 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
         onTap: () => _editRow(_rows.indexOf(row)),
         child: Text(
           c.name.isEmpty ? '（未命名课程）' : c.name,
-          maxLines: paletteOf(context).sunny ? null : 1,
-          overflow: paletteOf(context).sunny
-              ? TextOverflow.visible
-              : TextOverflow.ellipsis,
+          maxLines: null,
+          overflow: TextOverflow.visible,
           style: TextStyle(
-            fontSize: paletteOf(context).sunny ? 17 : 14.5,
+            fontSize: 17,
             fontWeight: FontWeight.w700,
             color: c.weekday < 1 ? textFaint(context) : textPrimary(context),
           ),

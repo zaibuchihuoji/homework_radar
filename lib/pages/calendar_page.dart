@@ -14,7 +14,6 @@ import '../ui/dashed_line.dart';
 import '../ui/hw_card.dart';
 import '../ui/ink_wash.dart';
 import '../ui/style_background.dart';
-import '../ui/theme_page_parts.dart';
 import '../ui/tokens.dart';
 import '../ui/focus_parts.dart';
 import 'detail_page.dart';
@@ -61,7 +60,12 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.state,
+    builder: (context, _) => _buildCalendar(context),
+  );
+
+  Widget _buildCalendar(BuildContext context) {
     final p = paletteOf(context);
     final events = _events;
     final dayKey = DateTime(_selected.year, _selected.month, _selected.day);
@@ -71,10 +75,8 @@ class _CalendarPageState extends State<CalendarPage> {
       (e) => e.key.year == _selected.year && e.key.month == _selected.month,
     );
     final monthCount = monthDays.fold<int>(0, (sum, e) => sum + e.value.length);
-    final dayTitle =
-        '${_selected.month}月${_selected.day}日 · ${dayItems.isEmpty ? '没有截止' : '${dayItems.length} 项截止'}';
     final calendar = TableCalendar<HomeworkItem>(
-      headerVisible: !p.sunny,
+      headerVisible: false,
       firstDay: DateTime.now().subtract(const Duration(days: 120)),
       lastDay: DateTime.now().add(const Duration(days: 400)),
       focusedDay: _selected,
@@ -86,12 +88,8 @@ class _CalendarPageState extends State<CalendarPage> {
           setState(() => _selected = selected),
       // 翻页也回写 focusedDay，防止时钟/外部重建时跳回旧月份。
       onPageChanged: (focused) => setState(() => _selected = focused),
-      rowHeight: p.sunny
-          ? 48
-          : p.clean
-          ? 52
-          : 48,
-      daysOfWeekHeight: p.clean ? 20 : 34,
+      rowHeight: 48,
+      daysOfWeekHeight: 20,
       headerStyle: HeaderStyle(
         formatButtonVisible: false,
         titleCentered: true,
@@ -138,97 +136,12 @@ class _CalendarPageState extends State<CalendarPage> {
       availableGestures: AvailableGestures.horizontalSwipe,
     );
 
-    if (p.sunny) {
-      return _focusCalendar(
-        context,
-        calendar,
-        dayItems,
-        monthCount,
-        monthDays.length,
-      );
-    }
-    return StyleBackground(
-      child: Scaffold(
-        backgroundColor: scaffoldBgOf(context),
-        appBar: AppBar(title: appBarTitle(context, '作业日历')),
-        body: !_localeReady
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
-                children: [
-                  if (!p.clean) ...[
-                    ThemePageHeader(
-                      compact: true,
-                      title: '作业日历',
-                      kicker: 'CALENDAR',
-                      icon: Icons.calendar_month_outlined,
-                      summary: '本月 $monthCount 项截止 · ${monthDays.length} 天有安排',
-                    ),
-                  ],
-                  if (p.sunny)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        '本月 $monthCount 项截止',
-                        style: TextStyle(fontSize: 12, color: p.ink2),
-                      ),
-                    ),
-                  if (p.clean)
-                    Container(
-                      decoration: BoxDecoration(
-                        color: cardColor(context),
-                        borderRadius: BorderRadius.circular(18),
-                        border: p.sunny ? null : cardBorderOf(context),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: calendar,
-                    )
-                  else
-                    ThemePanel(
-                      seed: 'calendar-month',
-                      padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
-                      child: calendar,
-                    ),
-                  const SizedBox(height: 14),
-                  if (p.clean)
-                    Text(
-                      dayTitle,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: textSecondary(context),
-                      ),
-                    )
-                  else ...[
-                    ThemeSectionHeading(
-                      title: '当日安排',
-                      detail: '${dayItems.length} 项截止',
-                    ),
-                    const SizedBox(height: 8),
-                    _agendaDate(context, dayTitle),
-                  ],
-                  const SizedBox(height: 8),
-                  if (dayItems.isEmpty)
-                    _emptyDay(context)
-                  else
-                    ...dayItems.map(
-                      (hw) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: buildHwCard(
-                          context,
-                          hw,
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  HomeworkDetailPage(homeworkId: hw.id),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-      ),
+    return _focusCalendar(
+      context,
+      calendar,
+      dayItems,
+      monthCount,
+      monthDays.length,
     );
   }
 
@@ -687,111 +600,6 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _agendaDate(BuildContext context, String title) {
-    final p = paletteOf(context);
-    return ThemePanel(
-      seed: 'calendar-agenda',
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          if (p.inkWash)
-            const Padding(
-              padding: EdgeInsets.only(right: 10),
-              child: InkSealChip(glyph: '日'),
-            )
-          else if (p.editorial || p.journal) ...[
-            Text(
-              _selected.day.toString().padLeft(2, '0'),
-              style: TextStyle(
-                fontSize: p.editorial ? 36 : 28,
-                fontWeight: FontWeight.w900,
-                fontFamily: p.journal ? 'serif' : null,
-                color: p.ink,
-              ),
-            ),
-            const SizedBox(width: 12),
-          ] else ...[
-            Icon(
-              p.pixel
-                  ? Icons.event_note
-                  : p.receipt
-                  ? Icons.receipt_long
-                  : p.terminal
-                  ? Icons.chevron_right
-                  : Icons.today_outlined,
-              color: p.ink2,
-              size: 20,
-            ),
-            const SizedBox(width: 10),
-          ],
-          Expanded(
-            child: Text(
-              p.terminal ? '> $title' : title,
-              style: serifTitle(
-                context,
-                monoText(
-                  context,
-                  TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: p.ink,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _emptyDay(BuildContext context) {
-    final p = paletteOf(context);
-    final message = Text(
-      p.clean ? '这一天没有作业截止 🎉' : '这一天没有作业截止',
-      style: TextStyle(fontSize: 13, color: p.ink3),
-      textAlign: TextAlign.center,
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Center(
-        child: p.inkWash
-            ? Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const SizedBox(
-                    width: 240,
-                    height: 72,
-                    child: InkMountains(height: 72),
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    spacing: 7,
-                    children: [
-                      message,
-                      const InkSealChip(glyph: '闲'),
-                    ],
-                  ),
-                ],
-              )
-            : p.receipt
-            ? Column(
-                children: [
-                  const DashedLine(),
-                  const SizedBox(height: 12),
-                  message,
-                  const SizedBox(height: 12),
-                  const DashedLine(),
-                ],
-              )
-            : message,
       ),
     );
   }
