@@ -2,14 +2,26 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homework_radar/services/timetable_ocr.dart';
 
-OcrBlock blk(String text, double cx, double cy, {double w = 60, double h = 18}) =>
-    OcrBlock(text: text, left: cx - w / 2, top: cy - h / 2, width: w, height: h);
+OcrBlock blk(
+  String text,
+  double cx,
+  double cy, {
+  double w = 60,
+  double h = 18,
+}) => OcrBlock(
+  text: text,
+  left: cx - w / 2,
+  top: cy - h / 2,
+  width: w,
+  height: h,
+);
 
 /// 7 列表头 + 表尺 1..4（表尺 y=100,200,300,400，行带间距 100）。
 List<OcrBlock> grid() => [
-      for (var d = 0; d < 7; d++) blk('星期${'一二三四五六日'[d]}', 120.0 + d * 120, 40),
-      for (var n = 1; n <= 4; n++) blk('$n', 40, 100.0 + (n - 1) * 100, w: 20),
-    ];
+  for (var d = 0; d < 7; d++) blk('星期${'一二三四五六日'[d]}', 120.0 + d * 120, 40),
+  for (var n = 1; n <= 4; n++)
+    blk('${n * 2 - 1}-${n * 2}节', 40, 100.0 + (n - 1) * 100, w: 20),
+];
 
 void main() {
   // 7 列课表：列锚点 x = 120, 240, ..., 840；表尺在 x = 40
@@ -110,8 +122,11 @@ void main() {
     expect(list, hasLength(9));
     for (final c in list) {
       expect(c.startSection, inInclusiveRange(1, 16), reason: '${c.name} 越界');
-      expect(c.endSection, inInclusiveRange(c.startSection, 16),
-          reason: '${c.name} 越界');
+      expect(
+        c.endSection,
+        inInclusiveRange(c.startSection, 16),
+        reason: '${c.name} 越界',
+      );
     }
     // 第 9 组此前按 gi*2+1 算出 17-18 流出解析器
     final last = list.firstWhere((c) => c.name == '课程9');
@@ -131,7 +146,8 @@ void main() {
       blk('星期四', 480, 40),
       blk('星期六', 720, 40),
       blk('星期日', 840, 40),
-      for (var n = 1; n <= 4; n++) blk('$n', 40, 100.0 + (n - 1) * 100, w: 20),
+      for (var n = 1; n <= 4; n++)
+        blk('${n * 2 - 1}-${n * 2}节', 40, 100.0 + (n - 1) * 100, w: 20),
       // 周四列（锚点 x=480）一格，靠表尺定在带 3 → 5-6 节；
       // pitch 翻倍时表尺列被误排除、退化成组序号兜底 → 错成 1-2 节
       blk('操作系统', 480, 300),
@@ -148,10 +164,7 @@ void main() {
   });
 
   test('表头退化（无网格）：无周次条目也不丢', () {
-    final blocks = [
-      blk('高等数学', 100, 100),
-      blk('教A-301', 100, 118),
-    ];
+    final blocks = [blk('高等数学', 100, 100), blk('教A-301', 100, 118)];
     final list = TimetableOcrParser.parse(blocks);
     expect(list, hasLength(1), reason: '无周次条目此前被 _parseNoGrid 整条过滤');
     expect(list.single.name, '高等数学');
@@ -161,10 +174,7 @@ void main() {
   });
 
   test('识别不到表头：全部落到未定列（weekday 0）', () {
-    final blocks = [
-      blk('高等数学', 100, 100),
-      blk('1-16周', 100, 130),
-    ];
+    final blocks = [blk('高等数学', 100, 100), blk('1-16周', 100, 130)];
     final list = TimetableOcrParser.parse(blocks);
     expect(list, hasLength(1));
     expect(list.first.weekday, 0);

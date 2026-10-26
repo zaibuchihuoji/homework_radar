@@ -182,16 +182,16 @@ class ZhihuishuService {
 
   /// Cookie 是否有效（问一次课程网关第 1 页），结论见 [ZhsSessionState]。
   ZhsSessionState? lastSessionState;
-  Future<ZhsSessionState> checkLogin() async {
-    final state = await _checkLogin();
+  Future<ZhsSessionState> checkLogin({bool refresh = false}) async {
+    final state = await _checkLogin(refresh: refresh);
     lastSessionState = state;
     return state;
   }
 
-  Future<ZhsSessionState> _checkLogin() async {
+  Future<ZhsSessionState> _checkLogin({bool refresh = false}) async {
     if (cookie == null || cookie!.isEmpty) return ZhsSessionState.expired;
     final current = _examApi ??= ZhihuishuExamApi(cookie: cookie);
-    final enrolled = await current.enrollments();
+    final enrolled = await current.enrollments(refresh: refresh);
     if (current.authRejected) return ZhsSessionState.expired;
     if (enrolled.complete) return ZhsSessionState.ok;
     final resp = await _gatewayPost(_courseGateway, {
@@ -710,6 +710,9 @@ class ZhihuishuService {
     }
 
     await Future.wait([for (var i = 0; i < 2; i++) worker()]);
+    if (await checkLogin(refresh: true) != ZhsSessionState.ok) {
+      listFailed = true;
+    }
     return out;
   }
 }

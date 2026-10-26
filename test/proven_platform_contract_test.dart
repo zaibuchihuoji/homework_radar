@@ -6,6 +6,7 @@ import 'package:homework_radar/services/mooc_service.dart';
 import 'package:homework_radar/services/xuetangx_service.dart';
 
 import 'support/synthetic_http.dart';
+import 'support/mooc_school_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -57,7 +58,10 @@ void main() {
               return SyntheticResponse('{"code":401}', 401);
             }
             return SyntheticResponse(
-              '{"code":0,"result":[{"courseId":1,"termId":2,"name":"Course"}]}',
+              jsonEncode({
+                'code': 0,
+                'result': [moocSchoolPanel(1, termId: 2, name: 'Course')],
+              }),
             );
           }
           return SyntheticResponse(jsonEncode(fixture));

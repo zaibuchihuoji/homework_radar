@@ -19,6 +19,9 @@ class MoocCourse {
   String name;
   String courseId;
   String? termId;
+  int? mode;
+  DateTime? startAt;
+  DateTime? endAt;
   MoocCourse(this.name, this.courseId, [this.termId]);
 }
 
@@ -37,6 +40,10 @@ class MoocService {
 
   /// 课程级请求失败次数。
   int failedCount = 0;
+
+  /// Only a complete, authenticated scan may narrow the active local scope.
+  /// null means unknown, while an empty set is a confirmed empty school term.
+  Set<String>? schoolTermScope;
 
   static final _csrfFromJson = RegExp(r'"csrfKey"\s*:\s*"(\w+)"');
   static final _csrfFromJs = RegExp(r'''csrfKey\s*[=:]\s*["']?(\w{10,})''');
@@ -59,7 +66,7 @@ class MoocService {
     final response = await SafeHttp.postForm(
       'https://www.icourse163.org/web/j/'
       'learnerCourseRpcBean.getMyLearnedCoursePanelList.rpc?csrfKey=${Uri.encodeQueryComponent(csrfKey!)}',
-      body: {'type': '30', 'p': '1', 'psize': '1'},
+      body: {'type': '30', 'courseType': '2', 'p': '1', 'psize': '1'},
       headers: _headers,
     );
     if (response == null || response.statusCode >= 500) return null;
@@ -117,8 +124,8 @@ class MoocService {
     'edu-script-token': csrfKey ?? '',
   };
 
-  /// 我学的课程（翻页拉全：此前固定第 1 页 32 条，选课多的用户第 33 门起
-  /// 永远拉不到，还会被同步层当「完整抓取」清掉旧条目）。
+  /// Official school-course tab uses courseType=2 (public-course tab uses 1).
+  /// Keep all pages before filtering: a full page of old courses is not EOF.
   Future<List<MoocCourse>> courses() async {
     if (csrfKey == null) await refreshCsrfKey();
     if (csrfKey == null) {
@@ -130,7 +137,7 @@ class MoocService {
       var resp = await SafeHttp.postForm(
         'https://www.icourse163.org/web/j/'
         'learnerCourseRpcBean.getMyLearnedCoursePanelList.rpc?csrfKey=$csrfKey',
-        body: {'type': '30', 'p': '$page', 'psize': '32'},
+        body: {'type': '30', 'courseType': '2', 'p': '$page', 'psize': '32'},
         headers: _headers,
       );
       // 非 200 可能是 csrfKey 被服务端轮换：刷新一次重试，别把旧会话
@@ -141,7 +148,12 @@ class MoocService {
           resp = await SafeHttp.postForm(
             'https://www.icourse163.org/web/j/'
             'learnerCourseRpcBean.getMyLearnedCoursePanelList.rpc?csrfKey=$csrfKey',
-            body: {'type': '30', 'p': '$page', 'psize': '32'},
+            body: {
+              'type': '30',
+              'courseType': '2',
+              'p': '$page',
+              'psize': '32',
+            },
             headers: _headers,
           );
         }
@@ -175,7 +187,11 @@ class MoocService {
         listFailed = true;
         return found;
       }
-      found.addAll(pageCourses);
+      for (final course in pageCourses) {
+        final eligible = _inSchoolSemester(course);
+        if (eligible == null) listFailed = true;
+        if (eligible == true) found.add(course);
+      }
       if (pageCourses.length < 32) break; // 短页 = 最后一页
       if (page == 20) listFailed = true;
     }
@@ -185,6 +201,39 @@ class MoocService {
       for (final c in found)
         if (seen.add('${c.courseId}|${c.termId}')) c,
     ];
+  }
+
+  // The official course card reads its selected/enrolled term from termPanel,
+  // not currentTermId (latest public offering), and badges modes 10/15/20 as
+  // SPOC. Merely having schoolPanel is not school enrollment evidence.
+  bool? _inSchoolSemester(MoocCourse course) {
+    final mode = course.mode;
+    if (mode == 0 || mode == 30) return false;
+    if (!const [10, 15, 20].contains(mode)) return null;
+    final start = course.startAt, end = course.endAt;
+    if (course.termId == null ||
+        start == null ||
+        end == null ||
+        !end.isAfter(start)) {
+      return null;
+    }
+    final now = DateTime.now();
+    final (semesterStart, semesterEnd) = switch (now.month) {
+      >= 8 => (DateTime(now.year, 8), DateTime(now.year + 1, 2)),
+      1 => (DateTime(now.year - 1, 8), DateTime(now.year, 2)),
+      _ => (DateTime(now.year, 2), DateTime(now.year, 8)),
+    };
+    return start.isBefore(semesterEnd) && !end.isBefore(semesterStart);
+  }
+
+  static DateTime? _courseDate(dynamic value) {
+    if (value is! num ||
+        !value.isFinite ||
+        value < 946684800000 ||
+        value > 253402300799000) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(value.toInt());
   }
 
   // Only a recognizable list can establish an empty course page. A success
@@ -235,15 +284,20 @@ class MoocService {
     if (node is Map) {
       final keys = node.keys.cast<String>().toSet();
       final hasName = keys.contains('name') && node['name'] is String;
-      final id = node['courseId'] ?? node['id'];
+      final id = node['id'] ?? node['courseId'];
       if (hasName && id != null && RegExp(r'^\d+$').hasMatch('$id')) {
-        final term = node['termId'];
+        final panel = node['termPanel'];
+        final term = panel is Map ? panel['id'] : node['termId'];
+        final validTerm =
+            term != null && RegExp(r'^[1-9]\d*$').hasMatch('$term');
+        final mode = panel is Map
+            ? panel['mode'] ?? node['mode']
+            : node['mode'];
         out.add(
-          MoocCourse(
-            node['name'] as String,
-            '$id',
-            term == null ? null : '$term',
-          ),
+          MoocCourse(node['name'] as String, '$id', validTerm ? '$term' : null)
+            ..mode = int.tryParse('$mode')
+            ..startAt = panel is Map ? _courseDate(panel['startTime']) : null
+            ..endAt = panel is Map ? _courseDate(panel['endTime']) : null,
         );
       } else {
         for (final v in node.values) {
@@ -251,10 +305,8 @@ class MoocService {
         }
         return;
       }
-      // 同层继续找嵌套的课程对象（结构未知，尽量宽松）
-      for (final v in node.values) {
-        _walkForCourses(v, out);
-      }
+      // A course's schoolPanel, teachers and termPanel also contain name/id.
+      // They are metadata, never extra enrolled courses.
     }
   }
 
@@ -263,7 +315,7 @@ class MoocService {
   /// 但这门课没有作业」（空列表）区分——此前一律静默返空列表，同步层把
   /// 失败当「确认消失」，把该课已入库作业连同提醒整课清掉。
   Future<List<HomeworkItem>?> homeworkOf(MoocCourse c) async {
-    final termId = c.termId ?? await _resolveTermId(c.courseId);
+    final termId = c.termId;
     if (termId == null) return null;
     final raw = await _termDtoRaw(termId);
     if (raw == null) return null;
@@ -391,20 +443,6 @@ class MoocService {
       add(exam, 'exam');
     }
     return invalid ? null : items;
-  }
-
-  Future<String?> _resolveTermId(String courseId) async {
-    // 优先从课程页 initial state 里找 termId
-    final resp = await SafeHttp.get(
-      'https://www.icourse163.org/course/-${Uri.encodeComponent(courseId)}',
-      headers: _headers,
-      followRedirects: true,
-    );
-    if (resp != null && resp.statusCode == 200) {
-      final m = RegExp(r'termId["\s:=]+(\d{6,})').firstMatch(resp.body);
-      if (m != null) return m.group(1);
-    }
-    return null;
   }
 
   Future<String?> _termDtoRaw(String termId) async {
@@ -610,6 +648,7 @@ class MoocService {
   Future<List<HomeworkItem>> allHomework({
     void Function(int done, int total)? onProgress,
   }) async {
+    schoolTermScope = null;
     final initialSession = await checkLogin();
     if (initialSession != true) {
       listFailed = true;
@@ -648,6 +687,9 @@ class MoocService {
     final session = await checkLogin();
     if (session != true) listFailed = true;
     if (session == false) loginFailed = true;
+    if (!listFailed && failedCount == 0 && session == true) {
+      schoolTermScope = {for (final c in cs) '${c.courseId}|${c.termId}'};
+    }
     return out;
   }
 }

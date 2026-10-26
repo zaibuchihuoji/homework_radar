@@ -15,6 +15,7 @@ import 'homework_widget_snapshot.dart';
 import 'notification_service.dart';
 import 'safe_http.dart';
 import 'storage.dart';
+import 'stable_hash.dart';
 import 'sync_policy.dart';
 import 'xuetangx_service.dart';
 import 'yuketang_service.dart';
@@ -39,11 +40,12 @@ void mergePlatform(
 }) {
   final bySource = <String, List<HomeworkItem>>{};
   for (final item in merged.values) {
-    if (item.sourceKey != null) {
+    if (item.platform == platform && item.sourceKey != null) {
       bySource.putIfAbsent(item.sourceKey!, () => []).add(item);
     }
   }
   final seenIds = <String>{};
+  final resolvedSources = <String, String>{};
   String? legacyZhsKey(String? key) {
     if (platform != PlatformKind.zhihuishu || key == null) return null;
     final parts = key.split('|');
@@ -57,10 +59,14 @@ void mergePlatform(
     final key = legacyZhsKey(item.sourceKey);
     if (key != null) incomingLegacy[key] = (incomingLegacy[key] ?? 0) + 1;
   }
-  final ambiguous =
+  var ambiguous =
       bySource.values.any((items) => items.length > 1) ||
       incomingLegacy.values.any((count) => count > 1);
   for (final it in incoming) {
+    if (it.platform != platform) {
+      ambiguous = true;
+      continue;
+    }
     var aliases = it.sourceKey == null ? null : bySource[it.sourceKey];
     final legacy = legacyZhsKey(it.sourceKey);
     if (aliases == null && legacy != null && incomingLegacy[legacy] == 1) {
@@ -69,7 +75,40 @@ void mergePlatform(
     final linked = aliases != null && aliases.length == 1
         ? aliases.single
         : null;
-    final resolved = linked == null ? it : it.copyWith(id: linked.id);
+    final source = it.sourceKey;
+    var id = source == null
+        ? it.id
+        : resolvedSources[source] ?? linked?.id ?? it.id;
+    final occupant = merged[id];
+    final uncertainAlias =
+        occupant != null &&
+        source != null &&
+        !resolvedSources.containsKey(source) &&
+        aliases != null &&
+        aliases.length > 1;
+    final collision =
+        occupant != null &&
+        (occupant.platform != platform ||
+            (linked?.id != id &&
+                source != null &&
+                occupant.sourceKey != null &&
+                occupant.sourceKey != source));
+    if (collision || uncertainAlias) {
+      // Keep all old IDs/notes. Only disambiguate the colliding new identity;
+      // changing every stored ID would revive hidden tasks and detach notes.
+      ambiguous = true;
+      final base =
+          '${it.id}__${stableHash('${platform.key}|${source ?? it.id}')}';
+      id = base;
+      var suffix = 2;
+      while (merged.containsKey(id) &&
+          (merged[id]!.platform != platform ||
+              merged[id]!.sourceKey != source)) {
+        id = '${base}_${suffix++}';
+      }
+    }
+    final resolved = id == it.id ? it : it.copyWith(id: id);
+    if (source != null) resolvedSources[source] = resolved.id;
     seenIds.add(resolved.id);
     final old = merged[resolved.id];
     final oldNote = old?.note;
@@ -197,6 +236,7 @@ class SyncService {
       }
     }
     String? loginExpiredNotice; // 收着，等 reschedule 之后才弹（见 run 尾部）
+    var cxExpiredDuringSync = false;
     String? moocExpiredNotice;
     String? zhsExpiredNotice;
     String? xtxExpiredNotice;
@@ -244,6 +284,17 @@ class SyncService {
                     progress(PlatformKind.chaoxing, done, total),
               );
               if (epoch != Storage.syncEpoch) return;
+              final finalSession = await cx.checkLogin();
+              if (epoch != Storage.syncEpoch) return;
+              if (finalSession != true) cx.listFailed = true;
+              if (finalSession == false) {
+                cxExpiredDuringSync = true;
+                result.chaoxingValid = false;
+                loginExpiredNotice = '学习通登录已过期';
+                await Storage.setFlag('cx_ok', false);
+                return;
+              }
+              if (finalSession == null) result.chaoxingUnknown = true;
               mergePlatform(
                 merged,
                 list,
@@ -288,7 +339,10 @@ class SyncService {
                 merged,
                 list,
                 PlatformKind.mooc,
-                complete: !mooc.listFailed && mooc.failedCount == 0,
+                // Narrowing to school/semester scope is not proof that every
+                // excluded historical record was deleted by the platform.
+                // Keep it until the archive-before-removal step below.
+                complete: false,
               );
             }
           }
@@ -421,7 +475,9 @@ class SyncService {
                 merged,
                 list,
                 PlatformKind.yuketang,
-                complete: !ykt.listFailed && ykt.failedCount == 0,
+                // A teacher/auditor enrollment excluded by the corrected
+                // role filter must be archived before its active copy leaves.
+                complete: false,
               );
             }
           }
@@ -512,7 +568,8 @@ class SyncService {
           : p == PlatformKind.zhihuishu &&
                 zhs.lastSessionState == ZhsSessionState.signatureRejected
           ? SyncOutcome.signatureRejected
-          : (p == PlatformKind.mooc && mooc.loginFailed) ||
+          : (p == PlatformKind.chaoxing && cxExpiredDuringSync) ||
+                (p == PlatformKind.mooc && mooc.loginFailed) ||
                 (p == PlatformKind.zhihuishu &&
                     zhs.lastSessionState == ZhsSessionState.expired) ||
                 (p == PlatformKind.xuetangx &&
@@ -603,6 +660,47 @@ class SyncService {
           !merged.containsKey(f.id) &&
           !dismissed.contains(f.id)) {
         merged[f.id] = f; // 同步期间新增的手动作业
+      }
+    }
+
+    for (final platform in [PlatformKind.mooc, PlatformKind.yuketang]) {
+      final scope = platform == PlatformKind.mooc
+          ? mooc.schoolTermScope
+          : ykt.nonStudentClassroomScope;
+      if (scope == null || result.outcomes[platform] != SyncOutcome.success) {
+        continue;
+      }
+      final outsideScope = merged.values.where((h) {
+        if (h.platform != platform) return false;
+        final parts = h.sourceKey?.split('|');
+        // Legacy rows without real course/term identity are also retained in
+        // the read-only archive; guessing by name could attach a public/old
+        // offering to a current school course of the same name.
+        if (platform == PlatformKind.mooc) {
+          return parts == null ||
+              parts.length != 5 ||
+              parts.first != 'mooc' ||
+              !scope.contains('${parts[1]}|${parts[2]}');
+        }
+        // YKT origins may expose different enrollment sets. Only an explicit
+        // teacher/auditor role can exclude a saved classroom; missing/legacy
+        // identity or absence from this origin is not proof of removal.
+        return parts != null &&
+            parts.length == 4 &&
+            parts.first == 'ykt' &&
+            scope.contains(parts[1]);
+      }).toList();
+      if (outsideScope.isNotEmpty) {
+        await Storage.archiveHomeworkScope(
+          platform,
+          outsideScope,
+          reason: platform == PlatformKind.mooc
+              ? 'MOOC：本学期学校课程范围调整'
+              : '雨课堂：正式选课范围调整',
+        );
+        if (epoch != Storage.syncEpoch) return cancelled();
+        final archivedIds = outsideScope.map((h) => h.id).toSet();
+        merged.removeWhere((id, _) => archivedIds.contains(id));
       }
     }
 

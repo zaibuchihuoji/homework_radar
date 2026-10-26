@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import '../app_state.dart';
 import '../ui/focus_parts.dart';
 import '../ui/adaptive.dart';
+import '../ui/theme_forms.dart';
 import '../models/course.dart';
 import '../services/timetable_ocr.dart';
 import 'jw_preview_page.dart';
@@ -29,6 +30,13 @@ class JwOcrImportPage extends StatefulWidget {
 class _JwOcrImportPageState extends State<JwOcrImportPage> {
   bool _busy = false;
   String _status = '';
+  List<OcrBlock>? _blocks;
+  List<Course>? _courses;
+  Set<int>? _selectedRows;
+  List<Course>? _pendingSelection;
+  String? _sourceImage;
+  bool _saveFailed = false;
+  OcrSectionMode _sectionMode = OcrSectionMode.auto;
 
   /// 课表格里字很小（手机截图 20px 上下），放大后再识别明显更准：
   /// 短边 <2000 的图放大到短边 2000（最长边不超过 4000）。
@@ -53,7 +61,7 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       if (short < 2000) {
         var s = 2000 / short;
         if (long * s > 4000) s = 4000 / long;
-        if (s <= 1.05) return path; // 差一点点到 2000，不值得重编一次码
+        if (s <= 1.05 && long <= 4000) return path;
         scale = s;
       } else if (long > 4000) {
         scale = 4000 / long;
@@ -93,6 +101,7 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
     // 截图」会误导用户重拍（数据其实已经入库一半）
     final RecognizedText result;
     final String prepared;
+    late final String originalPath;
     try {
       final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery,
@@ -106,6 +115,7 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
         });
         return;
       }
+      originalPath = picked.path;
       setState(() => _status = '正在识别截图文字…');
       prepared = await _prepareImage(picked.path);
       final input = InputImage.fromFilePath(prepared);
@@ -150,7 +160,7 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
               height: e.boundingBox.height.toDouble(),
             ),
     ];
-    final courses = TimetableOcrParser.parse(blocks);
+    final courses = TimetableOcrParser.parse(blocks, sectionMode: _sectionMode);
     if (!mounted) return;
     if (courses.isEmpty) {
       setState(() {
@@ -161,12 +171,42 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       });
       return;
     }
+    setState(() {
+      _blocks = blocks;
+      _courses = courses;
+      _sourceImage = originalPath;
+      _selectedRows = null;
+      _pendingSelection = null;
+      _saveFailed = false;
+      _busy = false;
+      _status = '';
+    });
+    await _review();
+  }
+
+  Future<void> _review() async {
+    if (_busy || _courses == null) return;
+    setState(() {
+      _busy = true;
+      _saveFailed = false;
+      _pendingSelection = null;
+    });
     final selected = await Navigator.of(context).push<List<Course>>(
       MaterialPageRoute(
-        builder: (_) => JwPreviewPage(courses: courses, sourceLabel: '截图导入'),
+        builder: (_) => JwPreviewPage(
+          courses: _courses!,
+          sourceLabel: '截图导入',
+          sourceImagePath: _sourceImage,
+          selectedRows: _selectedRows,
+          onDraftChanged: (courses, rows) {
+            _courses = courses;
+            _selectedRows = rows;
+          },
+        ),
       ),
     );
     if (!mounted) return;
+    setState(() => _busy = false);
     if (selected == null || selected.isEmpty) {
       // 用户在预览页取消：只重置 _busy 的话状态行永远停在「正在按表格重建课表…」
       setState(() {
@@ -175,6 +215,14 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       });
       return;
     }
+    _pendingSelection = selected;
+    await _confirmAndSave();
+  }
+
+  Future<void> _confirmAndSave() async {
+    final selected = _pendingSelection;
+    if (_busy || selected == null || selected.isEmpty) return;
+    setState(() => _busy = true);
     final replace = await confirmTimetableImport(
       context,
       selected: selected,
@@ -199,15 +247,50 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
         // OCR可能缺列/缺字；默认合并，整表替换必须明确确认。
         fullImport: replace,
       );
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _status = '保存失败：$e（解析结果没丢，可重试保存）';
+        _saveFailed = true;
+        _status = '保存未完成，已保留本次核对结果。可重试保存或继续核对，无需重新识别。';
       });
       return;
     }
     if (mounted) Navigator.of(context).pop(true);
+  }
+
+  Future<void> _changeSectionMode(OcrSectionMode mode) async {
+    if (_busy || mode == _sectionMode) return;
+    if (_courses?.any((c) => c.edited) == true) {
+      final reset = await showDialog<bool>(
+        context: context,
+        builder: (context) => ThemedAlertDialog(
+          title: const Text('重新整理节次？'),
+          content: const Text('这会重置本次识别结果中的人工修改。已保存的旧课表不会改变。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('重新整理'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || reset != true) return;
+    }
+    setState(() {
+      _sectionMode = mode;
+      if (_blocks != null) {
+        _courses = TimetableOcrParser.parse(_blocks!, sectionMode: mode);
+      }
+      _selectedRows = null;
+      _pendingSelection = null;
+      _saveFailed = false;
+      _status = _blocks == null ? '' : '已重新整理，请核对课程与节次。';
+    });
   }
 
   @override
@@ -216,7 +299,8 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
       '教务网页无法读取时，可以使用清晰课表截图导入：\n\n'
       '① 在教务里打开课表页面，整屏截图；\n'
       '② 回到这里选截图，离线识别后确认导入。\n\n'
-      '要求：截图里有完整的「星期一 ~ 星期日」表头，文字清晰不缩放。',
+      '尽量保留完整的星期表头和左侧节次。支持「星期一」「周一」等表头。\n'
+      '标尺不明确时不会自动填写节次，请核对后选择逐节编号或两节一组。',
       style: TextStyle(
         fontSize: 13,
         height: 1.8,
@@ -242,8 +326,40 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
             ),
           ],
           const SizedBox(height: 20),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: '节次标尺',
+              border: OutlineInputBorder(),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<OcrSectionMode>(
+                value: _sectionMode,
+                isExpanded: true,
+                onChanged: _busy
+                    ? null
+                    : (value) {
+                        if (value != null) _changeSectionMode(value);
+                      },
+                items: const [
+                  DropdownMenuItem(
+                    value: OcrSectionMode.auto,
+                    child: Text('自动核对'),
+                  ),
+                  DropdownMenuItem(
+                    value: OcrSectionMode.single,
+                    child: Text('逐节编号：1、2、3…'),
+                  ),
+                  DropdownMenuItem(
+                    value: OcrSectionMode.paired,
+                    child: Text('两节一组：1 代表第 1–2 节'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: _busy ? null : _pickAndRun,
+            onPressed: _busy ? null : () => _pickAndRun(),
             icon: _busy
                 ? const SizedBox(
                     width: 14,
@@ -253,6 +369,22 @@ class _JwOcrImportPageState extends State<JwOcrImportPage> {
                 : const Icon(Icons.photo_outlined),
             label: Text(_busy ? '处理中…' : '选择课表截图'),
           ),
+          if (_courses != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _review,
+              icon: const Icon(Icons.fact_check_outlined),
+              label: const Text('继续核对识别结果'),
+            ),
+          ],
+          if (_saveFailed && _pendingSelection != null) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _busy ? null : _confirmAndSave,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('重试保存'),
+            ),
+          ],
           if (_status.isNotEmpty) ...[
             const SizedBox(height: 16),
             Text(

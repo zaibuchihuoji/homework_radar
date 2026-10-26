@@ -60,7 +60,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
-          (_) async => true,
+          (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
         );
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
@@ -107,6 +107,45 @@ void main() {
       expect(service.failedCount, 0);
     },
   );
+
+  for (final finalStatus in [401, 503]) {
+    test(
+      'CX session $finalStatus after content fetch cannot clear saved homework',
+      () async {
+        final prior = network.handler;
+        var probes = 0;
+        network.handler = (method, uri, body) {
+          if (uri.path.endsWith('/backclazzdata') && ++probes > 1) {
+            return SyntheticResponse('unavailable', finalStatus);
+          }
+          return prior(method, uri, body);
+        };
+        await Storage.saveChaoxing(cookie: 'synthetic');
+        await Storage.setFlag('cx_ok', true);
+        await Storage.saveHomework([
+          HomeworkItem(
+            id: 'old-current-course',
+            platform: PlatformKind.chaoxing,
+            course: 'Existing',
+            title: 'Keep',
+            note: 'Keep note',
+            sourceKey: 'cx|99|99|work|9',
+          ),
+        ]);
+        final result = await SyncService.run(
+          platforms: {PlatformKind.chaoxing},
+        );
+        expect(
+          Storage.homework().any(
+            (h) => h.id == 'old-current-course' && h.note == 'Keep note',
+          ),
+          isTrue,
+        );
+        expect(result.partial, isTrue);
+        expect(Storage.flag('cx_ok'), finalStatus != 401);
+      },
+    );
+  }
 
   for (final response in [
     '<html><title>登录</title><body>请先登录</body></html>',

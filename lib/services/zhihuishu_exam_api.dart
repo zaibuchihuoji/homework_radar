@@ -139,7 +139,10 @@ MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCgfZmpLpPEpEFRKBe+ZjWJUjPe+7qg7pGqcfN3j2eg
     return body['rt'];
   }
 
-  Future<ZhsEnrollments> enrollments() => _enrollments ??= _readEnrollments();
+  Future<ZhsEnrollments> enrollments({bool refresh = false}) {
+    if (refresh) _enrollments = null;
+    return _enrollments ??= _readEnrollments();
+  }
 
   Future<ZhsEnrollments> _readEnrollments() async {
     final courses = <ZhsEnrollment>[];

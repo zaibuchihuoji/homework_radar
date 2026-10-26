@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- User-granted special access for time-sensitive course reminders. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <!-- flutter_local_notifications v16+ 不再自动合并：排期通知的接收器必须
          由应用清单注册，缺了的话 zonedSchedule 排出的全部提醒永远不会触发 -->
@@ -84,6 +86,17 @@
             android:exported="false"/>
         <!-- flutter_local_notifications：到点弹通知 + 重启后重排。
              manifest 注册要求见插件 README（v16 起插件只保留最低限度） -->
+        <receiver
+            android:name=".ReminderRecoveryReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"/>
+                <action android:name="android.intent.action.TIME_SET"/>
+                <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
         <receiver
             android:exported="false"
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />

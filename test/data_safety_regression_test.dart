@@ -54,7 +54,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
-          (call) async => true,
+          (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
         );
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
@@ -255,6 +255,7 @@ void main() {
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
           (call) async {
+            if (call.method == 'pendingNotificationRequests') { return <Map<String, Object?>>[]; }
             if (call.method == 'cancelAllPendingNotifications' && first) {
               first = false;
               arrived.complete();

@@ -65,7 +65,7 @@ void main() {
     }
     messenger.setMockMethodCallHandler(
       const MethodChannel('dexterous.com/flutter/local_notifications'),
-      (_) async => true,
+      (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
     );
     await Storage.init();
     await NotificationService.init();

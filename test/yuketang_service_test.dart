@@ -1,4 +1,4 @@
-// 雨课堂解析器：课程列表（role 5/6 + 漂移兜底）/学习日志活动（type 5 真机
+// 雨课堂解析器：课程列表（正式学生 role 5，排除旁听和教师）/学习日志活动（type 5 真机
 // 形状 + 19/20 社区形状）/截止校验 + 合并状态保留。
 import 'package:flutter_test/flutter_test.dart';
 import 'package:homework_radar/models/homework.dart';
@@ -23,12 +23,12 @@ void main() {
     test('收 role 5/6 的学生课程，跨字段取名字，按 classroom_id 去重', () {
       const body = '''
       {"data":{"list":[
-        {"classroom_id":1001,"role":6,"course_name":"线性代数"},
-        {"classroom_id":1001,"role":6,"course_name":"线性代数副本"},
-        {"classroom_id":1002,"role":3,"course_name":"我是老师"},
-        {"classroom_id":1003,"role":"6","name":"字符串角色也算"},
-        {"classroom_id":1004,"role":6,"title":"标题兜底"},
-        {"classroom_id":1005,"role":6},
+        {"classroom_id":1001,"role":5,"course_name":"线性代数"},
+        {"classroom_id":1001,"role":5,"course_name":"线性代数副本"},
+        {"classroom_id":1002,"role":1,"course_name":"我是老师"},
+        {"classroom_id":1003,"role":"5","name":"字符串角色也算"},
+        {"classroom_id":1004,"role":5,"title":"标题兜底"},
+        {"classroom_id":1005,"role":5},
         {"classroom_id":1006,"role":5,"course_name":"真机实证5也是学生"}
       ]}}
       ''';
@@ -43,7 +43,7 @@ void main() {
       expect(courses[4].name, '真机实证5也是学生');
     });
 
-    test('列表非空但无 role 命中 → 兜底全收（role 口径漂移保护）', () {
+    test('未知 role 返回不完整，不能兜底全收', () {
       const body = '''
       {"data":{"list":[
         {"classroom_id":2001,"role":7,"course_name":"未知角色课"},
@@ -51,9 +51,7 @@ void main() {
       ]}}
       ''';
       final courses = YuketangService.parseCourseList(body);
-      expect(courses, isNotNull);
-      expect(courses!.length, 2);
-      expect(courses[0].name, '未知角色课');
+      expect(courses, isNull);
     });
 
     test('list 为空数组 = 权威无课；list 缺失 = 形状陌生 null', () {
@@ -81,9 +79,15 @@ void main() {
       expect(items, isNotNull);
       expect(items!.length, 1, reason: 'type14 课件无截止概念，直接跳过');
       expect(items[0].title, '体育学院实验室安全考核二（2）');
-      expect(items[0].dueAt, DateTime.fromMillisecondsSinceEpoch(1789383600000));
-      expect(items[0].status, HwStatus.done,
-          reason: 'status=3 且有 score = 已判分完成');
+      expect(
+        items[0].dueAt,
+        DateTime.fromMillisecondsSinceEpoch(1789383600000),
+      );
+      expect(
+        items[0].status,
+        HwStatus.done,
+        reason: 'status=3 且有 score = 已判分完成',
+      );
       expect(items[0].platform, PlatformKind.yuketang);
     });
 
@@ -106,7 +110,10 @@ void main() {
         {"id":"a3","type":0,"title":"视频","content":{"score_d":1799000000000}}
       ]}}
       ''';
-      final items = YuketangService.parseLogActivities(body, courseName: '线性代数');
+      final items = YuketangService.parseLogActivities(
+        body,
+        courseName: '线性代数',
+      );
       expect(items, isNotNull);
       expect(items!.length, 2);
       expect(items[0].title, '第一章作业');
@@ -176,16 +183,21 @@ void main() {
         note: '纸质提交',
       );
       final merged = <String, HomeworkItem>{'ykt_1_2': old};
-      mergePlatform(merged, [
-        HomeworkItem(
-          id: 'ykt_1_2',
-          platform: PlatformKind.yuketang,
-          course: '课',
-          title: '作业',
-          dueAt: DateTime(2027, 1, 10),
-          status: HwStatus.todo,
-        ),
-      ], PlatformKind.yuketang, complete: true);
+      mergePlatform(
+        merged,
+        [
+          HomeworkItem(
+            id: 'ykt_1_2',
+            platform: PlatformKind.yuketang,
+            course: '课',
+            title: '作业',
+            dueAt: DateTime(2027, 1, 10),
+            status: HwStatus.todo,
+          ),
+        ],
+        PlatformKind.yuketang,
+        complete: true,
+      );
       expect(merged['ykt_1_2']!.status, HwStatus.done);
       expect(merged['ykt_1_2']!.note, '纸质提交');
     });
@@ -199,15 +211,20 @@ void main() {
         dueAt: DateTime(2027, 1, 10),
       );
       final merged = <String, HomeworkItem>{'ykt_1_2': old};
-      mergePlatform(merged, [
-        HomeworkItem(
-          id: 'ykt_1_9',
-          platform: PlatformKind.yuketang,
-          course: '课',
-          title: '新作业',
-          dueAt: DateTime(2027, 1, 11),
-        ),
-      ], PlatformKind.yuketang, complete: true);
+      mergePlatform(
+        merged,
+        [
+          HomeworkItem(
+            id: 'ykt_1_9',
+            platform: PlatformKind.yuketang,
+            course: '课',
+            title: '新作业',
+            dueAt: DateTime(2027, 1, 11),
+          ),
+        ],
+        PlatformKind.yuketang,
+        complete: true,
+      );
       expect(merged.containsKey('ykt_1_2'), isFalse);
       expect(merged.containsKey('ykt_1_9'), isTrue);
     });

@@ -43,6 +43,7 @@ void main() {
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
           (call) async {
+            if (call.method == 'pendingNotificationRequests') { return <Map<String, Object?>>[]; }
             calls.add(call);
             if (call.method == 'getNotificationChannels') {
               if (readFails) throw PlatformException(code: 'unavailable');

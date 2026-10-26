@@ -25,6 +25,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
+          if (call.method == 'pendingNotificationRequests') { return <Map<String,Object?>>[]; }
           if (call.method == 'areNotificationsEnabled') return true;
           return true;
         });
@@ -155,7 +156,7 @@ void main() {
     final scheduled = calls.where((c) => c.method == 'zonedSchedule').toList();
     expect(scheduled.length, 500);
     expect(
-      scheduled.where((c) => (c.arguments as Map)['payload'] == '').length,
+      scheduled.where((c) => (c.arguments as Map)['payload'].toString().startsWith('class-reminder:')).length,
       400,
     );
   });

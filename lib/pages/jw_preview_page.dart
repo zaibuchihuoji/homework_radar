@@ -2,6 +2,8 @@
 /// 教务抓取、文本粘贴、截图 OCR 三条导入路都汇到这里。
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../models/course.dart';
@@ -13,11 +15,17 @@ class JwPreviewPage extends StatefulWidget {
     super.key,
     required this.courses,
     required this.sourceLabel,
+    this.sourceImagePath,
+    this.selectedRows,
+    this.onDraftChanged,
   });
 
   /// 解析出的候选课程（weekday 为 0 表示星期未知）
   final List<Course> courses;
   final String sourceLabel;
+  final String? sourceImagePath;
+  final Set<int>? selectedRows;
+  final void Function(List<Course>, Set<int>)? onDraftChanged;
 
   @override
   State<JwPreviewPage> createState() => _JwPreviewPageState();
@@ -34,6 +42,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
   String _filter = '';
 
   bool _selectable(Course c) =>
+      c.name.trim().isNotEmpty &&
       c.weekday >= 1 &&
       c.weekday <= 7 &&
       c.weeks.isNotEmpty &&
@@ -46,8 +55,48 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
   @override
   void initState() {
     super.initState();
-    _rows = [for (final c in widget.courses) _Row(c, checked: _selectable(c))];
+    _rows = [
+      for (var i = 0; i < widget.courses.length; i++)
+        _Row(
+          widget.courses[i],
+          checked:
+              _selectable(widget.courses[i]) &&
+              (widget.selectedRows == null || widget.selectedRows!.contains(i)),
+        ),
+    ];
   }
+
+  void _draftChanged() => widget.onDraftChanged?.call(
+    [for (final row in _rows) row.course],
+    {
+      for (var i = 0; i < _rows.length; i++)
+        if (_rows[i].checked) i,
+    },
+  );
+
+  Future<void> _showSource() => showDialog<void>(
+    context: context,
+    builder: (context) => Dialog.fullscreen(
+      child: Scaffold(
+        appBar: AppBar(title: const Text('课表原图')),
+        body: InteractiveViewer(
+          minScale: .5,
+          maxScale: 8,
+          child: Center(
+            child: Image(
+              image: ResizeImage(
+                FileImage(File(widget.sourceImagePath!)),
+                width: 2400,
+                height: 2400,
+                policy: ResizeImagePolicy.fit,
+              ),
+              errorBuilder: (_, _, _) => const Text('原图暂时无法读取，请返回重新选择。'),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 
   int get _checkedCount => _rows.where((r) => r.checked).length;
 
@@ -62,11 +111,13 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
       row.course = updated;
       row.checked = _selectable(updated);
     });
+    _draftChanged();
   }
 
   @override
   Widget build(BuildContext context) {
     final weekdayUnknown = _rows.where((r) => r.course.weekday < 1).length;
+    final pending = _rows.where((r) => !_selectable(r.course)).length;
     final visible = [
       for (final r in _rows)
         if (_filter.isEmpty ||
@@ -91,6 +142,18 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
       ),
       body: Column(
         children: [
+          if (widget.sourceImagePath != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: _showSource,
+                  icon: const Icon(Icons.image_outlined),
+                  label: const Text('查看原图 · 可放大核对'),
+                ),
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Row(
@@ -98,6 +161,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
                 Expanded(
                   child: Text(
                     '解析出 ${_rows.length} 条，已选 $_checkedCount 条'
+                    '${pending > 0 ? '；待核对 $pending 条' : ''}'
                     '${weekdayUnknown > 0 ? '；$weekdayUnknown 条星期未知，点开可修正' : ''}',
                     style: TextStyle(
                       fontSize: 12.5,
@@ -106,21 +170,36 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
                   ),
                 ),
                 TextButton(
-                  onPressed: () {
-                    // 以「可选行」为基准：存在星期未知行时按总行数比较，
-                    // 全选按钮会永远显示「全选」且无法一键全不选
-                    final target = _checkedCount < _selectableCount;
-                    setState(() {
-                      for (final r in _rows) {
-                        r.checked = target && _selectable(r.course);
-                      }
-                    });
-                  },
-                  child: Text(_checkedCount < _selectableCount ? '全选' : '全不选'),
+                  onPressed: _selectableCount == 0
+                      ? null
+                      : () {
+                          // 以「可选行」为基准：存在星期未知行时按总行数比较，
+                          // 全选按钮会永远显示「全选」且无法一键全不选
+                          final target = _checkedCount < _selectableCount;
+                          setState(() {
+                            for (final r in _rows) {
+                              r.checked = target && _selectable(r.course);
+                            }
+                          });
+                          _draftChanged();
+                        },
+                  child: Text(
+                    _selectableCount == 0
+                        ? '待补全'
+                        : (_checkedCount < _selectableCount ? '全选' : '全不选'),
+                  ),
                 ),
               ],
             ),
           ),
+          if (pending > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: Text(
+                '待核对课程需补全后才能勾选，未勾选的课程不会导入。',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
           if (_rows.length > 8)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
@@ -162,7 +241,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
   Widget _rowTile(BuildContext context, _Row row) {
     final c = row.course;
     const dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-    final time = c.weekday < 1
+    final time = c.weekday < 1 || c.weekday > 7
         ? '星期未知'
         : c.sectionsProvisional
         ? '${dayNames[c.weekday - 1]} 节次待定（点开编辑）'
@@ -176,7 +255,10 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
       value: row.checked,
       onChanged: !_selectable(c)
           ? null
-          : (v) => setState(() => row.checked = v ?? false),
+          : (v) {
+              setState(() => row.checked = v ?? false);
+              _draftChanged();
+            },
       controlAffinity: ListTileControlAffinity.leading,
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
       title: GestureDetector(
@@ -213,6 +295,7 @@ class _JwPreviewPageState extends State<JwPreviewPage> {
   }
 
   Future<void> _save() async {
+    _draftChanged();
     final selected = [
       for (final r in _rows)
         if (r.checked && _selectable(r.course)) r.course,

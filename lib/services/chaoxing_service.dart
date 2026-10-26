@@ -10,6 +10,7 @@
 library;
 
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
@@ -138,11 +139,17 @@ class ChaoxingService {
       'https://mooc1-api.chaoxing.com/mycourse/backclazzdata?view=json&rss=1',
     );
     if (resp == null) return null; // 网络失败 ≠ 登录过期
-    if (resp.statusCode != 200) return false;
+    if (resp.statusCode == 401 || resp.statusCode == 403) return false;
+    if (resp.statusCode != 200) return null;
     try {
-      return resp.body.contains('"result":1');
+      final json = jsonDecode(resp.body);
+      if (json is! Map) return null;
+      final result = json['result'];
+      if (result == 1) return true;
+      if (result == 0) return false;
+      return null;
     } catch (_) {
-      return false;
+      return null;
     }
   }
 
@@ -234,9 +241,17 @@ class ChaoxingService {
       if (li.querySelector('a.not-open-tip') != null) continue;
       final a = li.querySelector('a[href]');
       final nameEl = li.querySelector('.course-name');
-      if (a == null || nameEl == null) continue;
-      final href = a.attributes['href'];
-      if (href == null) continue;
+      final href = a?.attributes['href'];
+      if (href == null ||
+          href.trim().isEmpty ||
+          nameEl == null ||
+          nameEl.text.trim().isEmpty) {
+        listFailed = true;
+        if (!_failureDetails.contains('部分课程信息不完整')) {
+          _failureDetails.add('部分课程信息不完整');
+        }
+        continue;
+      }
       try {
         final link = Uri.parse(url).resolve(href).toString();
         out.add(_CourseRef(nameEl.text.trim(), link));

@@ -12,6 +12,7 @@ import 'package:homework_radar/services/yuketang_service.dart';
 import 'package:homework_radar/services/zhihuishu_service.dart';
 
 import 'support/synthetic_http.dart';
+import 'support/mooc_school_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -182,12 +183,7 @@ void main() {
       return SyntheticResponse(
         jsonEncode({
           'result': [
-            for (var n = 0; n < 32; n++)
-              {
-                'name': 'Course',
-                'courseId': page * 32 + n,
-                'termId': page * 32 + n,
-              },
+            for (var n = 0; n < 32; n++) moocSchoolPanel(page * 32 + n),
           ],
         }),
       );
@@ -275,10 +271,7 @@ void main() {
           ? SyntheticResponse(
               jsonEncode({
                 'code': 200,
-                'result': [
-                  for (var n = 0; n < 32; n++)
-                    {'name': 'Course', 'courseId': n},
-                ],
+                'result': [for (var n = 0; n < 32; n++) moocSchoolPanel(n + 1)],
               }),
             )
           : SyntheticResponse('{"code":500,"message":"Unavailable"}');

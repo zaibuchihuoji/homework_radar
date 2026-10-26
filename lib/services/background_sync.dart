@@ -111,6 +111,21 @@ class BackgroundSync {
   });
 
   Future<bool> _run(String reason) async {
+    if (reason == 'reminders') {
+      // Exact-alarm access / clock changes need offline rescheduling even when
+      // platform sync is disabled and there are no logged-in accounts.
+      try {
+        await state.waitForSync();
+        await Storage.waitForBusinessTransaction();
+        await NotificationService.reschedule(
+          state.homework,
+          courses: state.courses,
+        );
+        return NotificationService.scheduleError.value == null;
+      } catch (_) {
+        return false;
+      }
+    }
     if (reason == 'periodic' || reason == 'retry') {
       if (!Storage.syncConfig().enabled && !_foreground) return true;
     }

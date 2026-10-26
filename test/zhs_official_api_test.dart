@@ -244,6 +244,21 @@ void main() {
         : prior(method, uri, body);
     expect((await api().enrollments()).complete, isFalse);
   });
+  test('final ZHS session probe bypasses cached enrollment evidence', () async {
+    final prior = network.handler;
+    var catalogs = 0;
+    network.handler = (method, uri, body) {
+      if (uri.path.endsWith('listAllRecruits') && ++catalogs > 1) {
+        return SyntheticResponse('expired', 401);
+      }
+      return prior(method, uri, body);
+    };
+    final service = ZhihuishuService(cookie: 'synthetic', examApi: api());
+    await service.allHomework();
+    expect(catalogs, 2);
+    expect(service.listFailed, isTrue);
+    expect(service.lastSessionState, ZhsSessionState.expired);
+  });
   test(
     'failed legacy catalog does not poison a complete official catalog',
     () async {

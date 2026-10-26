@@ -13,6 +13,7 @@ import 'package:homework_radar/services/sync_policy.dart';
 import 'package:homework_radar/services/zhihuishu_service.dart';
 
 import 'support/synthetic_http.dart';
+import 'support/mooc_school_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -38,7 +39,7 @@ void main() {
     );
     messenger.setMockMethodCallHandler(
       const MethodChannel('dexterous.com/flutter/local_notifications'),
-      (_) async => true,
+      (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
     );
     for (final key in [
       'cx_cookie',
@@ -61,6 +62,139 @@ void main() {
     200,
     {'content-type': 'application/json; charset=utf-8'},
   );
+
+  for (final mode in [
+    'ok',
+    'no-students',
+    'empty-origin',
+    'unknown-role',
+    'failed-log',
+    'expired-final',
+  ]) {
+    test(
+      'YKT school enrollment scope $mode preserves data before narrowing',
+      () async {
+        var courseReads = 0;
+        final logClassrooms = <String>[];
+        network.handler = (_, uri, _) {
+          if (uri.path.endsWith('/courses/list')) {
+            if (++courseReads >= 4 && mode == 'expired-final') {
+              return SyntheticResponse('expired', 401);
+            }
+            return json({
+              'errcode': 0,
+              'data': {
+                'list': mode == 'empty-origin'
+                    ? []
+                    : [
+                        if (mode != 'no-students')
+                          {
+                            'classroom_id': 1,
+                            'role': mode == 'unknown-role' ? 7 : 5,
+                            'course_name': 'Current school class',
+                          },
+                        {
+                          'classroom_id': 2,
+                          'role': 6,
+                          'course_name': 'Auditor',
+                        },
+                        {
+                          'classroom_id': 3,
+                          'role': 1,
+                          'course_name': 'Teacher',
+                        },
+                        if (mode == 'ok')
+                          {
+                            'classroom_id': 1,
+                            'role': 6,
+                            'course_name': 'Same class alternate role',
+                          },
+                      ],
+              },
+            });
+          }
+          logClassrooms.add(uri.pathSegments.last);
+          if (mode == 'failed-log') return json({'errcode': 1});
+          return json({
+            'errcode': 0,
+            'data': {
+              'has_more': false,
+              'activities': [
+                {
+                  'type': 5,
+                  'id': 8,
+                  'title': 'Current homework',
+                  'deadline': 1799765999000,
+                },
+              ],
+            },
+          });
+        };
+        await Storage.saveYuketang(cookie: 'synthetic');
+        await Storage.saveHomework([
+          for (final entry in [
+            ('current', 'ykt|1|5|8'),
+            ('auditor', 'ykt|2|5|9'),
+            ('legacy', null),
+          ])
+            HomeworkItem(
+              id: entry.$1,
+              platform: PlatformKind.yuketang,
+              course: 'Saved course',
+              title: entry.$1,
+              sourceKey: entry.$2,
+              note: 'Keep ${entry.$1}',
+              status: HwStatus.done,
+            ),
+          HomeworkItem(
+            id: 'manual',
+            platform: PlatformKind.manual,
+            course: 'Mine',
+            title: 'Manual',
+          ),
+        ]);
+        await Storage.dismiss(
+          'hidden-ykt',
+          jsonEncode(
+            HomeworkItem(
+              id: 'hidden-ykt',
+              platform: PlatformKind.yuketang,
+              course: 'Hidden',
+              title: 'Hidden',
+              sourceKey: 'ykt|2|5|10',
+            ).toJson(),
+          ),
+        );
+        await SyncService.run(platforms: {PlatformKind.yuketang});
+        if (mode == 'ok' || mode == 'no-students') {
+          expect(Storage.homework().map((h) => h.id).toSet(), {
+            'current',
+            'legacy',
+            'manual',
+          });
+          final archived = Storage.accountArchives().single['homework'] as List;
+          expect(archived.map((h) => h['id']).toSet(), {'auditor'});
+          expect(archived.every((h) => h['note'] == 'Keep ${h['id']}'), isTrue);
+          expect(logClassrooms, mode == 'ok' ? ['1'] : isEmpty);
+          if (mode == 'ok') {
+            final current = Storage.homework().firstWhere(
+              (h) => h.id == 'current',
+            );
+            expect(current.note, 'Keep current');
+            expect(current.status, HwStatus.done);
+          }
+        } else {
+          expect(
+            Storage.homework().map((h) => h.id),
+            containsAll(['current', 'auditor', 'legacy', 'manual']),
+          );
+          expect(Storage.accountArchives(), isEmpty);
+        }
+        expect(Storage.hiddenItems(), contains('hidden-ykt'));
+        expect(Storage.dismissedIds(), contains('hidden-ykt'));
+      },
+    );
+  }
 
   test(
     'confirmed expiry during fetch pauses retry and retains existing work',
@@ -162,8 +296,8 @@ void main() {
                   return json({
                     'code': 0,
                     'result': [
-                      {'courseId': 1, 'termId': 1, 'name': 'Healthy'},
-                      {'courseId': 2, 'termId': 2, 'name': 'Empty or failing'},
+                      moocSchoolPanel(1, termId: 1, name: 'Healthy'),
+                      moocSchoolPanel(2, termId: 2, name: 'Empty or failing'),
                     ],
                   });
                 }
@@ -388,9 +522,12 @@ void main() {
           expect(result.partial, incomplete);
           expect(result.message.isNotEmpty, incomplete);
           expect(result.items.map((h) => h.title), contains('Fresh'));
-          expect(result.items.any((h) => h.id == 'old'), incomplete);
+          // A YKT record absent from this origin/without classroom identity
+          // cannot be classified as a confirmed teacher or auditor record.
+          final keepOld = incomplete || platform == PlatformKind.yuketang;
+          expect(result.items.any((h) => h.id == 'old'), keepOld);
           expect(Storage.flag(flag), isTrue);
-          expect(Storage.homework().any((h) => h.id == 'old'), incomplete);
+          expect(Storage.homework().any((h) => h.id == 'old'), keepOld);
         },
       );
     }

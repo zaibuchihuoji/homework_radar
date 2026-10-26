@@ -40,6 +40,15 @@ AppState? appStateForHome;
 BackgroundSync? backgroundSyncForApp;
 
 void _openDetail(String homeworkId) {
+  if (NotificationService.isClassPayload(homeworkId)) {
+    final state = appStateForHome;
+    if (state != null) {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute<void>(builder: (_) => TimetablePage(state: state)),
+      );
+    }
+    return;
+  }
   _navigatorKey.currentState?.push(
     MaterialPageRoute(
       builder: (_) => HomeworkDetailPage(homeworkId: homeworkId),

@@ -85,6 +85,7 @@ class Storage {
     'ui_style',
     'sort_mode',
     'class_reminder',
+    'class_reminder_minutes',
     'reminders',
     'jw_config',
     'timetable_source',
@@ -264,6 +265,28 @@ class Storage {
     if (!hidden.containsKey(id)) return;
     hidden[id] = jsonEncode(item.toJson());
     await _setString('hidden_items', jsonEncode(hidden));
+  }
+
+  /// Save the only historical copy before narrowing active enrollment scope.
+  /// Failure must propagate so the sync cannot remove the active records.
+  /// Hidden bodies/dismissals and other platforms remain in their own stores.
+  static Future<void> archiveHomeworkScope(
+    PlatformKind platform,
+    List<HomeworkItem> items, {
+    required String reason,
+  }) async {
+    if (items.isEmpty) return;
+    final now = DateTime.now();
+    await mergeAccountArchives([
+      {
+        'id': '${now.microsecondsSinceEpoch}_${platform.key}_scope',
+        'createdAt': now.toIso8601String(),
+        'platform': platform.key,
+        'reason': reason,
+        'homework': [for (final h in items) h.toJson()],
+        'hiddenItems': <String, String>{},
+      },
+    ]);
   }
 
   /// 无法确认同一账号时保留无凭据归档，活动数据不跨账号继承。
@@ -491,6 +514,15 @@ class Storage {
 
   /// 上课提醒开关（课前 15 分钟）
   static bool classReminder() => _sp.getBool('class_reminder') ?? true;
+  static int classReminderMinutes() {
+    final value = _sp.getInt('class_reminder_minutes');
+    return value != null && value >= 1 && value <= 180 ? value : 30;
+  }
+
+  static Future<void> saveClassReminderMinutes(int minutes) async {
+    if (minutes < 1 || minutes > 180) throw ArgumentError.value(minutes);
+    await _setInt('class_reminder_minutes', minutes);
+  }
 
   static Future<void> saveClassReminder(bool v) =>
       _setBool('class_reminder', v);

@@ -31,6 +31,7 @@ import '../ui/tokens.dart';
 import '../ui/dashed_line.dart';
 import 'section_times_page.dart';
 import 'notification_settings_page.dart';
+import 'class_reminder_settings_page.dart';
 import 'background_sync_settings_page.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -307,12 +308,24 @@ class SettingsPage extends StatelessWidget {
           _switchTile(
             context,
             icon: Icons.school_outlined,
-            title: '上课前 15 分钟提醒',
+            title: '上课提醒',
             subtitle: Storage.classReminder() && Storage.semesterStart() == null
                 ? '请先在课表页设置开学日期'
                 : null,
             value: Storage.classReminder(),
             onChanged: state.updateClassReminder,
+          ),
+          SettingsDivider(indent: 16),
+          SettingsRow(
+            icon: Icons.notifications_active_outlined,
+            title: '课前提醒时间与状态',
+            subtitle: '提前 ${Storage.classReminderMinutes()} 分钟 · 查看下一条提醒',
+            navigation: true,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ClassReminderSettingsPage(state: state),
+              ),
+            ),
           ),
           SettingsDivider(indent: 16),
           SettingsRow(
@@ -1624,7 +1637,8 @@ class AccountArchivesPage extends StatelessWidget {
                       if (i > 0) const SettingsDivider(),
                       SettingsRow(
                         icon: Icons.inventory_2_outlined,
-                        title: '${archives[i]['platform']}',
+                        title:
+                            '${archives[i]['reason'] ?? archives[i]['platform']}',
                         subtitle:
                             '${archives[i]['createdAt']}\n'
                             '${(archives[i]['homework'] as List? ?? const []).length} 条作业 · '
@@ -1702,7 +1716,7 @@ class _AccountArchiveDetail extends StatelessWidget {
         children: [
           const Padding(
             padding: EdgeInsets.fromLTRB(4, 8, 4, 12),
-            child: SettingsNote('此处保留换号或替换前的数据。查看与导出不会修改当前账号。'),
+            child: SettingsNote('此处保留换号、替换或同步范围调整前的数据。查看与导出不会修改当前账号。'),
           ),
           if (tasks.isNotEmpty)
             SettingsSection(

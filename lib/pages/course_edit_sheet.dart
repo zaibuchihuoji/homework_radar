@@ -53,13 +53,13 @@ class _CourseEditSheetState extends State<CourseEditSheet> {
     _teacher = TextEditingController(text: c?.teacher ?? '');
     _room = TextEditingController(text: c?.room ?? '');
     _weeks = TextEditingController(
-      text: c == null || c.weeks.isEmpty ? '1-20周' : c.weeksText,
+      text: c == null ? '1-20周' : (c.weeks.isEmpty ? '' : c.weeksText),
     );
-    _weekday = (c?.weekday ?? widget.initialWeekday ?? 1).clamp(1, 7);
+    _weekday = c?.weekday ?? (widget.initialWeekday ?? 1).clamp(1, 7);
     // 不做静默钳位：13-16 节的晚课被改写成 12/12 是把错误数据当保存结果。
     // 下拉已支持 1-16，越界值原样展示让用户自己决定怎么改
-    _start = c?.startSection ?? 1;
-    _end = c?.endSection ?? _start + 1;
+    _start = c?.sectionsProvisional == true ? 0 : (c?.startSection ?? 1);
+    _end = c?.sectionsProvisional == true ? 0 : (c?.endSection ?? _start + 1);
   }
 
   @override
@@ -87,6 +87,8 @@ class _CourseEditSheetState extends State<CourseEditSheet> {
   bool get _canSave =>
       _name.text.trim().isNotEmpty &&
       _parsedWeeks != null &&
+      _weekday >= 1 &&
+      _weekday <= 7 &&
       _start >= 1 &&
       _start <= 16 &&
       _end >= _start &&
@@ -186,6 +188,14 @@ class _CourseEditSheetState extends State<CourseEditSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        if (_weekday < 1 ||
+                            _weekday > 7 ||
+                            _start < 1 ||
+                            _end < 1)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 10),
+                            child: Text('上课时间尚未确认，请选择星期和起止节次。'),
+                          ),
                         Wrap(
                           spacing: 6,
                           runSpacing: 6,
@@ -221,7 +231,10 @@ class _CourseEditSheetState extends State<CourseEditSheet> {
                                 ],
                                 onChanged: (v) => setState(() {
                                   _start = v ?? _start;
-                                  if (_end < _start || _end > 16) _end = _start;
+                                  if (_end > 0 &&
+                                      (_end < _start || _end > 16)) {
+                                    _end = _start;
+                                  }
                                 }),
                               ),
                             ),

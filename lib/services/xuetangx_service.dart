@@ -330,6 +330,7 @@ class XuetangxService {
     }
 
     await Future.wait([for (var i = 0; i < 2; i++) worker()]);
+    if (await checkLogin() != XtSessionState.ok) listFailed = true;
     return out;
   }
 

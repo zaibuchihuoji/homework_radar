@@ -63,11 +63,23 @@ class _RLine {
   }
 }
 
+enum OcrSectionMode { auto, single, paired }
+
+class _SectionMark {
+  const _SectionMark(this.y, this.start, this.end, this.known);
+  final double y;
+  final int start, end;
+  final bool known;
+}
+
 class TimetableOcrParser {
   TimetableOcrParser._();
 
-  static final _dayText = RegExp(r'^[（(]?\s*星期\s*([一二三四五六日天])\s*[)）]?$');
-  static final _rulerText = RegExp(r'^[一二三四五六七八九十\d]{1,2}$');
+  static final _dayText = RegExp(
+    r'^[（(]?\s*(?:星期|周|礼拜)\s*([一二三四五六日天])\s*[)）]?$',
+  );
+  static final _number = r'[一二三四五六七八九十\d]{1,3}';
+  static final _rulerText = RegExp('^$_number\$');
   static const _cnDigits = {
     '一': 1,
     '二': 2,
@@ -93,6 +105,49 @@ class TimetableOcrParser {
       '天': 7,
     };
     return map[cn] ?? 0;
+  }
+
+  static int? _axisNumber(String text) {
+    final numeric = int.tryParse(text) ?? _cnDigits[text];
+    if (numeric != null) return numeric;
+    if (text.startsWith('十') && text.length == 2) {
+      final digit = _cnDigits[text.substring(1)];
+      if (digit != null) return 10 + digit;
+    }
+    return null;
+  }
+
+  static _SectionMark? _sectionMark(
+    _RLine line,
+    OcrSectionMode mode, {
+    bool inferSingle = false,
+  }) {
+    final text = line.text.replaceAll(RegExp(r'\s'), '');
+    final range = RegExp('^第?($_number)[-~～—–至]($_number)节?\$')
+        .firstMatch(text);
+    if (range != null) {
+      final start = _axisNumber(range[1]!);
+      final end = _axisNumber(range[2]!);
+      if (start != null &&
+          end != null &&
+          start >= 1 &&
+          end >= start &&
+          end <= 16) {
+        return _SectionMark(line.cy, start, end, true);
+      }
+      return null;
+    }
+    final large = RegExp('^第?($_number)大节\$').firstMatch(text);
+    final single = RegExp('^第?($_number)节\$').firstMatch(text);
+    final bare = _rulerText.hasMatch(text);
+    final n = _axisNumber(large?[1] ?? single?[1] ?? (bare ? text : ''));
+    if (n == null || n < 1 || n > 16) return null;
+    if (large != null || (single == null && mode == OcrSectionMode.paired)) {
+      return n <= 8 ? _SectionMark(line.cy, n * 2 - 1, n * 2, true) : null;
+    }
+    final known =
+        single != null || mode == OcrSectionMode.single || inferSingle;
+    return _SectionMark(line.cy, n, n, known);
   }
 
   static double _median(List<double> v) {
@@ -121,7 +176,8 @@ class TimetableOcrParser {
   /// 同行归并条件：y 邻近 且 与行尾的水平间距小于字高 1.2 倍——
   /// 相邻格子同一行的文字 y 相同但 x 间距大，不能并成一行（列串扰）。
   static List<_RLine> _reassembleLines(List<OcrBlock> atoms) {
-    final sorted = [...atoms]..sort((a, b) {
+    final sorted = [...atoms]
+      ..sort((a, b) {
         final t = a.top.compareTo(b.top);
         return t != 0 ? t : a.left.compareTo(b.left);
       });
@@ -154,31 +210,34 @@ class TimetableOcrParser {
     return lines..sort((a, b) => a.top.compareTo(b.top));
   }
 
-  /// 行中心 → 表尺行带号（1..8）；离任何表尺行都太远（>0.55×间距）
+  /// 行中心 → 标尺索引；离任何表尺行都太远（>0.55×间距）
   /// 返回 null。带归属带滞后：到最近带没有比到上一带的一半更近时，
   /// 仍归上一带。为什么：格子文字自行顶往下排，格底最后一行常越过
   /// 两带中点、几何上离下一带更近，但它是上一格的尾巴——按最近带
   /// 归属会把单带格记成「跨两带」，节次凭空多算一节。
-  static int? _bandOf(_RLine ln, List<(double, int)> ruler, double spacing) {
+  static int? _bandOf(_RLine ln, List<_SectionMark> ruler, double spacing) {
     var k = -1;
     var bd = double.infinity;
     for (var i = 0; i < ruler.length; i++) {
-      final d = (ruler[i].$1 - ln.cy).abs();
+      final d = (ruler[i].y - ln.cy).abs();
       if (d < bd) {
         bd = d;
         k = i;
       }
     }
     if (k < 0 || bd > spacing * 0.55) return null;
-    var n = ruler[k].$2;
+    var n = k;
     if (k > 0) {
-      final dPrev = (ruler[k - 1].$1 - ln.cy).abs();
-      if (bd >= dPrev * 0.5) n = ruler[k - 1].$2;
+      final dPrev = (ruler[k - 1].y - ln.cy).abs();
+      if (bd >= dPrev * 0.5) n = k - 1;
     }
     return n;
   }
 
-  static List<Course> parse(List<OcrBlock> atoms) {
+  static List<Course> parse(
+    List<OcrBlock> atoms, {
+    OcrSectionMode sectionMode = OcrSectionMode.auto,
+  }) {
     if (atoms.isEmpty) return const [];
     final lines = _reassembleLines(atoms);
 
@@ -249,24 +308,27 @@ class TimetableOcrParser {
     final anchors = byDay.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
     final firstX = anchors.first.value;
-    final leftEdge = firstX - pitch * 0.75;
+    final leftEdge = firstX - pitch * 1.5;
 
     // ---- 表尺（大节序号列）----
-    final ruler = <(double, int)>[];
+    final axisLines = <_RLine>[];
     for (final ln in lines) {
       if (ln.cx >= firstX - pitch * 0.35) continue;
       if (ln.cx < leftEdge) continue;
       if (ln.top < headerTop - 10 || ln.top < headerBottom - 2) continue;
-      final t = ln.text.trim();
-      if (!_rulerText.hasMatch(t)) continue;
-      final n = int.tryParse(t) ?? _cnDigits[t];
-      if (n != null && n >= 1 && n <= 8) {
-        ruler.add((ln.cy, n));
-      }
+      if (_sectionMark(ln, sectionMode) != null) axisLines.add(ln);
     }
-    ruler.sort((a, b) => a.$1.compareTo(b.$1));
+    // Within the supported 1–16 sections, an axis extending past 8 cannot
+    // represent two sections per number. Short bare axes remain ambiguous.
+    final inferSingle =
+        sectionMode == OcrSectionMode.auto &&
+        axisLines.any((ln) => (_axisNumber(ln.text.trim()) ?? 0) > 8);
+    final ruler = [
+      for (final ln in axisLines)
+        _sectionMark(ln, sectionMode, inferSingle: inferSingle)!,
+    ]..sort((a, b) => a.y.compareTo(b.y));
     final rulerSpacing = _median([
-      for (var i = 1; i < ruler.length; i++) ruler[i].$1 - ruler[i - 1].$1,
+      for (var i = 1; i < ruler.length; i++) ruler[i].y - ruler[i - 1].y,
     ]);
 
     // ---- 逐列：行重组 → 行带聚格 ----
@@ -277,8 +339,8 @@ class TimetableOcrParser {
       final colAtoms = atoms
           .where(
             (b) =>
-              b.cx >= ax - pitch * 0.45 &&
-              b.cx <= ax + pitch * 0.45 &&
+                b.cx >= ax - pitch * 0.45 &&
+                b.cx <= ax + pitch * 0.45 &&
                 b.top >= headerBottom - 2,
           )
           .toList();
@@ -289,26 +351,31 @@ class TimetableOcrParser {
       // 组元素 =（行, 行带号）：行带号随行留存，节次按组内最小/最大
       // 带号推导（连堂跨带）；无表尺分支带号恒 0
       final groups = <List<(_RLine, int)>>[];
-      var dropped = false;
       if (ruler.length >= 2) {
         // 表尺行带：靠哪行大节就是哪个大节
         var cur = <(_RLine, int)>[];
-        var curLo = 0, curHi = 0;
+        var curLo = -1, curHi = -1;
         void flush() {
           if (cur.isEmpty) return;
           groups.add(cur);
           cur = <(_RLine, int)>[];
-          curLo = curHi = 0;
+          curLo = curHi = -1;
         }
 
         for (final ln in colLines) {
           final band = _bandOf(ln, ruler, rulerSpacing);
           if (band == null) {
-            // 表尺覆盖不到的行组：表格下方注释/杂线，整组丢弃
-            flush();
-            dropped = true;
+            // Keep out-of-axis text as provisional candidates, rather than
+            // losing a course when OCR missed a lower axis label.
+            if (cur.isNotEmpty &&
+                (cur.last.$2 >= 0 ||
+                    ln.top - cur.last.$1.top > ln.height * 1.9)) {
+              flush();
+            }
+            cur.add((ln, -1));
             continue;
           }
+          if (cur.isNotEmpty && cur.last.$2 < 0) flush();
           if (cur.isNotEmpty && (band < curLo || band > curHi)) {
             // 带号变化 = 同列下一个格子开始了，要切组。此前只有
             // 「匹配不到任何带」才切组，而相邻带的覆盖范围必然重叠
@@ -322,7 +389,7 @@ class TimetableOcrParser {
             }
           }
           cur.add((ln, band));
-          if (curLo == 0 || band < curLo) curLo = band;
+          if (curLo < 0 || band < curLo) curLo = band;
           if (band > curHi) curHi = band;
         }
         flush();
@@ -345,30 +412,32 @@ class TimetableOcrParser {
         // OCR 漏读小字周次行的格子如果整格零产出，整门课就无声消失——
         // 截图导入保留无周次条目，交给预览页人工补
         final entries = TimetableParser.parseCellLines(
-            g.map((e) => e.$1.text).join('\n'),
+          g.map((e) => e.$1.text).join('\n'),
           keepWeekless: true,
         );
         // 组内行带的最小/最大号 → 首带起始 ~ 末带结束（带1+带2 →
         // 1-4 节）。此前按组中心找单一最近带、写单带 2 节区间，
         // rowspan 连堂（真实占 4 节）的节次被塌缩掉一半
-        var minBand = 0, maxBand = 0;
+        var minBand = -1, maxBand = -1;
         for (final e in g) {
-          if (e.$2 <= 0) continue;
-          if (minBand == 0 || e.$2 < minBand) minBand = e.$2;
+          if (e.$2 < 0) continue;
+          if (minBand < 0 || e.$2 < minBand) minBand = e.$2;
           if (e.$2 > maxBand) maxBand = e.$2;
         }
         for (final en in entries) {
-          final provisionalSections = en.start <= 0 && ruler.length < 2;
-          if (en.start <= 0 && minBand > 0) {
+          final located =
+              ruler.length >= 2 &&
+              minBand >= 0 &&
+              g.every((e) => e.$2 >= 0 && ruler[e.$2].known);
+          final provisionalSections = en.start <= 0 && !located;
+          if (en.start <= 0 && located) {
             en
-              ..start = minBand * 2 - 1
-              ..end = maxBand * 2;
+              ..start = ruler[minBand].start
+              ..end = ruler[maxBand].end;
           }
-          if (en.start <= 0 && !dropped) {
-            // 无表尺兜底：把「该列第几组」当「第几大节」。某天大节
-            // 空堂会让序号整体错位一格——不做复杂补偿（预览页可人工
-            // 改节次），只把节次钳回 1..16：9 个以上组时 gi*2+1 会
-            // 算出 17-18 越过节次流出解析器
+          if (en.start <= 0) {
+            // 这里只是候选列表使用的占位范围，不能当成真实上课时间。
+            // provisionalSections 保持待定，预览不勾选，编辑必须明确补齐。
             final s = (gi * 2 + 1).clamp(1, 16);
             en
               ..start = s
@@ -398,16 +467,19 @@ class TimetableOcrParser {
       // 类无周次条目此前被整条过滤、课程无声消失；预览页本就不默认
       // 勾选无周次条目，交人工补即可
       final entries = TimetableParser.parseCellLines(
-          cur.map((l) => l.text).join('\n'),
+        cur.map((l) => l.text).join('\n'),
         keepWeekless: true,
       );
       for (final e in entries) {
+        final provisional = e.start <= 0;
         if (e.start <= 0) {
           e
             ..start = 1
             ..end = 2;
         }
-        out.add(TimetableParser.entryToCourse(e, 0));
+        out.add(
+          TimetableParser.entryToCourse(e, 0, provisionalSections: provisional),
+        );
       }
     }
 

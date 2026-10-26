@@ -6,7 +6,8 @@
 ///
 /// 端点（社区逆向实证，yuketang-helper 系）：
 /// 1. 课程列表 `GET {origin}/v2/api/web/courses/list?identity=2`
-///    → {list: [{classroom_id, role, ...}]}，role==6 为学生身份；
+///    → {list: [{classroom_id, role, ...}]}，官方前端 role=5 为正式学生，
+///    role=6 为旁听，role=1 为教师；只同步正式选课；
 /// 2. 学习日志 `GET /v2/api/web/logs/learn/{classroomId}?page=&offset=200&sort=0&actype=-1`
 ///    → {activities: [...]}。真机实证（2026-10-06）：考核为 type==5，
 ///    截止/成绩在条目顶层 deadline/score/status；社区文档形状 type==19
@@ -79,6 +80,11 @@ class YuketangService {
   /// 课程级失败次数（单课失败不当「没有作业」）。
   int failedCount = 0;
 
+  /// Positive non-student evidence only, after a complete scan/session check.
+  /// Absence on one origin cannot prove removal on another institutional site.
+  Set<String>? nonStudentClassroomScope;
+  Set<String> _listedNonStudentClassrooms = {};
+
   /// 会话实际可用的 origin（课程列表首个成功者）；日志接口必须打同一
   /// origin——长江雨课堂用户的会话在主站不认，写死主站会让作业全挂。
   String? _activeOrigin;
@@ -148,10 +154,11 @@ class YuketangService {
               .writeAsStringSync(resp.body, flush: true);
         } catch (_) {}
       }
-      final parsed = parseCourseList(resp.body);
+      final parsed = _parseCourseScan(resp.body);
       if (parsed != null) {
         _activeOrigin = origin;
-        return parsed;
+        _listedNonStudentClassrooms = parsed.nonStudent;
+        return parsed.courses;
       }
       // 形状陌生：换下一个 origin；两个都不行在循环外落 listFailed
     }
@@ -163,10 +170,15 @@ class YuketangService {
   /// course_name/name/title，缺省「课程 {cid}」。list 缺失/非数组返回
   /// null（形状陌生），空数组返回空列表（授权正常无课）。
   ///
-  /// role 口径：社区实证 6=学生，2026-10-06 真机（个人版号）实证 5 也是
-  /// 学生（一门 57 人班级课）。因此先按 5/6 过滤；若列表非空却没有一条
-  /// 命中，视为 role 字段口径再漂移，兜底全收——宁可多拉，不能静默 0 课。
-  static List<YktCourse>? parseCourseList(String body) {
+  /// Official pc client (2026-10-26): STUDENT=5, TEACHER=1, AUDITOR=6;
+  /// its course card explicitly badges role 6 as auditing. Unknown/missing roles
+  /// are incomplete evidence, never a reason to import all classroom roles.
+  static List<YktCourse>? parseCourseList(String body) =>
+      _parseCourseScan(body)?.courses;
+
+  static ({List<YktCourse> courses, Set<String> nonStudent})? _parseCourseScan(
+    String body,
+  ) {
     dynamic json;
     try {
       json = jsonDecode(body);
@@ -191,27 +203,28 @@ class YuketangService {
     }
 
     final out = <YktCourse>[];
+    final excluded = <String>{};
     final seen = <String>{};
     // A malformed student row must not disappear from a supposedly complete
     // course list, even when another course parsed successfully.
     for (final e in data['list'] as List) {
       if (e is! Map || fromEntry(e) == null) return null;
+      if (!const [1, '1', 5, '5', 6, '6'].contains(e['role'])) return null;
     }
     for (final e in data['list'] as List) {
       if (e is! Map) continue;
       final role = e['role'];
-      if (role != 6 && role != '6' && role != 5 && role != '5') continue;
       final c = fromEntry(e);
+      if (role != 5 && role != '5') {
+        if (c != null) excluded.add(c.classroomId);
+        continue;
+      }
       if (c != null && seen.add(c.classroomId)) out.add(c);
     }
-    if (out.isEmpty) {
-      for (final e in data['list'] as List) {
-        if (e is! Map) continue;
-        final c = fromEntry(e);
-        if (c != null && seen.add(c.classroomId)) out.add(c);
-      }
-    }
-    return out;
+    // Multiple role rows can refer to one classroom. Positive formal student
+    // evidence must not be overridden by an alternate teacher/auditor row.
+    excluded.removeAll(seen);
+    return (courses: out, nonStudent: excluded);
   }
 
   /// 单门课程的作业/考试截止（学习日志活动流）。形状见
@@ -275,6 +288,8 @@ class YuketangService {
   Future<List<HomeworkItem>> allHomework({
     void Function(int done, int total)? onProgress,
   }) async {
+    nonStudentClassroomScope = null;
+    _listedNonStudentClassrooms = {};
     if (await checkLogin() != YktSessionState.ok) {
       listFailed = true;
       return [];
@@ -304,6 +319,11 @@ class YuketangService {
     }
 
     await Future.wait([for (var i = 0; i < 2; i++) worker()]);
+    final session = await checkLogin();
+    if (session != YktSessionState.ok) listFailed = true;
+    if (!listFailed && failedCount == 0 && session == YktSessionState.ok) {
+      nonStudentClassroomScope = {..._listedNonStudentClassrooms};
+    }
     return out;
   }
 

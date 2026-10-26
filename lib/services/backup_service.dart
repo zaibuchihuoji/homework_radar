@@ -40,6 +40,7 @@ class BackupService {
       'uiStyle': Storage.uiStyle(),
       'sortMode': Storage.sortMode(),
       'classReminder': Storage.classReminder(),
+      'classReminderMinutes': Storage.classReminderMinutes(),
       'reminders': Storage.reminders().toJson(),
       'jwConfig': Storage.jwConfigRaw() ?? '',
     },
@@ -208,6 +209,14 @@ class BackupService {
       }
     }
     final settings = decoded['settings'];
+    final classMinutes = settings is Map
+        ? settings['classReminderMinutes']
+        : null;
+    if (settings is Map &&
+        settings.containsKey('classReminderMinutes') &&
+        (classMinutes is! int || classMinutes < 1 || classMinutes > 180)) {
+      throw const FormatException('课前提醒时间格式损坏，未覆盖当前数据');
+    }
     final reminder = settings is Map && settings['reminders'] is Map
         ? ReminderSettings.fromJson(
             Map<String, dynamic>.from(settings['reminders'] as Map),
@@ -307,6 +316,9 @@ class BackupService {
         if (s['sortMode'] is String) await Storage.saveSortMode(s['sortMode']);
         if (s['classReminder'] is bool) {
           await Storage.saveClassReminder(s['classReminder']);
+        }
+        if (classMinutes is int) {
+          await Storage.saveClassReminderMinutes(classMinutes);
         }
         if (reminder != null) await Storage.saveReminders(reminder);
         if (s['jwConfig'] is String) {

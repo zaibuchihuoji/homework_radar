@@ -56,6 +56,7 @@ void main() {
     messenger.setMockMethodCallHandler(
       const MethodChannel('dexterous.com/flutter/local_notifications'),
       (call) async {
+            if (call.method == 'pendingNotificationRequests') { return <Map<String, Object?>>[]; }
         if (call.method == 'cancelAllPendingNotifications') {
           if (entered != null && !entered!.isCompleted) entered!.complete();
           if (release != null) await release!.future;

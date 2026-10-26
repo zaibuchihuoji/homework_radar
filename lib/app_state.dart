@@ -760,6 +760,13 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateClassReminderMinutes(int minutes) async {
+    await Storage.waitForBusinessTransaction();
+    await Storage.saveClassReminderMinutes(minutes);
+    await NotificationService.reschedule(homework, courses: courses);
+    notifyListeners();
+  }
+
   /// 手动隐藏某条作业（老师撤回、不需要提交等场景）。
   Future<void> dismissHomework(HomeworkItem hw) async {
     await Storage.waitForBusinessTransaction();

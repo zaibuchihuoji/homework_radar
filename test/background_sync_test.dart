@@ -49,7 +49,9 @@ void main() {
     );
     messenger.setMockMethodCallHandler(
       const MethodChannel('dexterous.com/flutter/local_notifications'),
-      (_) async => true,
+      (call) async => call.method == 'pendingNotificationRequests'
+          ? <Map<String, Object?>>[]
+          : true,
     );
     messenger.setMockMethodCallHandler(BackgroundSync.channel, (call) async {
       if (call.method == 'ready') return false;
@@ -70,6 +72,15 @@ void main() {
   });
 
   test(
+    'alarm permission recovery reschedules offline without fetching platforms',
+    () async {
+      await Storage.saveSyncConfig(const SyncConfig(enabled: false));
+      expect(await controller.run('reminders'), true);
+      expect(state.requests, isEmpty);
+    },
+  );
+
+  test(
     'one failed publication cannot poison future automatic retries',
     () async {
       await Storage.clearChaoxing();
@@ -86,7 +97,9 @@ void main() {
       await expectLater(actual.waitForSync(), completes);
       messenger.setMockMethodCallHandler(
         const MethodChannel('dexterous.com/flutter/local_notifications'),
-        (_) async => true,
+        (call) async => call.method == 'pendingNotificationRequests'
+            ? <Map<String, Object?>>[]
+            : true,
       );
       await expectLater(actual.syncAll(), completes);
       actual.dispose();

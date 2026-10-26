@@ -26,6 +26,7 @@ internal object SyncRuntimeHost {
         val engine = FlutterEngine(app)
         runtime = engine
         UpdateBridge.register(app, engine.dartExecutor.binaryMessenger)
+        ClassReminderCapabilities.register(app, engine.dartExecutor.binaryMessenger)
         restorePlatformBridge(app)
         channel = MethodChannel(engine.dartExecutor.binaryMessenger, "homework_radar/background_sync").apply {
             setMethodCallHandler { call, result ->
