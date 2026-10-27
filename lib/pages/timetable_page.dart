@@ -630,9 +630,11 @@ class _TimetablePageState extends State<TimetablePage> {
           child: Scaffold(
             backgroundColor: scaffoldBgOf(context),
             appBar: AppBar(
+              toolbarHeight: 68,
+              titleSpacing: 20,
               title: GestureDetector(
                 onLongPress: _showRawPage,
-                child: appBarTitle(context, '课表'),
+                child: appBarTitle(context, '课表', root: true),
               ),
               actions: [
                 IconButton(
@@ -819,22 +821,27 @@ class _TimetablePageState extends State<TimetablePage> {
                       Text(
                         '第 $_displayWeek 周',
                         style: TextStyle(
-                          fontSize: 26,
+                          fontSize: 24,
                           fontWeight: FontWeight.w600,
                           color: p.ink,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        monday == null
-                            ? '设置开学日期，校准周次'
-                            : '${monday.month}月${monday.day}日 — ${monday.add(const Duration(days: 6)).month}月${monday.add(const Duration(days: 6)).day}日',
-                        style: TextStyle(fontSize: 12, color: p.ink2),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${state.courses.where((c) => c.inWeek(_displayWeek)).map((c) => c.name).toSet().length} 门课程',
-                        style: TextStyle(fontSize: 12, color: p.ink2),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 2,
+                        children: [
+                          Text(
+                            monday == null
+                                ? '设置开学日期，校准周次'
+                                : '${monday.month}月${monday.day}日 — ${monday.add(const Duration(days: 6)).month}月${monday.add(const Duration(days: 6)).day}日',
+                            style: TextStyle(fontSize: 12, color: p.ink2),
+                          ),
+                          Text(
+                            '${state.courses.where((c) => c.inWeek(_displayWeek)).map((c) => c.name).toSet().length} 门课程',
+                            style: TextStyle(fontSize: 12, color: p.ink2),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -865,6 +872,14 @@ class _TimetablePageState extends State<TimetablePage> {
             onChanged: (i) => _setAgenda(i == 1),
           ),
         ),
+        if (!_agenda)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+            child: Text(
+              '点击星期查看当天课程',
+              style: TextStyle(fontSize: 12, color: p.ink2),
+            ),
+          ),
         if (currentWeek == null)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
@@ -992,6 +1007,15 @@ class _TimetablePageState extends State<TimetablePage> {
                           style: TextStyle(fontSize: 12, color: p.ink2),
                         ),
                       ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 3,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: p.accentFill,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1154,7 +1178,17 @@ class _TimetablePageState extends State<TimetablePage> {
               SizedBox(width: _gutterWidth),
               for (var d = 1; d <= 7; d++)
                 Expanded(
-                  child: _dayHeader(context, d, monday, now, isCurrentWeek),
+                  child: Semantics(
+                    button: true,
+                    label: '查看周${_weekdayNames[d - 1]}的课程',
+                    child: InkWell(
+                      onTap: () {
+                        _agendaDay = d;
+                        _setAgenda(true);
+                      },
+                      child: _dayHeader(context, d, monday, now, isCurrentWeek),
+                    ),
+                  ),
                 ),
             ],
           ),

@@ -136,7 +136,14 @@ void main() {
         );
         await show(TimetablePage(state: state));
         expect(find.byType(FocusViewSwitch), findsOneWidget);
-        await t.tap(find.text('当日清单'));
+        const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+        final dayLabel = '查看周${weekdays[DateTime.now().weekday - 1]}的课程';
+        await t.tap(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is Semantics && widget.properties.label == dayLabel,
+          ),
+        );
         await t.pumpAndSettle();
         expect(find.text('测试课程'), findsOneWidget);
         await t.tap(find.text('测试课程'));
@@ -156,8 +163,9 @@ void main() {
         await t.tap(find.byTooltip('关闭账号详情'));
         await t.pumpAndSettle();
         await show(SettingsPage(state: state));
-        expect(find.byType(FocusSummary), findsOneWidget);
         expect(find.text('学习偏好'), findsOneWidget);
+        expect(find.text('提醒与课表'), findsOneWidget);
+        expect(find.text('外观与小组件'), findsOneWidget);
         await t.tap(find.text('同步与后台'));
         await t.pumpAndSettle();
         expect(find.byType(FocusSummary), findsOneWidget);

@@ -3,6 +3,7 @@ import UIKit
 import WebKit
 import Security
 import UserNotifications
+import BackgroundTasks
 
 // 凭据存 Keychain（service 固定，account 为键名）
 enum SecureBox {
@@ -48,16 +49,108 @@ enum SecureBox {
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  private let reminderRefreshIdentifier = "com.worknote.homeworkRadar.reminderRefresh"
+  private var reminderChannel: FlutterMethodChannel?
+  private var appIsForeground = false
+  private var reminderTaskRegistered = false
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(appDidBecomeActive(_:)),
+      name: UIApplication.didBecomeActiveNotification, object: nil)
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(appDidEnterBackground(_:)),
+      name: UIApplication.didEnterBackgroundNotification, object: nil)
+    reminderTaskRegistered = BGTaskScheduler.shared.register(forTaskWithIdentifier: reminderRefreshIdentifier, using: nil) { [weak self] task in
+      guard let refresh = task as? BGAppRefreshTask, let self = self else {
+        task.setTaskCompleted(success: false)
+        return
+      }
+      self.handleReminderRefresh(refresh)
+    }
     UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
+  @objc private func appDidBecomeActive(_ notification: Notification) {
+    appIsForeground = true
+    reminderChannel?.invokeMethod("foreground", arguments: true)
+  }
+
+  @objc private func appDidEnterBackground(_ notification: Notification) {
+    appIsForeground = false
+    reminderChannel?.invokeMethod("foreground", arguments: false)
+  }
+
+  private func scheduleReminderRefresh() throws {
+    guard reminderTaskRegistered else {
+      throw NSError(domain: "homework_radar.reminder", code: 1, userInfo: nil)
+    }
+    let request = BGAppRefreshTaskRequest(identifier: reminderRefreshIdentifier)
+    request.earliestBeginDate = Date(timeIntervalSinceNow: 12 * 60 * 60)
+    try BGTaskScheduler.shared.submit(request)
+  }
+
+  private func handleReminderRefresh(_ task: BGAppRefreshTask) {
+    do { try scheduleReminderRefresh() }
+    catch { NSLog("Reminder background refresh could not be scheduled") }
+
+    // Never start a second Dart engine: it could race the UI's local writes.
+    // If iOS launched a cold process with no existing engine, fail safely and
+    // rely on the next foreground launch and the scheduled reopen reminder.
+    var completed = false
+    let finish: (Bool) -> Void = { success in
+      DispatchQueue.main.async {
+        guard !completed else { return }
+        completed = true
+        task.expirationHandler = nil
+        task.setTaskCompleted(success: success)
+      }
+    }
+    task.expirationHandler = { finish(false) }
+    DispatchQueue.main.async { [weak self] in
+      guard let channel = self?.reminderChannel else {
+        finish(false)
+        return
+      }
+      channel.invokeMethod("run", arguments: "ios_reminders") { value in
+        finish(value as? Bool == true)
+      }
+    }
+  }
+
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+      let background = FlutterMethodChannel(
+        name: "homework_radar/background_sync",
+        binaryMessenger: engineBridge.applicationRegistrar.messenger())
+      reminderChannel = background
+      background.setMethodCallHandler { [weak self] (call, result) in
+        switch call.method {
+        case "ready":
+          result(self?.appIsForeground == true)
+        case "configure":
+          if (call.arguments as? [String: Any])?["scheduleLocalReminders"] as? Bool == false {
+            result(true)
+            return
+          }
+          guard let self = self else {
+            result(FlutterError(code: "schedule", message: "无法安排后台提醒更新", details: nil))
+            return
+          }
+          do {
+            try self.scheduleReminderRefresh()
+            result(true)
+          } catch {
+            result(FlutterError(code: "schedule", message: "无法安排后台提醒更新", details: nil))
+          }
+        default:
+          result(FlutterMethodNotImplemented)
+        }
+      }
       let channel = FlutterMethodChannel(
         name: "homework_radar/platform",
         binaryMessenger: engineBridge.applicationRegistrar.messenger())

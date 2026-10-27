@@ -79,6 +79,38 @@ void main() {
         ),
       );
 
+  testWidgets(
+    'empty backup explains the data it will clear before confirmation',
+    (tester) async {
+      final empty = jsonEncode({
+        'app': 'homework_radar',
+        'version': 3,
+        'homework': [],
+        'courses': [],
+        'hiddenItems': <String, String>{},
+        'manualTrash': <String, Object>{},
+        'sectionTimes': [],
+        'courseColors': <String, int>{},
+        'semesterStart': null,
+      });
+      final preview = await BackupService.previewJson(empty);
+      await tester.pumpWidget(
+        harness(BackupRestorePage(state: state, raw: empty, preview: preview)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('课表将恢复为空'), findsOneWidget);
+      expect(find.textContaining('作业列表将恢复为空'), findsOneWidget);
+      expect(find.textContaining('隐藏记录将按空备份恢复'), findsOneWidget);
+      expect(find.textContaining('回收站将恢复为空'), findsOneWidget);
+      expect(find.textContaining('开学日期将清除'), findsOneWidget);
+      await tester.tap(find.text('恢复这份备份'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('课表将恢复为空'), findsWidgets);
+      expect(find.textContaining('作业列表将恢复为空'), findsWidgets);
+      expect(Storage.homework().single.id, 'manual_keep');
+    },
+  );
+
   testWidgets('a stale restore preview cannot overwrite newer local changes', (
     tester,
   ) async {

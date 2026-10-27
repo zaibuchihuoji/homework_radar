@@ -17,6 +17,7 @@ class BackupPreview {
     required this.trashCount,
     required this.hasCourses,
     required this.hasHomework,
+    required this.clearEffects,
     this.exportedAt,
     this.message = '',
   });
@@ -24,6 +25,7 @@ class BackupPreview {
   final List<HomeworkItem> items;
   final int hiddenCount, trashCount;
   final bool hasCourses, hasHomework;
+  final List<String> clearEffects;
   final DateTime? exportedAt;
   final String message;
 }
@@ -158,16 +160,34 @@ class BackupService {
       }
     }
     final startMs = decoded['semesterStart'];
+    if (decoded.containsKey('semesterStart') &&
+        startMs != null &&
+        startMs is! int) {
+      throw const FormatException('开学日期格式损坏，未覆盖当前数据');
+    }
     if (badCourses > 0 || badHomework > 0) {
       throw FormatException(
         '备份包含损坏的课程或作业（课表$badCourses条、作业$badHomework条），未覆盖当前数据。请先修复备份。',
       );
     }
-    final start = startMs is num
-        ? DateTime.fromMillisecondsSinceEpoch(startMs.toInt())
-        : null;
+    DateTime? start;
+    if (startMs is int) {
+      try {
+        start = DateTime.fromMillisecondsSinceEpoch(startMs);
+      } catch (_) {
+        throw const FormatException('开学日期超出范围，未覆盖当前数据');
+      }
+    }
     final manualFlag = decoded['semesterStartManual'];
     final sem = decoded['timetableSemester'];
+    if (decoded.containsKey('semesterStartManual') && manualFlag is! bool) {
+      throw const FormatException('学期校准标记格式损坏，未覆盖当前数据');
+    }
+    for (final key in ['timetableSemester', 'timetableSource']) {
+      if (decoded.containsKey(key) && decoded[key] is! String) {
+        throw FormatException('备份字段 $key 格式损坏，未覆盖当前数据');
+      }
+    }
     final st = decoded['sectionTimes'];
     if (st is List && st.isNotEmpty && (st.length < 8 || st.length > 16)) {
       throw const FormatException('作息必须包含8至16节，未覆盖当前数据');
@@ -178,13 +198,16 @@ class BackupService {
       times = <(int, int)>[];
       for (var i = 0; i < st.length; i++) {
         final p = st[i];
-        if (p is List && p.length >= 2 && p[0] is num && p[1] is num) {
-          times.add(((p[0] as num).toInt(), (p[1] as num).toInt()));
-        } else if (i < Course.sectionTimes.length) {
-          times.add(Course.sectionTimes[i]);
-        } else {
+        if (p is! List ||
+            p.length != 2 ||
+            p[0] is! int ||
+            p[1] is! int ||
+            (p[0] as int) < 0 ||
+            (p[1] as int) > 1440 ||
+            (p[0] as int) >= (p[1] as int)) {
           throw FormatException('第${i + 1}节作息损坏，未恢复任何数据');
         }
+        times.add((p[0] as int, p[1] as int));
       }
     }
     final hidden = <String, String>{};
@@ -207,12 +230,15 @@ class BackupService {
       }
     }
     final colors = decoded['courseColors'];
-    final colorMap = <String, int>{
-      if (colors is Map)
-        for (final e in colors.entries)
-          if (e.key is String && e.value is int)
-            e.key as String: e.value as int,
-    };
+    final colorMap = <String, int>{};
+    if (colors is Map) {
+      for (final e in colors.entries) {
+        if (e.key is! String || e.value is! int) {
+          throw const FormatException('课程颜色格式损坏，未覆盖当前数据');
+        }
+        colorMap[e.key as String] = e.value as int;
+      }
+    }
 
     final archived = decoded['accountArchives'];
     final parsedArchives = <Map<String, dynamic>>[];
@@ -225,30 +251,46 @@ class BackupService {
             a['hiddenItems'] is! Map) {
           throw const FormatException('账号归档格式损坏，未恢复任何数据');
         }
-        parsedArchives.add({
-          'id': a['id'],
-          'createdAt': a['createdAt'],
-          'platform': a['platform'],
-          'homework': [
-            for (final h in a['homework'] as List)
-              HomeworkItem.fromJson(Map<String, dynamic>.from(h as Map))
-                  .toJson(),
-          ],
-          'hiddenItems': Map<String, String>.from(a['hiddenItems'] as Map),
-          if (a['courses'] is List)
-            'courses': [
-              for (final c in a['courses'] as List)
-                Course.fromJson(Map<String, dynamic>.from(c as Map)).toJson(),
-            ],
-          if (a['semesterStart'] is num) 'semesterStart': a['semesterStart'],
-          if (a['timetableSemester'] is String)
-            'timetableSemester': a['timetableSemester'],
-          if (a['timetableSource'] is String)
-            'timetableSource': a['timetableSource'],
-        });
+        try {
+          for (final h in a['homework'] as List) {
+            HomeworkItem.fromJson(Map<String, dynamic>.from(h as Map));
+          }
+          Map<String, String>.from(a['hiddenItems'] as Map);
+          if (a.containsKey('courses')) {
+            for (final c in a['courses'] as List) {
+              Course.fromJson(Map<String, dynamic>.from(c as Map));
+            }
+          }
+          // Preserve the original records and extensions after validation.
+          parsedArchives.add(Map<String, dynamic>.from(a));
+        } catch (_) {
+          throw const FormatException('账号归档格式损坏，未恢复任何数据');
+        }
       }
     }
     final settings = decoded['settings'];
+    if (settings is Map) {
+      for (final key in ['themeMode', 'uiStyle', 'sortMode', 'jwConfig']) {
+        if (settings.containsKey(key) && settings[key] is! String) {
+          throw FormatException('备份设置 $key 格式损坏，未覆盖当前数据');
+        }
+      }
+      if (settings.containsKey('classReminder') &&
+          settings['classReminder'] is! bool) {
+        throw const FormatException('上课提醒设置格式损坏，未覆盖当前数据');
+      }
+      if (settings.containsKey('reminders')) {
+        final rawReminders = settings['reminders'];
+        if (rawReminders is! Map) {
+          throw const FormatException('作业提醒设置格式损坏，未覆盖当前数据');
+        }
+        for (final key in ['24', '6', '1']) {
+          if (rawReminders.containsKey(key) && rawReminders[key] is! bool) {
+            throw const FormatException('作业提醒设置格式损坏，未覆盖当前数据');
+          }
+        }
+      }
+    }
     final classMinutes = settings is Map
         ? settings['classReminderMinutes']
         : null;
@@ -287,6 +329,23 @@ class BackupService {
       trashCount: trash.length,
       hasCourses: decoded.containsKey('courses'),
       hasHomework: hw is List,
+      clearEffects: List.unmodifiable([
+        if (decoded['courses'] is List && courses.isEmpty) '课表将恢复为空。',
+        if (hw is List && items.isEmpty) '作业列表将恢复为空；已登录平台和无法识别的记录保留。',
+        if (hraw is Map && hidden.isEmpty) '隐藏记录将按空备份恢复；已登录平台的隐藏记录保留。',
+        if (trashRaw is Map && trash.isEmpty) '回收站将恢复为空。',
+        if (colors is Map && colorMap.isEmpty) '课程颜色将恢复默认。',
+        if (st is List && st.isEmpty) '作息将恢复默认。',
+        if (decoded.containsKey('semesterStart') && start == null) '开学日期将清除。',
+        if (sem is String && sem.isEmpty) '学期名称将清除。',
+        if (decoded['timetableSource'] is String &&
+            decoded['timetableSource'].isEmpty)
+          '课表来源将清除。',
+        if (settings is Map &&
+            settings['jwConfig'] is String &&
+            settings['jwConfig'].isEmpty)
+          '教务配置将恢复为空。',
+      ]),
       exportedAt: DateTime.tryParse(decoded['exportedAt']?.toString() ?? ''),
       message: message,
     );
@@ -307,7 +366,11 @@ class BackupService {
     // ---- 落库阶段（解析全部成功；日志保护整组写入）----
     await Storage.businessTransaction(() async {
       // Keep a usable undo point even if applying the import later rolls back.
-      await LocalRecoveryStore.capture(encode(), reason: '恢复前备份');
+      await LocalRecoveryStore.capture(
+        encode(),
+        reason: '恢复前备份',
+        includeEmpty: true,
+      );
       final imported = <dynamic>[
         for (var i = 0; i < items.length; i++)
           if (!loggedIn(items[i].platform)) (hw as List)[i],
@@ -335,7 +398,10 @@ class BackupService {
             'id': '${now.microsecondsSinceEpoch}_backup_${p.key}',
             'createdAt': now.toIso8601String(),
             'platform': p.key,
-            'homework': [for (final h in platformItems) h.toJson()],
+            'homework': [
+              for (var i = 0; i < items.length; i++)
+                if (items[i].platform == p) (hw as List)[i],
+            ],
             'hiddenItems': platformHidden,
           });
         }
@@ -418,16 +484,26 @@ class BackupService {
 
     // 汇总用「实际导入」条数：按文件原始条数虚报会掩盖坏条目被跳过
     final parts = <String>[
-      if (courses.isNotEmpty) '课表 ${courses.length} 节',
-      if (items.isNotEmpty) '作业 ${items.length} 条',
+      if (decoded['courses'] is List)
+        courses.isEmpty ? '课表已恢复为空' : '课表 ${courses.length} 节',
+      if (hw is List)
+        items.isEmpty ? '已恢复空作业备份（已登录平台和无法识别的记录保留）' : '作业 ${items.length} 条',
       if (start != null) '学期校准',
+      if (decoded.containsKey('semesterStart') && start == null) '已清除学期校准',
       if (hidden.isNotEmpty) '隐藏作业 ${hidden.length} 条',
+      if (hraw is Map && hidden.isEmpty) '已恢复空隐藏记录（已登录平台记录保留）',
+      if (st is List) st.isEmpty ? '作息已恢复默认' : '作息',
+      if (colors is Map) colorMap.isEmpty ? '课程颜色已恢复默认' : '课程颜色',
+      if (settings is Map) '设置',
+      if (parsedArchives.isNotEmpty) '账号归档 ${parsedArchives.length} 项',
     ];
     final warnings = <String>[
       if (badCourses > 0) '$badCourses 条坏课表数据被跳过',
       if (badHomework > 0) '$badHomework 条坏作业数据被跳过',
     ];
-    if (trash.isNotEmpty) parts.add('回收站 ${trash.length} 条');
+    if (trashRaw is Map) {
+      parts.add(trash.isEmpty ? '回收站已恢复为空' : '回收站 ${trash.length} 条');
+    }
     if (parts.isEmpty && warnings.isEmpty) return preview('备份为空，没有可恢复的数据');
     final base = parts.isEmpty ? '没有可恢复的数据' : '已恢复：${parts.join('、')}';
     final ownership = isolated.isEmpty ? '' : '；已登录平台的备份记录已放入只读归档，未关联当前账号';

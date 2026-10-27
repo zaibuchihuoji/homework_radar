@@ -150,6 +150,8 @@ class FocusAccountRow extends StatelessWidget {
                 ],
               ),
             ),
+            if (state == AccountState.needRelogin)
+              TextButton(onPressed: onLogin, child: const Text('重新登录')),
             IconButton(
               tooltip: '$title账号详情',
               onPressed: () => _details(context),

@@ -82,14 +82,21 @@ class _CalendarPageState extends State<CalendarPage> {
       focusedDay: _selected,
       selectedDayPredicate: (day) => isSameDay(day, _selected),
       locale: 'zh_CN',
+      startingDayOfWeek: StartingDayOfWeek.monday,
       eventLoader: (day) =>
           events[DateTime(day.year, day.month, day.day)] ?? const [],
       onDaySelected: (selected, focused) =>
           setState(() => _selected = selected),
       // 翻页也回写 focusedDay，防止时钟/外部重建时跳回旧月份。
       onPageChanged: (focused) => setState(() => _selected = focused),
-      rowHeight: 48,
-      daysOfWeekHeight: 20,
+      rowHeight: MediaQuery.textScalerOf(context).scale(36).clamp(48.0, 90.0),
+      daysOfWeekHeight: MediaQuery.textScalerOf(context)
+          .scale(15)
+          .clamp(20.0, 45.0),
+      daysOfWeekStyle: DaysOfWeekStyle(
+        weekdayStyle: TextStyle(color: p.ink2),
+        weekendStyle: TextStyle(color: p.ink2),
+      ),
       headerStyle: HeaderStyle(
         formatButtonVisible: false,
         titleCentered: true,
@@ -110,6 +117,9 @@ class _CalendarPageState extends State<CalendarPage> {
         rightChevronMargin: EdgeInsets.zero,
       ),
       calendarStyle: CalendarStyle(
+        defaultTextStyle: TextStyle(color: p.ink),
+        weekendTextStyle: TextStyle(color: p.ink),
+        todayTextStyle: TextStyle(color: p.ink),
         todayDecoration: BoxDecoration(
           color: p.accentFill.withValues(alpha: 0.18),
           shape: BoxShape.circle,
@@ -123,7 +133,7 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
       calendarBuilders: CalendarBuilders<HomeworkItem>(
         headerTitleBuilder: p.clean ? null : _monthHeading,
-        dowBuilder: p.clean ? null : _weekday,
+        dowBuilder: _weekday,
         defaultBuilder: p.clean ? null : (c, day, focused) => _day(c, day),
         todayBuilder: p.clean
             ? null
@@ -173,7 +183,9 @@ class _CalendarPageState extends State<CalendarPage> {
       child: Scaffold(
         backgroundColor: scaffoldBgOf(context),
         appBar: AppBar(
-          title: appBarTitle(context, '作业日历'),
+          toolbarHeight: 68,
+          titleSpacing: 20,
+          title: appBarTitle(context, '作业日历', root: true),
           actions: [
             TextButton(
               onPressed: () => setState(() => _selected = DateTime.now()),
@@ -251,9 +263,8 @@ class _CalendarPageState extends State<CalendarPage> {
                       ],
                     ),
                   ),
-                  calendar,
-                  const SizedBox(height: 20),
                   FocusSummary(
+                    compact: true,
                     eyebrow: DateUtils.isSameDay(_selected, DateTime.now())
                         ? '今天'
                         : '所选日期',
@@ -265,6 +276,26 @@ class _CalendarPageState extends State<CalendarPage> {
                       size: 26,
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 4,
+                    children: [
+                      _legendItem(context, Tokens.danger, '未完成 · 今天及以前'),
+                      _legendItem(
+                        context,
+                        p.inkWash ? p.accent : const Color(0xFFEA580C),
+                        '未完成 · 未来',
+                      ),
+                      _legendItem(
+                        context,
+                        p.inkWash ? p.ink2.withValues(alpha: .55) : p.accent,
+                        '全部完成',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  calendar,
                   if (items.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 28),
@@ -295,6 +326,22 @@ class _CalendarPageState extends State<CalendarPage> {
       ),
     );
   }
+
+  Widget _legendItem(BuildContext context, Color color, String label) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Container(
+        width: 7,
+        height: 7,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      ),
+      const SizedBox(width: 5),
+      Text(
+        label,
+        style: TextStyle(fontSize: 11, color: paletteOf(context).ink2),
+      ),
+    ],
+  );
 
   Widget _monthHeading(BuildContext context, DateTime date) {
     final p = paletteOf(context);
@@ -443,7 +490,7 @@ class _CalendarPageState extends State<CalendarPage> {
             ? label
             : '周$label',
         style: TextStyle(
-          fontSize: p.terminal || p.pixel ? 10 : 11,
+          fontSize: p.terminal || p.pixel ? 10 : (p.clean ? 12 : 11),
           color: p.ink2,
           fontFamily: p.pixel || p.terminal || p.receipt
               ? 'monospace'
@@ -512,13 +559,16 @@ class _CalendarPageState extends State<CalendarPage> {
                 alignment: Alignment.center,
                 margin: const EdgeInsets.all(4),
                 color: fill,
-                child: Text(
-                  '${date.day}',
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 14,
-                    color: textColor,
-                    fontWeight: FontWeight.w800,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '${date.day}',
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 14,
+                      color: textColor,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               )
@@ -575,13 +625,18 @@ class _CalendarPageState extends State<CalendarPage> {
         : Tokens.danger;
     final square = p.pixel || p.receipt || p.terminal;
     final line = p.editorial || p.journal || p.paper;
+    final status = items.every(hwIsDone)
+        ? '全部完成'
+        : day0.isAfter(today)
+        ? '未完成，未来截止'
+        : '未完成，今天及以前截止';
     return Positioned(
       left: 0,
       right: 0,
       bottom: 3,
       child: Center(
         child: Semantics(
-          label: '${day.month}月${day.day}日 ${items.length}项截止',
+          label: '${day.month}月${day.day}日 ${items.length}项截止，$status',
           child: Container(
             width: line
                 ? 16

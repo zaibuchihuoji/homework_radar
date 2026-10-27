@@ -54,7 +54,9 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
-          (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
+          (call) async => call.method == 'pendingNotificationRequests'
+              ? <Map<String, Object?>>[]
+              : true,
         );
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
@@ -112,22 +114,30 @@ void main() {
       expect(Storage.dismissedIds(), contains('cx_hidden'));
     },
   );
-  test('D05 malformed times in backup shift later section indexes', () async {
-    final times = <dynamic>[
-      for (var i = 0; i < 12; i++) [480 + 60 * i, 525 + 60 * i],
-    ];
-    times[2] = 'broken';
-    await BackupService.importJson(
-      jsonEncode({
-        'app': 'homework_radar',
-        'version': 1,
-        'sectionTimes': times,
-      }),
-    );
-    final restored = Storage.sectionTimes()!;
-    expect(restored.length, 12);
-    expect(restored[3].$1, 660);
-  });
+  test(
+    'D05 malformed times in backup cannot replace existing section times',
+    () async {
+      final existing = [
+        for (var i = 0; i < 12; i++) (420 + 60 * i, 465 + 60 * i),
+      ];
+      await Storage.saveSectionTimes(existing);
+      final times = <dynamic>[
+        for (var i = 0; i < 12; i++) [480 + 60 * i, 525 + 60 * i],
+      ];
+      times[2] = 'broken';
+      await expectLater(
+        BackupService.importJson(
+          jsonEncode({
+            'app': 'homework_radar',
+            'version': 1,
+            'sectionTimes': times,
+          }),
+        ),
+        throwsFormatException,
+      );
+      expect(Storage.sectionTimes(), existing);
+    },
+  );
   test('D06 true adjacent semesters are treated as identical', () {
     expect(
       AppState.sameSemesterText('2025-2026学年第一学期', '2025-2026学年第二学期'),
@@ -255,7 +265,9 @@ void main() {
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
           (call) async {
-            if (call.method == 'pendingNotificationRequests') { return <Map<String, Object?>>[]; }
+            if (call.method == 'pendingNotificationRequests') {
+              return <Map<String, Object?>>[];
+            }
             if (call.method == 'cancelAllPendingNotifications' && first) {
               first = false;
               arrived.complete();

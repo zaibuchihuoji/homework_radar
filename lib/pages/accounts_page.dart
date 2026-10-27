@@ -43,7 +43,11 @@ class AccountsPage extends StatelessWidget {
       // 玻璃样式下透明化 Scaffold，露出渐变磨砂底衬
       child: Scaffold(
         backgroundColor: scaffoldBgOf(context),
-        appBar: AppBar(title: appBarTitle(context, '账号')),
+        appBar: AppBar(
+          toolbarHeight: 68,
+          titleSpacing: 20,
+          title: appBarTitle(context, '账号', root: true),
+        ),
         body: ListenableBuilder(
           listenable: state,
           builder: (context, _) => ListView(
@@ -263,6 +267,8 @@ class AccountsPage extends StatelessWidget {
         .length;
     return [
       FocusSummary(
+        compact: true,
+        yellow: false,
         eyebrow: '已连接的平台',
         title: '$connected / ${rows.length}',
         detail: expired > 0
@@ -273,7 +279,7 @@ class AccountsPage extends StatelessWidget {
         trailing: Icon(
           Icons.link_rounded,
           size: 30,
-          color: paletteOf(context).onAccent,
+          color: paletteOf(context).accent,
         ),
         child: connected == 0
             ? null

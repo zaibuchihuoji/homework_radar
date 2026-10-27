@@ -7,11 +7,22 @@ import java.util.concurrent.TimeUnit
 internal object SyncScheduler {
     private const val PERIODIC = "homework-platform-sync"
     private const val RETRY = "homework-platform-sync-retry"
-    fun configure(context: Context, enabled: Boolean, minutes: Int, retryAt: Long?): List<Operation> {
+    private const val REMINDERS = "homework-reminder-maintenance"
+    fun configure(context: Context, enabled: Boolean, minutes: Int, retryAt: Long?, scheduleLocalReminders: Boolean): List<Operation> {
         require(minutes in setOf(15, 30, 60, 120))
         val manager = WorkManager.getInstance(context)
         val prefs = context.getSharedPreferences("sync_scheduler", Context.MODE_PRIVATE)
         val operations = mutableListOf<Operation>()
+        if (scheduleLocalReminders) {
+            val reminders = PeriodicWorkRequest.Builder(BackgroundSyncWorker::class.java, 12, TimeUnit.HOURS)
+                .setInputData(workDataOf("reason" to "reminders"))
+                .setInitialDelay(12, TimeUnit.HOURS)
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
+                .addTag(REMINDERS).build()
+            // No network constraint: this job only reads local data and rolls
+            // the reminder window forward. KEEP preserves its next run.
+            operations.add(manager.enqueueUniquePeriodicWork(REMINDERS, ExistingPeriodicWorkPolicy.KEEP, reminders))
+        }
         if (!enabled) {
             operations.add(manager.cancelUniqueWork(PERIODIC))
             operations.add(manager.cancelUniqueWork(RETRY))

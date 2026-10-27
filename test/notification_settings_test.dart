@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -43,7 +44,9 @@ void main() {
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
           (call) async {
-            if (call.method == 'pendingNotificationRequests') { return <Map<String, Object?>>[]; }
+            if (call.method == 'pendingNotificationRequests') {
+              return <Map<String, Object?>>[];
+            }
             calls.add(call);
             if (call.method == 'getNotificationChannels') {
               if (readFails) throw PlatformException(code: 'unavailable');
@@ -90,6 +93,28 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     state.dispose();
   });
+
+  testWidgets(
+    'iOS reminder settings explain that future reminders need reopening',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final state = AppState();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.light, ThemeStyle.clean),
+          home: SettingsPage(state: state),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('提醒与课表'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('iOS 限制待发送提醒数量'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      state.dispose();
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
   testWidgets(
     'channel inspection is read-only and never equates app grant with banners',

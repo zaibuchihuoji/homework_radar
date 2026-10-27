@@ -109,6 +109,15 @@ void main() {
     expect(contrast(p.ink, p.bg), greaterThanOrEqualTo(7));
     expect(contrast(p.ink2, p.card), greaterThanOrEqualTo(4.5));
     expect(contrast(p.onAccent, p.accentFill), greaterThanOrEqualTo(4.5));
+    final picker = theme.datePickerTheme;
+    final todaySelected = <WidgetState>{WidgetState.selected};
+    expect(
+      contrast(
+        picker.todayForegroundColor!.resolve(todaySelected)!,
+        picker.todayBackgroundColor!.resolve(todaySelected)!,
+      ),
+      greaterThanOrEqualTo(4.5),
+    );
     final button = theme.filledButtonTheme.style!;
     expect(
       contrast(

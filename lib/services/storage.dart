@@ -42,8 +42,16 @@ class ReminderSettings {
   );
 }
 
+/// The local business snapshot is usable but encrypted credentials could not
+/// be read. Never treat this as an empty account or delete the stored keys.
+class SecureStorageUnavailableException implements Exception {
+  const SecureStorageUnavailableException();
+}
+
 class Storage {
   static late SharedPreferences _sp;
+  static bool _localDataReadyForRecovery = false;
+  static bool get localDataReadyForRecovery => _localDataReadyForRecovery;
 
   static String? recognitionDraft() => _sp.getString('recognition_draft_v1');
   static Future<void> saveRecognitionDraft(String? raw) => raw == null
@@ -178,10 +186,23 @@ class Storage {
       if (credentials) await SecureStore.finishTransaction(rollback: false);
       final before = {for (final key in _businessKeys) key: _sp.get(key)};
       _recoveryPending = true;
-      await _setString(
-        'business_transaction',
-        jsonEncode({...before, '_credentials': credentials}),
-      );
+      try {
+        await _setString(
+          'business_transaction',
+          jsonEncode({...before, '_credentials': credentials}),
+        );
+      } catch (_) {
+        // SharedPreferences updates its cache before the platform write. A
+        // failed call may still have persisted the journal; no business writes
+        // ran yet, so removing this new journal is safe in either case.
+        try {
+          await _remove('business_transaction');
+          _recoveryPending = false;
+        } catch (_) {
+          // An uncertain journal must be recovered on the next startup.
+        }
+        rethrow;
+      }
       try {
         if (credentials) await SecureStore.beginTransaction();
         final value = await action();
@@ -379,6 +400,7 @@ class Storage {
   ];
 
   static Future<void> init() async {
+    _localDataReadyForRecovery = false;
     final pending = _transactionTail;
     if (pending != null) await pending;
     invalidateSync();
@@ -395,13 +417,21 @@ class Storage {
       await _remove('business_transaction');
     }
     _recoveryPending = false;
+    _localDataReadyForRecovery = true;
     // 老版本把 Cookie 明文存在 prefs；迁入安全存储后删除明文。
     // 只删「已确认写入安全存储」的键——写失败就删明文会把用户仅有的
     // 凭据副本毁掉且无法重试（Keystore 损坏/换机还原时必现）。
     final legacy = {for (final k in _secureKeys) k: _sp.getString(k) ?? ''};
-    final confirmed = await SecureStore.preloadAndMigrate(legacy);
-    for (final key in confirmed) {
-      await _remove(key);
+    try {
+      final confirmed = await SecureStore.preloadAndMigrate(legacy);
+      for (final key in confirmed) {
+        await _remove(key);
+      }
+    } catch (_, stack) {
+      Error.throwWithStackTrace(
+        const SecureStorageUnavailableException(),
+        stack,
+      );
     }
   }
 

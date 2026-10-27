@@ -232,40 +232,14 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
       bottomNavigationBar: CaptureBottomBar(
         busy: _busy,
         label: _busy ? '正在本机读取截图…' : '核对后确认添加',
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : _image,
-                    icon: const Icon(Icons.image_outlined, size: 20),
-                    label: const Text('选择截图'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _busy ? null : _paste,
-                    icon: const Icon(Icons.content_paste_outlined, size: 20),
-                    label: const Text('粘贴文字'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: _busy || _reviewing ? null : _recognize,
-              icon: Icon(
-                Icons.arrow_forward_rounded,
-                size: 22,
-                color: p.sunny && !isDark(context) ? p.accentFill : null,
-              ),
-              label: const Text('识别并核对'),
-            ),
-          ],
+        child: FilledButton.icon(
+          onPressed: _busy || _reviewing ? null : _recognize,
+          icon: Icon(
+            Icons.arrow_forward_rounded,
+            size: 22,
+            color: p.sunny && !isDark(context) ? p.accentFill : null,
+          ),
+          label: const Text('识别并核对'),
         ),
       ),
       body: SafeArea(
@@ -314,7 +288,24 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
                     ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 10,
+                runSpacing: 4,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _image,
+                    icon: const Icon(Icons.image_outlined, size: 18),
+                    label: const Text('选择截图'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _paste,
+                    icon: const Icon(Icons.content_paste_outlined, size: 18),
+                    label: const Text('粘贴文字'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               if (_imageMode) ...[
                 Container(
                   key: const ValueKey('recognition_image_preview'),
@@ -401,7 +392,7 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
                 title: const Text('通知日期'),
                 subtitle: Text(
                   _noticeDate == null
-                      ? '未设置 · 相对日期留待确认'
+                      ? '用于识别“明天”等相对日期 · 未设置'
                       : '${_noticeDate!.year}年${_noticeDate!.month}月${_noticeDate!.day}日',
                 ),
                 children: [

@@ -343,8 +343,9 @@ class ThemedAlertDialog extends StatelessWidget {
       shape: p.clean ? (shape ?? themeModalShape(p)) : themeModalShape(p),
       titlePadding: titlePadding ?? const EdgeInsets.fromLTRB(24, 24, 24, 4),
       contentPadding:
-          contentPadding ?? const EdgeInsets.fromLTRB(24, 20, 24, 24),
-      actionsPadding: actionsPadding,
+          contentPadding ?? const EdgeInsets.fromLTRB(24, 16, 24, 20),
+      actionsPadding:
+          actionsPadding ?? const EdgeInsets.fromLTRB(16, 0, 16, 14),
       actionsAlignment: actionsAlignment,
       insetPadding:
           insetPadding ??

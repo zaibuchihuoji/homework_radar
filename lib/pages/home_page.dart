@@ -603,7 +603,7 @@ class _HomePageState extends State<HomePage> {
           _filter = 'todo';
         }),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(15, 14, 15, 12),
+          padding: const EdgeInsets.fromLTRB(15, 12, 15, 10),
           child: Row(
             children: [
               Icon(Icons.schedule_outlined, size: 20, color: p.onAccent),
@@ -622,6 +622,16 @@ class _HomePageState extends State<HomePage> {
                 '$count 项',
                 style: TextStyle(fontSize: 12, color: p.onAccent),
               ),
+              const SizedBox(width: 8),
+              Text(
+                _todayOnly ? '已筛选' : '筛选',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: p.onAccent,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Icon(Icons.filter_list_rounded, size: 18, color: p.onAccent),
             ],
           ),
         ),
@@ -1084,6 +1094,14 @@ class _HomePageState extends State<HomePage> {
   /// 分段块：左侧 3px 色条贯穿标题与卡片，色条颜色即分段语义
   Widget _sectionHeader(String title, int count) => Row(
     children: [
+      if (title == '已截止') ...[
+        Icon(
+          Icons.error_outline_rounded,
+          size: 18,
+          color: Theme.of(context).colorScheme.error,
+        ),
+        const SizedBox(width: 6),
+      ],
       Expanded(child: _sectionTitleText(title)),
       Text(
         '$count 项',
@@ -1100,7 +1118,9 @@ class _HomePageState extends State<HomePage> {
         TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w700,
-          color: textPrimary(context),
+          color: title == '已截止'
+              ? Theme.of(context).colorScheme.error
+              : textPrimary(context),
         ),
       ),
     );

@@ -36,17 +36,17 @@ class SettingsScaffold extends StatelessWidget {
         scrolledUnderElevation: 0,
         surfaceTintColor: Colors.transparent,
         backgroundColor: scaffoldBgOf(context),
-        titleSpacing: root ? 24 : null,
+        titleSpacing: root ? 20 : null,
         toolbarHeight: root ? 68 : 60,
         title: DefaultTextStyle.merge(
           style: TextStyle(
-            fontSize: root ? 25 : 19,
+            fontSize: root ? 22 : 19,
             fontWeight: FontWeight.w600,
             color: textPrimary(context),
           ),
           child: paletteOf(context).clean
               ? Text(title)
-              : appBarTitle(context, title),
+              : appBarTitle(context, title, root: root),
         ),
         actions: actions,
       ),
@@ -163,7 +163,7 @@ class SettingsRow extends StatelessWidget {
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 64),
         child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 0, vertical: 18),
+          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 15),
           child: Row(
             children: [
               if (icon != null) ...[

@@ -172,7 +172,10 @@ void main() {
             );
             await tester.pumpAndSettle();
             expect(
-              find.text(i == 2 ? '登录${names[i]}' : '重新登录'),
+              find.descendant(
+                of: find.byType(Dialog),
+                matching: find.text(i == 2 ? '登录${names[i]}' : '重新登录'),
+              ),
               findsOneWidget,
             );
             expect(find.text('退出账号'), i == 2 ? findsNothing : findsOneWidget);

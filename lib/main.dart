@@ -14,6 +14,7 @@ import 'pages/detail_page.dart';
 import 'pages/home_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/splash_page.dart';
+import 'pages/startup_recovery_page.dart';
 import 'pages/timetable_page.dart';
 import 'services/notification_service.dart';
 import 'services/background_sync.dart';
@@ -40,6 +41,8 @@ AppState? appStateForHome;
 BackgroundSync? backgroundSyncForApp;
 
 void _openDetail(String homeworkId) {
+  homeworkId = NotificationService.navigationPayload(homeworkId);
+  if (homeworkId.isEmpty) return;
   if (NotificationService.isClassPayload(homeworkId)) {
     final state = appStateForHome;
     if (state != null) {
@@ -84,46 +87,102 @@ Future<void> main() async {
         return true; // 已由 zone 兜底记录，不交给默认处理器再炸一次
       };
 
-      // 前后台都先加载同一份本地数据；后台任务不创建页面或请求权限。
-      await Storage.init();
-      final state = AppState();
-      appStateForHome = state;
-      // 先上屏本地已有数据（作业 + 课表），主页一出来就有内容
-      await state.loadLocal();
-      Future<void>? uiStarted;
-      Future<void> startUi() => uiStarted ??= () async {
-        runApp(HomeworkRadarApp(state: state));
-        String? payload;
+      Future<void> startApplication() async {
+        // 前后台都先加载同一份本地数据；后台任务不创建页面或请求权限。
+        await Storage.init();
+        final state = AppState();
+        appStateForHome = state;
+        // 先上屏本地已有数据（作业 + 课表），主页一出来就有内容
+        await state.loadLocal();
+        Future<void>? uiStarted;
+        Future<void> startUi() => uiStarted ??= () async {
+          runApp(HomeworkRadarApp(state: state));
+          String? payload;
+          try {
+            await NotificationService.init();
+            payload = await NotificationService.initialPayload();
+          } catch (e) {
+            debugPrint('notification launch init failed: $e');
+          }
+          if (!launchPayloadReady.isCompleted) {
+            launchPayloadReady.complete(payload);
+          }
+          unawaited(NotificationService.rerequestPermission());
+        }();
+
+        // 在启动任何 UI 之前挂好交接，首次 Activity 到来时才读取通知 payload。
+        onSplashFinished = () async {
+          final payload = await launchPayloadReady.future;
+          if (payload != null && payload.isNotEmpty) _openDetail(payload);
+        };
+        NotificationService.onSelect = _openDetail;
+        // Safe without an Activity: notification initialization never requests UI permission.
         try {
           await NotificationService.init();
-          payload = await NotificationService.initialPayload();
-        } catch (e) {
-          debugPrint('notification launch init failed: $e');
-        }
-        if (!launchPayloadReady.isCompleted) {
-          launchPayloadReady.complete(payload);
-        }
-        unawaited(NotificationService.rerequestPermission());
-      }();
+        } catch (_) {}
+        final background = BackgroundSync(state, onForeground: startUi);
+        backgroundSyncForApp = background;
+        await background.init();
+        unawaited(
+          NotificationService.reschedule(
+            state.homework,
+            courses: state.courses,
+          ),
+        );
+        unawaited(TimetableWidget.push(state.courses));
+        unawaited(SyncService.updateHomeWidget(state.homework));
+      }
 
-      // 在启动任何 UI 之前挂好交接，首次 Activity 到来时才读取通知 payload。
-      onSplashFinished = () async {
-        final payload = await launchPayloadReady.future;
-        if (payload != null && payload.isNotEmpty) _openDetail(payload);
-      };
-      NotificationService.onSelect = _openDetail;
-      // Safe without an Activity: notification initialization never requests UI permission.
+      Future<void> showRecovery(Object error) async {
+        var shown = false;
+        late Future<dynamic> Function(MethodCall) recoveryHandler;
+        Future<void> show() async {
+          if (shown) return;
+          shown = true;
+          runApp(
+            StartupRecoveryApp(
+              secureFailure: error is SecureStorageUnavailableException,
+              canReadLocalData: Storage.localDataReadyForRecovery,
+              retry: () async {
+                try {
+                  await startApplication();
+                } catch (_) {
+                  BackgroundSync.channel.setMethodCallHandler(recoveryHandler);
+                  rethrow;
+                }
+              },
+            ),
+          );
+        }
+
+        // A headless Android worker must fail/retry without creating a UI;
+        // opening the Activity later shows the same recovery screen.
+        recoveryHandler = (call) async {
+          if (call.method == 'foreground') {
+            if (call.arguments == true) await show();
+            return true;
+          }
+          if (call.method == 'run') return false;
+          throw MissingPluginException();
+        };
+        BackgroundSync.channel.setMethodCallHandler(recoveryHandler);
+        var foreground = true;
+        try {
+          foreground =
+              await BackgroundSync.channel.invokeMethod<bool>('ready') == true;
+        } on MissingPluginException {
+          // iOS and other hosts run the ordinary foreground app.
+        } catch (_) {
+          // If the lifecycle bridge itself failed, still show a recovery UI.
+        }
+        if (foreground) await show();
+      }
+
       try {
-        await NotificationService.init();
-      } catch (_) {}
-      final background = BackgroundSync(state, onForeground: startUi);
-      backgroundSyncForApp = background;
-      await background.init();
-      unawaited(
-        NotificationService.reschedule(state.homework, courses: state.courses),
-      );
-      unawaited(TimetableWidget.push(state.courses));
-      unawaited(SyncService.updateHomeWidget(state.homework));
+        await startApplication();
+      } catch (error) {
+        await showRecovery(error);
+      }
     },
     (e, st) {
       // 同步/通知/小组件链路的未捕获异步异常：记到 debug 控制台即可，
@@ -507,13 +566,11 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
               (states) =>
                   states.contains(WidgetState.selected) ? pal.accentFill : null,
             ),
-            todayBackgroundColor: pal.sunny
-                ? WidgetStateProperty.resolveWith(
-                    (states) => states.contains(WidgetState.selected)
-                        ? pal.accentFill
-                        : Colors.transparent,
-                  )
-                : null,
+            todayBackgroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? pal.accentFill
+                  : Colors.transparent,
+            ),
             yearBackgroundColor: pal.sunny
                 ? WidgetStateProperty.resolveWith(
                     (states) => states.contains(WidgetState.selected)

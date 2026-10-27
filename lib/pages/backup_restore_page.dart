@@ -47,11 +47,17 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
   }
 
   Future<void> _restore() async {
+    final clearNotes = widget.preview.clearEffects;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => SettingsAlertDialog(
         title: const Text('恢复这份备份？'),
-        content: const Text('会先保存当前数据的本地备份，再恢复预览中的内容。账号登录不变；已登录平台的备份作业放入只读归档。'),
+        content: Text(
+          [
+            ...clearNotes,
+            '会先保存当前数据的本地备份，再恢复预览中的内容。账号登录不变；已登录平台的备份作业放入只读归档。',
+          ].join('\n'),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -155,6 +161,11 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                     const Padding(
                       padding: EdgeInsets.all(16),
                       child: SettingsNote('这份备份未包含作业列表，当前作业保留。'),
+                    ),
+                  if (p.clearEffects.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: SettingsNote(p.clearEffects.join('\n')),
                     ),
                 ],
               );

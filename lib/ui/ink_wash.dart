@@ -60,10 +60,12 @@ class _BrushPainter extends CustomPainter {
 /// AppBar 题字：水墨=衬线拉字距+落款小印（每页标题都钤一方印，
 /// 全 app 统一的「题款」语言）；暖纸=衬线信纸体；其余样式常规标题。
 /// 放在本文件而非 adaptive.dart，避免 adaptive ↔ ink_wash 循环 import。
-Widget appBarTitle(BuildContext c, String text) {
+Widget appBarTitle(BuildContext c, String text, {bool root = false}) {
   final pal = paletteOf(c);
   final base = TextStyle(
-    fontSize: pal.sunny || pal.clay
+    fontSize: root
+        ? (pal.clay ? 25 : 22)
+        : pal.sunny || pal.clay
         ? 25
         : pal.editorial
         ? 19

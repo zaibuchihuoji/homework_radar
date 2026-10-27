@@ -80,6 +80,82 @@ void main() {
     },
   );
 
+  test('local reminder scheduling remains enabled without network sync or accounts', () async {
+    await Storage.clearChaoxing();
+    await Storage.clearMooc();
+    await Storage.saveSyncConfig(const SyncConfig(enabled: false));
+    await controller.configure();
+    expect(native.last['enabled'], false);
+    expect(native.last['scheduleLocalReminders'], true);
+    expect(await controller.run('reminders'), true);
+    expect(state.requests, isEmpty);
+  });
+
+  test(
+    'iOS background maintenance never cancels an existing pending reminder',
+    () async {
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('dexterous.com/flutter/local_notifications'),
+        (call) async {
+          calls.add(call);
+          if (call.method == 'pendingNotificationRequests') {
+            return <Map<String, Object?>>[
+              {'id': 12, 'title': '保留', 'body': '保留', 'payload': 'old'},
+            ];
+          }
+          return true;
+        },
+      );
+      expect(await controller.run('ios_reminders'), true);
+      expect(state.requests, isEmpty);
+      expect(
+        calls.any(
+          (c) =>
+              c.method == 'cancel' ||
+              c.method == 'cancelAllPendingNotifications',
+        ),
+        false,
+      );
+    },
+  );
+
+  test(
+    'iOS background maintenance can refill an empty queue offline',
+    () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('dexterous.com/flutter/local_notifications'),
+            (call) async {
+              calls.add(call);
+              return call.method == 'pendingNotificationRequests'
+                  ? <Map<String, Object?>>[]
+                  : true;
+            },
+          );
+      state.homework.add(
+        HomeworkItem(
+          id: 'manual_background',
+          platform: PlatformKind.manual,
+          course: '数学',
+          title: '待完成作业',
+          status: HwStatus.todo,
+          dueAt: DateTime.now().add(const Duration(days: 2)),
+        ),
+      );
+      expect(await controller.run('ios_reminders'), true);
+      expect(state.requests, isEmpty);
+      expect(
+        calls.any((c) => c.method == 'cancelAllPendingNotifications'),
+        false,
+      );
+      expect(calls.any((c) => c.method == 'zonedSchedule'), true);
+    },
+  );
+
   test(
     'one failed publication cannot poison future automatic retries',
     () async {

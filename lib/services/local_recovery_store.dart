@@ -97,6 +97,7 @@ abstract final class LocalRecoveryStore {
     String backup, {
     required String reason,
     bool daily = false,
+    bool includeEmpty = false,
     DateTime? now,
   }) async {
     final value = jsonDecode(backup) as Map;
@@ -105,7 +106,8 @@ abstract final class LocalRecoveryStore {
     }
     final homework = (value['homework'] as List? ?? const []).length;
     final courses = (value['courses'] as List? ?? const []).length;
-    if (homework == 0 &&
+    if (!includeEmpty &&
+        homework == 0 &&
         courses == 0 &&
         (value['hiddenItems'] as Map? ?? const {}).isEmpty &&
         (value['accountArchives'] as List? ?? const []).isEmpty &&

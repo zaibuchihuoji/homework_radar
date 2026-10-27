@@ -12,6 +12,7 @@ import 'package:homework_radar/pages/homework_edit_dialogs.dart';
 import 'package:homework_radar/pages/homework_recognition_page.dart';
 import 'package:homework_radar/pages/homework_recognition_review_page.dart';
 import 'package:homework_radar/services/storage.dart';
+import 'package:homework_radar/ui/capture_parts.dart';
 import 'package:homework_radar/ui/tokens.dart';
 
 void main() {
@@ -125,6 +126,20 @@ void main() {
             chooseImageText: () async => '【英语】阅读第五单元，明天交',
           ),
         ),
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CaptureBottomBar),
+          matching: find.text('选择截图'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(CaptureBottomBar),
+          matching: find.text('识别并核对'),
+        ),
+        findsOneWidget,
       );
       await t.tap(find.text('选择截图'));
       await t.pumpAndSettle();

@@ -14,13 +14,25 @@ import 'package:homework_radar/services/local_recovery_store.dart';
 class _FailingStore extends InMemorySharedPreferencesStore {
   _FailingStore() : super.empty();
   String? failKey;
+  bool persistBeforeFailure = false;
+  String? failRemoveKey;
   @override
   Future<bool> setValue(String type, String key, Object value) async {
     if (key == failKey) {
       failKey = null;
+      if (persistBeforeFailure) await super.setValue(type, key, value);
       return false;
     }
     return super.setValue(type, key, value);
+  }
+
+  @override
+  Future<bool> remove(String key) async {
+    if (key == failRemoveKey) {
+      failRemoveKey = null;
+      return false;
+    }
+    return super.remove(key);
   }
 }
 
@@ -82,6 +94,57 @@ void main() {
     await state.loadLocal();
   });
   tearDown(() => state.dispose());
+
+  test(
+    'journal creation failure preserves data and permits a later transaction',
+    () async {
+      store.failKey = 'flutter.business_transaction';
+      await expectLater(
+        Storage.businessTransaction(() => Storage.saveHomework([])),
+        throwsStateError,
+      );
+      expect(Storage.homework().single.id, 'manual_original');
+      await Storage.businessTransaction(() => Storage.saveHomework([]));
+      expect(Storage.homework(), isEmpty);
+    },
+  );
+
+  test(
+    'an ambiguously persisted journal is safely removed before retry',
+    () async {
+      store.persistBeforeFailure = true;
+      store.failKey = 'flutter.business_transaction';
+      await expectLater(
+        Storage.businessTransaction(() => Storage.saveHomework([])),
+        throwsStateError,
+      );
+      expect(Storage.homework().single.id, 'manual_original');
+      await Storage.businessTransaction(() => Storage.saveHomework([]));
+      await Storage.init();
+      expect(Storage.homework(), isEmpty);
+    },
+  );
+
+  test(
+    'uncertain journal cleanup blocks writes until startup recovery',
+    () async {
+      store.persistBeforeFailure = true;
+      store.failKey = 'flutter.business_transaction';
+      store.failRemoveKey = 'flutter.business_transaction';
+      await expectLater(
+        Storage.businessTransaction(() => Storage.saveHomework([])),
+        throwsStateError,
+      );
+      await expectLater(
+        Storage.businessTransaction(() => Storage.saveHomework([])),
+        throwsStateError,
+      );
+      await Storage.init();
+      expect(Storage.homework().single.id, 'manual_original');
+      await Storage.businessTransaction(() => Storage.saveHomework([]));
+      expect(Storage.homework(), isEmpty);
+    },
+  );
 
   test(
     'deleting manual homework retains its complete body in a recycle bin',

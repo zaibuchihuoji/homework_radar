@@ -98,61 +98,121 @@ class FocusSummary extends StatelessWidget {
     this.trailing,
     this.child,
     this.yellow = true,
+    this.compact = false,
   });
   final String eyebrow, title;
   final String? detail;
   final Widget? trailing, child;
-  final bool yellow;
+  final bool yellow, compact;
   @override
   Widget build(BuildContext context) {
     final p = paletteOf(context);
     final ink = yellow ? p.onAccent : p.ink;
     return WorkbenchPanel(
       accent: yellow,
-      padding: const EdgeInsets.all(18),
+      padding: EdgeInsets.all(compact ? 14 : 18),
       child: DefaultTextStyle.merge(
         style: TextStyle(color: ink),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        eyebrow,
-                        style: TextStyle(fontSize: 12, height: 1.5, color: ink),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        title,
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontFamily: p.clay ? 'StudySerif' : null,
-                          fontWeight: p.clay
-                              ? FontWeight.w400
-                              : FontWeight.w600,
-                          height: 1.3,
-                          color: ink,
+            if (compact)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              eyebrow,
+                              style: TextStyle(fontSize: 12, color: ink),
+                            ),
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 20,
+                                height: 1.3,
+                                fontFamily: p.clay ? 'StudySerif' : null,
+                                fontWeight: p.clay
+                                    ? FontWeight.w400
+                                    : FontWeight.w600,
+                                color: ink,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
+                        if (detail != null) ...[
+                          const SizedBox(height: 5),
+                          Text(
+                            detail!,
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.45,
+                              color: ink,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                ),
-                if (trailing != null) ...[const SizedBox(width: 12), trailing!],
-              ],
-            ),
-            if (detail != null) ...[
+                  if (trailing != null) ...[
+                    const SizedBox(width: 12),
+                    trailing!,
+                  ],
+                ],
+              )
+            else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          eyebrow,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.5,
+                            color: ink,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontFamily: p.clay ? 'StudySerif' : null,
+                            fontWeight: p.clay
+                                ? FontWeight.w400
+                                : FontWeight.w600,
+                            height: 1.3,
+                            color: ink,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (trailing != null) ...[
+                    const SizedBox(width: 12),
+                    trailing!,
+                  ],
+                ],
+              ),
+            if (!compact && detail != null) ...[
               const SizedBox(height: 10),
               Text(
                 detail!,
                 style: TextStyle(fontSize: 13, height: 1.6, color: ink),
               ),
             ],
-            if (child != null) ...[const SizedBox(height: 14), child!],
+            if (child != null) ...[SizedBox(height: compact ? 10 : 14), child!],
           ],
         ),
       ),
@@ -167,7 +227,7 @@ class FocusSectionTitle extends StatelessWidget {
   final Widget? action;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 24, bottom: 12),
+    padding: const EdgeInsets.only(top: 20, bottom: 10),
     child: Row(
       children: [
         Expanded(

@@ -122,7 +122,7 @@ Widget buildFocusHomeworkRow(
 }) {
   final p = paletteOf(context);
   final ink = priority ? p.onAccent : p.ink;
-  final secondary = priority ? p.onAccent.withValues(alpha: .78) : p.ink2;
+  final secondary = priority ? p.onAccent : p.ink2;
   final due = hw.dueAt;
   final overdue = hwIsOverdue(hw);
   final time = due == null ? '截止时间待确认' : HomeworkItem.formatDueTime(due);
@@ -175,13 +175,16 @@ Widget buildFocusHomeworkRow(
     children: [
       Text(
         compactTime,
-        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: ink),
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: ink),
       ),
       Text(
         overdue ? '已截止' : '今天',
         style: TextStyle(
           fontSize: 11,
-          color: overdue ? Theme.of(context).colorScheme.error : secondary,
+          color: priority
+              ? secondary
+              : (overdue ? Theme.of(context).colorScheme.error : secondary),
+          fontWeight: overdue ? FontWeight.w700 : FontWeight.normal,
         ),
       ),
     ],
@@ -247,6 +250,9 @@ Widget buildFocusHomeworkRow(
     ],
   );
   return priority
-      ? Padding(padding: const EdgeInsets.all(15), child: content)
+      ? Padding(
+          padding: const EdgeInsets.fromLTRB(15, 12, 15, 14),
+          child: content,
+        )
       : WorkbenchPanel(seed: hw.id, child: content);
 }

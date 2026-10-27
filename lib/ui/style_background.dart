@@ -105,7 +105,7 @@ class StyleBackground extends StatelessWidget {
             painter: _GrainPainter(
               color: dark
                   ? Colors.white.withValues(alpha: 0.03)
-                  : Colors.black.withValues(alpha: 0.035),
+                  : Colors.black.withValues(alpha: 0.018),
             ),
           ),
         ),
@@ -121,7 +121,7 @@ class StyleBackground extends StatelessWidget {
             painter: _ScanlinePainter(
               color: dark
                   ? Colors.white.withValues(alpha: 0.035)
-                  : Colors.black.withValues(alpha: 0.045),
+                  : Colors.black.withValues(alpha: 0.022),
             ),
           ),
         ),
@@ -216,7 +216,7 @@ class _RuledPaperPainter extends CustomPainter {
     final line = Paint()
       ..color = dark
           ? const Color(0xFF4A5A6A).withValues(alpha: 0.20)
-          : const Color(0xFF8FA8C0).withValues(alpha: 0.28)
+          : const Color(0xFF8FA8C0).withValues(alpha: 0.13)
       ..strokeWidth = 1;
     for (double y = 44; y < size.height; y += 26) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), line);

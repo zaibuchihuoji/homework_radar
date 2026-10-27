@@ -103,6 +103,9 @@ void showManualHomeworkEditor(
   final noteCtrl = TextEditingController(text: edit?.note ?? '');
   DateTime? due = edit?.dueAt;
   var saving = false;
+  var titleError = false;
+  final titleKey = GlobalKey();
+  final deadlineKey = GlobalKey();
   final existingCourses = state.homework
       .map((h) => h.course.trim())
       .where((c) => c.isNotEmpty)
@@ -204,15 +207,24 @@ void showManualHomeworkEditor(
                             title: '作业内容',
                             index: 2,
                             child: TextField(
+                              key: titleKey,
                               controller: titleCtrl,
+                              onChanged: (_) {
+                                if (titleError) {
+                                  setSheet(() => titleError = false);
+                                }
+                              },
                               style: TextStyle(
                                 fontSize: 14.5,
                                 color: textPrimary(sheetContext),
                               ),
-                              decoration: _homeworkInput(
-                                sheetContext,
-                                '作业标题（必填）',
-                              ),
+                              decoration:
+                                  _homeworkInput(
+                                    sheetContext,
+                                    '作业标题（必填）',
+                                  ).copyWith(
+                                    errorText: titleError ? '请填写作业标题' : null,
+                                  ),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -234,6 +246,7 @@ void showManualHomeworkEditor(
                           ),
                           const SizedBox(height: 12),
                           Row(
+                            key: deadlineKey,
                             children: [
                               Icon(
                                 Icons.schedule_rounded,
@@ -283,14 +296,16 @@ void showManualHomeworkEditor(
                                       due ?? now,
                                     ),
                                   );
-                                  if (!sheetContext.mounted) return;
+                                  if (!sheetContext.mounted || t == null) {
+                                    return;
+                                  }
                                   setSheet(
                                     () => due = DateTime(
                                       d.year,
                                       d.month,
                                       d.day,
-                                      t?.hour ?? 23,
-                                      t?.minute ?? 59,
+                                      t.hour,
+                                      t.minute,
                                     ),
                                   );
                                 },
@@ -313,71 +328,111 @@ void showManualHomeworkEditor(
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 46,
-                      child: FilledButton(
-                        onPressed: saving
-                            ? null
-                            : () async {
-                                final title = titleCtrl.text.trim();
-                                if (title.isEmpty) return;
-                                final course = courseCtrl.text.trim();
-                                final note = noteCtrl.text.trim();
-                                setSheet(() => saving = true);
-                                try {
-                                  final result = edit == null
-                                      ? await state.addManualHomework(
-                                          course: course,
-                                          title: title,
-                                          dueAt: due,
-                                          note: note,
-                                        )
-                                      : await state.updateManualHomework(
-                                          HomeworkItem(
-                                            id: edit.id,
-                                            platform: PlatformKind.manual,
-                                            course: course,
-                                            title: title,
-                                            dueAt: due,
-                                            status: edit.status,
-                                            url: edit.url,
-                                            score: edit.score,
-                                            note: note,
-                                            sourceKey: edit.sourceKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                due == null
+                                    ? '截止时间：未设置'
+                                    : '截止时间：${due!.month}月${due!.day}日 ${due!.hour.toString().padLeft(2, '0')}:${due!.minute.toString().padLeft(2, '0')}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: textSecondary(sheetContext),
+                                ),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                final field = deadlineKey.currentContext;
+                                  if (field != null) {
+                                  Scrollable.ensureVisible(field);
+                                  }
+                              },
+                              child: Text(due == null ? '设置' : '更改'),
+                            ),
+                          ],
+                        ),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 46,
+                          child: FilledButton(
+                            onPressed: saving
+                                ? null
+                                : () async {
+                                    final title = titleCtrl.text.trim();
+                                    if (title.isEmpty) {
+                                      setSheet(() => titleError = true);
+                                      final field = titleKey.currentContext;
+                                      if (field != null) {
+                                        await Scrollable.ensureVisible(field);
+                                      }
+                                      return;
+                                    }
+                                    final course = courseCtrl.text.trim();
+                                    final note = noteCtrl.text.trim();
+                                    setSheet(() => saving = true);
+                                    try {
+                                      final result = edit == null
+                                          ? await state.addManualHomework(
+                                              course: course,
+                                              title: title,
+                                              dueAt: due,
+                                              note: note,
+                                            )
+                                          : await state.updateManualHomework(
+                                              HomeworkItem(
+                                                id: edit.id,
+                                                platform: PlatformKind.manual,
+                                                course: course,
+                                                title: title,
+                                                dueAt: due,
+                                                status: edit.status,
+                                                url: edit.url,
+                                                score: edit.score,
+                                                note: note,
+                                                sourceKey: edit.sourceKey,
+                                              ),
+                                            );
+                                      if (!sheetContext.mounted) return;
+                                      Navigator.of(sheetContext).pop();
+                                      if (result.outputsDelayed &&
+                                          context.mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  '作业已保存，提醒或小组件刷新稍有延迟，请勿重复添加。',
+                                                ),
+                                              ),
+                                            );
+                                      }
+                                    } catch (_) {
+                                      if (sheetContext.mounted) {
+                                        setSheet(() => saving = false);
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('未能保存，输入已保留，请重试。'),
                                           ),
                                         );
-                                  if (!sheetContext.mounted) return;
-                                  Navigator.of(sheetContext).pop();
-                                  if (result.outputsDelayed &&
-                                      context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          '作业已保存，提醒或小组件刷新稍有延迟，请勿重复添加。',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                } catch (_) {
-                                  if (sheetContext.mounted) {
-                                    setSheet(() => saving = false);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('未能保存，输入已保留，请重试。'),
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
-                        child: Text(
-                          saving
-                              ? '正在保存…'
-                              : edit == null
-                              ? '添加'
-                              : '保存',
+                                      }
+                                    }
+                                  },
+                            child: Text(
+                              saving
+                                  ? '正在保存…'
+                                  : edit == null
+                                  ? '添加'
+                                  : '保存',
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ),
                 ],

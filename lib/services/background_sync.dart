@@ -94,6 +94,8 @@ class BackgroundSync {
     try {
       await channel.invokeMethod<bool>('configure', {
         'enabled': config.enabled && Storage.syncAccounts().isNotEmpty,
+        // Local alarm maintenance must never depend on network sync or login.
+        'scheduleLocalReminders': true,
         'minutes': config.minutes,
         'retryAt': _nextRetry()?.millisecondsSinceEpoch,
       });
@@ -111,17 +113,25 @@ class BackgroundSync {
   });
 
   Future<bool> _run(String reason) async {
-    if (reason == 'reminders') {
+    if (reason == 'reminders' || reason == 'ios_reminders') {
       // Exact-alarm access / clock changes need offline rescheduling even when
       // platform sync is disabled and there are no logged-in accounts.
       try {
         await state.waitForSync();
         await Storage.waitForBusinessTransaction();
-        await NotificationService.reschedule(
-          state.homework,
-          courses: state.courses,
-        );
-        return NotificationService.scheduleError.value == null;
+        if (reason == 'ios_reminders') {
+          final scheduled = await NotificationService.rescheduleIfNoPending(
+            state.homework,
+            courses: state.courses,
+          );
+          return !scheduled || NotificationService.scheduleError.value == null;
+        } else {
+          await NotificationService.reschedule(
+            state.homework,
+            courses: state.courses,
+          );
+          return NotificationService.scheduleError.value == null;
+        }
       } catch (_) {
         return false;
       }

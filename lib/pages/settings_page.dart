@@ -71,38 +71,6 @@ class SettingsPage extends StatelessWidget {
     root: true,
     body: SettingsList(
       children: [
-        InkWell(
-          onTap: () => _openDetail(context, '外观与小组件', _appearanceSettings),
-          borderRadius: BorderRadius.circular(12),
-          child: FocusSummary(
-            eyebrow: '当前外观',
-            title: state.style.label,
-            trailing: Icon(
-              Icons.palette_outlined,
-              size: 30,
-              color: paletteOf(context).onAccent,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '外观与小组件',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: paletteOf(context).onAccent,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.arrow_forward_rounded,
-                  size: 20,
-                  color: paletteOf(context).onAccent,
-                ),
-              ],
-            ),
-          ),
-        ),
         const FocusSectionTitle('学习偏好'),
         SettingsRow(
           icon: Icons.notifications_none_rounded,
@@ -121,6 +89,14 @@ class SettingsPage extends StatelessWidget {
           subtitle: sync,
           navigation: true,
           onTap: () => _openDetail(context, '同步与后台', _syncSettings),
+        ),
+        const SettingsDivider(indent: 0),
+        SettingsRow(
+          icon: Icons.palette_outlined,
+          title: '外观与小组件',
+          subtitle: '当前主题：${state.style.label}',
+          navigation: true,
+          onTap: () => _openDetail(context, '外观与小组件', _appearanceSettings),
         ),
         const FocusSectionTitle('数据与支持'),
         SettingsRow(
@@ -255,6 +231,13 @@ class SettingsPage extends StatelessWidget {
   List<Widget> _reminderSettings(BuildContext context) {
     final r = Storage.reminders();
     return [
+      if (defaultTargetPlatform == TargetPlatform.iOS)
+        const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: SettingsNote(
+            'iOS 限制待发送提醒数量，后台更新由系统安排。长时间未打开应用时，请按提示重新打开，以继续安排后续提醒。',
+          ),
+        ),
       if (NotificationService.notificationsEnabled == false)
         SettingsSection(
           children: [
@@ -705,6 +688,14 @@ class SettingsPage extends StatelessWidget {
                   '选择后立即生效',
                   style: TextStyle(
                     fontSize: 13,
+                    color: textSecondary(sheetContext),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '晴黄、清夏支持深色，其余为浅色',
+                  style: TextStyle(
+                    fontSize: 12,
                     color: textSecondary(sheetContext),
                   ),
                 ),

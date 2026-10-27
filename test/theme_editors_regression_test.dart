@@ -112,7 +112,7 @@ void main() {
   );
 
   testWidgets(
-    'homework date and time callbacks retain cancel, fallback and clear semantics',
+    'homework date and time cancellation preserves the previous deadline',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -152,13 +152,25 @@ void main() {
       expect(find.byType(TimePickerDialog), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('23:59'), findsOneWidget);
+      expect(find.text('未设置截止时间'), findsOneWidget);
       await chooseDate();
       await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('OK'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('23:59'), findsOneWidget);
+      expect(find.text('未设置截止时间'), findsNothing);
+      final beforeCancel = tester
+          .widget<Text>(find.textContaining('截止时间：').first)
+          .data;
+      await chooseDate();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Text>(find.textContaining('截止时间：').first).data,
+        beforeCancel,
+      );
       await tester.tap(find.byTooltip('清除截止时间'));
       await tester.pumpAndSettle();
       expect(find.text('未设置截止时间'), findsOneWidget);

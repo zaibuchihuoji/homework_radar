@@ -43,7 +43,8 @@ internal object SyncRuntimeHost {
                             val operations = SyncScheduler.configure(app,
                                 call.argument<Boolean>("enabled") == true,
                                 call.argument<Int>("minutes") ?: 30,
-                                call.argument<Number>("retryAt")?.toLong())
+                                call.argument<Number>("retryAt")?.toLong(),
+                                call.argument<Boolean>("scheduleLocalReminders") != false)
                             // A returned enqueue Operation is not yet durable.
                             // Report database/scheduler failures back to Dart.
                             scheduling.execute {

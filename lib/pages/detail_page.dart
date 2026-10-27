@@ -281,34 +281,43 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
               ],
             ),
           ),
-          const SizedBox(height: 28),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '我的备注',
+          const SizedBox(height: 20),
+          WorkbenchPanel(
+            seed: 'homework-note',
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '我的备注',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: p.ink,
+                        ),
+                      ),
+                    ),
+                    if (state != null)
+                      TextButton.icon(
+                        onPressed: () =>
+                            showHomeworkNoteEditor(context, state, hw),
+                        icon: const Icon(Icons.edit_note_outlined, size: 20),
+                        label: Text(note.isEmpty ? '添加备注' : '编辑备注'),
+                      ),
+                  ],
+                ),
+                SelectableText(
+                  note.isEmpty ? '暂无备注' : note,
                   style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: p.ink,
+                    fontSize: 14,
+                    height: 1.7,
+                    color: note.isEmpty ? p.ink2 : p.ink,
                   ),
                 ),
-              ),
-              if (state != null)
-                TextButton.icon(
-                  onPressed: () => showHomeworkNoteEditor(context, state, hw),
-                  icon: const Icon(Icons.edit_note_outlined, size: 20),
-                  label: Text(note.isEmpty ? '添加备注' : '编辑备注'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SelectableText(
-            note.isEmpty ? '暂无备注' : note,
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.7,
-              color: note.isEmpty ? p.ink2 : p.ink,
+              ],
             ),
           ),
           if (state != null) ...[

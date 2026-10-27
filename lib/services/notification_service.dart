@@ -2,6 +2,8 @@
 /// 点击通知可携带 payload（作业 id）跳转到详情页。
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -95,7 +97,23 @@ class NotificationService {
   @visibleForTesting
   static DateTime Function() clock = DateTime.now;
   static const _testId = 0x7fffffff;
+  static const _refreshId = 0x7ffffffe;
   static const _testPayload = 'class-reminder-test:';
+  static const _homeworkPayload = 'homework-reminder:';
+  static const _refreshPayload = 'reminder-refresh:';
+
+  /// New alarms carry their deadline so a delayed, still-pending alarm can be
+  /// distinguished from one for an edited deadline. Old plain IDs still work.
+  static String navigationPayload(String payload) {
+    if (payload.startsWith(_refreshPayload)) return '';
+    if (!payload.startsWith(_homeworkPayload)) return payload;
+    try {
+      final value = jsonDecode(payload.substring(_homeworkPayload.length));
+      return value is Map && value['id'] is String ? value['id'] as String : '';
+    } catch (_) {
+      return '';
+    }
+  }
 
   static Future<bool?> exactAlarmPermission() async {
     if (defaultTargetPlatform != TargetPlatform.android) return null;
@@ -245,9 +263,9 @@ class NotificationService {
   }) {
     final snapshot = List<HomeworkItem>.of(items);
     final courseSnapshot = List<Course>.of(courses);
-    final task = _rescheduleQueue.then(
-      (_) => _rescheduleNow(snapshot, courses: courseSnapshot),
-    );
+    final task = _rescheduleQueue.then((_) async {
+      await _rescheduleNow(snapshot, courses: courseSnapshot);
+    });
     // 队列吞掉单次失败，别让一次排期异常卡死后续所有重排
     _rescheduleQueue = task.catchError((Object error) {
       scheduleError.value = '提醒排期未完成，原有数据已保留，请稍后重试';
@@ -255,16 +273,45 @@ class NotificationService {
     return task;
   }
 
-  static Future<void> _rescheduleNow(
+  /// A time-limited iOS background refresh must not clear existing alarms:
+  /// the system can suspend the process midway through a replan. Refill only
+  /// after the pending queue has drained, on the same serial queue as the UI.
+  static Future<bool> rescheduleIfNoPending(
     List<HomeworkItem> items, {
     List<Course> courses = const [],
+  }) {
+    final snapshot = List<HomeworkItem>.of(items);
+    final courseSnapshot = List<Course>.of(courses);
+    final task = _rescheduleQueue.then(
+      (_) => _rescheduleNow(
+        snapshot,
+        courses: courseSnapshot,
+        onlyWhenEmpty: true,
+      ),
+    );
+    _rescheduleQueue = task.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {
+        scheduleError.value = '提醒排期未完成，原有数据已保留，请稍后重试';
+      },
+    );
+    return task;
+  }
+
+  static Future<bool> _rescheduleNow(
+    List<HomeworkItem> items, {
+    List<Course> courses = const [],
+    bool onlyWhenEmpty = false,
   }) async {
     await init();
     // 完整候选按真实触发时间共同分配预算，远期课程不能挤掉近期作业。
     final now = clock();
     final pending = await _plugin.pendingNotificationRequests();
+    if (onlyWhenEmpty && pending.isNotEmpty) return false;
     final exact = await exactAlarmPermission();
     final candidates = <_Reminder>[];
+    final keptIds = <int>{};
+    var keptHomework = 0;
     for (final hw in items) {
       if (hw.status == HwStatus.done || hw.status == HwStatus.submitted) {
         continue;
@@ -273,16 +320,52 @@ class NotificationService {
       if (due == null) continue;
       for (final h in Storage.reminders().enabledHours) {
         final fire = due.subtract(Duration(hours: h));
-        if (!fire.isAfter(now)) continue;
-        candidates.add(
-          _Reminder(
-            stableHash('hw#${hw.id}#$h') & 0x3fffffff,
-            fire,
-            '作业即将截止：${hw.course}',
-            '「${hw.title}」$h小时后截止',
-            payload: hw.id,
-          ),
+        final reminder = _Reminder(
+          stableHash('hw#${hw.id}#$h') & 0x3fffffff,
+          fire,
+          '作业即将截止：${hw.course}',
+          '「${hw.title}」$h小时后截止',
+          payload:
+              '$_homeworkPayload${jsonEncode({'id': hw.id, 'due': due.millisecondsSinceEpoch, 'hours': h})}',
         );
+        if (fire.isAfter(now)) {
+          candidates.add(reminder);
+        } else if (due.isAfter(now)) {
+          final lateBody = '「${hw.title}」临近截止，请查看详情';
+          var keptCurrent = false;
+          for (final p in pending) {
+            if (p.payload == reminder.payload &&
+                p.title == reminder.title &&
+                (p.body == reminder.body || p.body == lateBody) &&
+                keptIds.add(p.id)) {
+              keptHomework++;
+              keptCurrent = true;
+            }
+          }
+          if (!keptCurrent &&
+              pending.any(
+                (p) =>
+                    p.payload == reminder.payload ||
+                    (p.payload == hw.id &&
+                        (p.id == reminder.id ||
+                            (p.title == reminder.title &&
+                                p.body == reminder.body)) &&
+                        (p.body?.endsWith('$h小时后截止') ?? false)),
+              )) {
+            // Older versions only stored the homework ID, so their trigger
+            // time cannot be verified. Replace the pending legacy alarm with
+            // an immediate reminder for the current, still-active deadline.
+            candidates.add(
+              _Reminder(
+                reminder.id,
+                now.add(const Duration(seconds: 2)),
+                reminder.title,
+                lateBody,
+                payload: reminder.payload,
+              ),
+            );
+          }
+        }
       }
     }
     final plan = ClassReminderPlan.build(
@@ -293,7 +376,6 @@ class NotificationService {
       minutes: Storage.classReminderMinutes(),
       slots: SectionTimes.current(),
     );
-    final keptIds = <int>{};
     final keptClasses = <ClassReminderEntry>[];
     for (final entry in plan.entries) {
       if (entry.fire.isAfter(now)) {
@@ -362,24 +444,70 @@ class NotificationService {
       final cmp = a.fire.compareTo(b.fire);
       return cmp != 0 ? cmp : a.id.compareTo(b.id);
     });
-    final budget = defaultTargetPlatform == TargetPlatform.iOS ? 64 : 500;
-    var homeworkCount = 0,
+    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
+    DateTime? nextUnscheduled;
+    if (isIos && courses.isNotEmpty && Storage.classReminder()) {
+      // The normal plan covers 56 days. Find the next occurrence beyond that
+      // window so iOS can ask the user to reopen before reminders run out.
+      final start = Storage.semesterStart();
+      if (start != null) {
+        final startDay = DateTime(start.year, start.month, start.day);
+        final firstMonday = startDay.subtract(
+          Duration(days: startDay.weekday - 1),
+        );
+        var cursor = DateTime(now.year, now.month, now.day + 56);
+        if (cursor.isBefore(firstMonday)) cursor = firstMonday;
+        // Course entry supports at most 30 weeks; four 56-day windows cover it.
+        for (
+          var window = 0;
+          window < 4 && Course.weekNumberOf(start, cursor) <= 30;
+          window++
+        ) {
+          final later = ClassReminderPlan.build(
+            courses: courses,
+            semesterStart: start,
+            now: cursor,
+            enabled: true,
+            minutes: Storage.classReminderMinutes(),
+            slots: SectionTimes.current(),
+          );
+          if (later.entries.isNotEmpty) {
+            nextUnscheduled = later.entries.first.fire;
+            break;
+          }
+          cursor = DateTime(cursor.year, cursor.month, cursor.day + 56);
+        }
+      }
+    }
+    final needsRefreshSlot =
+        isIos &&
+        (nextUnscheduled != null || candidates.length + keptIds.length > 64);
+    final budget = isIos ? (needsRefreshSlot ? 63 : 64) : 500;
+    var homeworkCount = keptHomework,
         classCount = keptClasses.length,
         total = keptIds.length,
         failed = 0;
-    if (keptIds.isEmpty) {
-      await _plugin.cancelAllPendingNotifications();
-    } else {
-      for (final p in pending) {
-        if (!keptIds.contains(p.id)) await _plugin.cancel(p.id);
+    if (!onlyWhenEmpty) {
+      if (keptIds.isEmpty) {
+        await _plugin.cancelAllPendingNotifications();
+      } else {
+        for (final p in pending) {
+          if (!keptIds.contains(p.id)) await _plugin.cancel(p.id);
+        }
       }
     }
-    final usedIds = <int>{_testId, ...keptIds};
+    final usedIds = <int>{_testId, _refreshId, ...keptIds};
     final scheduledClasses = [...keptClasses];
     var actualExact = exact;
     for (final item in candidates) {
-      if (total >= budget) break;
-      if (item.isClass ? classCount >= 400 : homeworkCount >= 100) continue;
+      if (total >= budget ||
+          (item.isClass ? classCount >= 400 : homeworkCount >= 100)) {
+        if (isIos &&
+            (nextUnscheduled == null || item.fire.isBefore(nextUnscheduled))) {
+          nextUnscheduled = item.fire;
+        }
+        continue;
+      }
       var id = item.id;
       while (!usedIds.add(id)) {
         id = (id + 1) & 0x7fffffff;
@@ -405,14 +533,40 @@ class NotificationService {
         failed++;
       }
     }
+    if (isIos && nextUnscheduled != null && total < 64) {
+      final proposed = nextUnscheduled.subtract(const Duration(hours: 6));
+      final refreshAt = proposed.isAfter(now.add(const Duration(minutes: 1)))
+          ? proposed
+          : now.add(const Duration(minutes: 1));
+      try {
+        await _schedule(
+          _Reminder(
+            _refreshId,
+            refreshAt,
+            '打开作业通以更新后续提醒',
+            'iOS 的待发送提醒数量有限，打开应用后会继续安排后续提醒。',
+            payload: '$_refreshPayload${refreshAt.millisecondsSinceEpoch}',
+          ),
+          false,
+        );
+      } catch (_) {
+        failed++;
+      }
+    } else if (isIos && nextUnscheduled != null) {
+      failed++;
+    }
     scheduledClasses.sort((a, b) => a.fire.compareTo(b.fire));
     scheduleError.value = failed == 0 ? null : '$failed 条提醒排期失败，请检查系统通知设置后重试';
     classSchedule.value = ClassScheduleStatus(
       next: scheduledClasses.firstOrNull,
       scheduledCount: classCount,
       exact: actualExact,
-      issue: scheduleError.value ?? plan.issue,
+      issue:
+          scheduleError.value ??
+          plan.issue ??
+          (nextUnscheduled == null ? null : 'iOS 需要重新打开应用以安排更远的提醒'),
     );
+    return true;
   }
 
   /// Returns the mode actually accepted; permission can be revoked between the

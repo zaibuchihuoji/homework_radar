@@ -6,6 +6,7 @@ import 'package:homework_radar/models/homework.dart';
 import 'package:homework_radar/pages/calendar_page.dart';
 import 'package:homework_radar/pages/detail_page.dart';
 import 'package:homework_radar/services/storage.dart';
+import 'package:homework_radar/ui/focus_parts.dart';
 import 'package:homework_radar/ui/tokens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:table_calendar/table_calendar.dart';
@@ -73,6 +74,33 @@ void main() {
 
   for (final style in ThemeStyle.values) {
     testWidgets(
+      '${style.name}: calendar starts on Monday and scales weekday row',
+      (tester) async {
+        final state = AppState();
+        await show(tester, state, style, narrow: true);
+        final calendar = tester.widget<TableCalendar<HomeworkItem>>(
+          find.byType(TableCalendar<HomeworkItem>),
+        );
+        expect(calendar.startingDayOfWeek, StartingDayOfWeek.monday);
+        expect(calendar.daysOfWeekHeight, greaterThan(20));
+        expect(calendar.calendarBuilders.dowBuilder, isNotNull);
+        expect(find.text('未完成 · 今天及以前'), findsOneWidget);
+        expect(
+          tester.getTopLeft(find.byType(FocusSummary)).dy,
+          lessThan(tester.getTopLeft(find.text('未完成 · 今天及以前')).dy),
+        );
+        expect(
+          tester.getTopLeft(find.text('未完成 · 今天及以前')).dy,
+          lessThan(
+            tester.getTopLeft(find.byType(TableCalendar<HomeworkItem>)).dy,
+          ),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        state.dispose();
+      },
+    );
+    testWidgets(
       '${style.name}: date agenda stays ordered and opens its detail',
       (tester) async {
         final now = DateTime.now();
@@ -84,13 +112,17 @@ void main() {
           ];
         await Storage.saveHomework(state.homework);
         await show(tester, state, style, narrow: true);
-        await tester.tap(
-          find.descendant(
-            of: find.byType(TableCalendar<HomeworkItem>),
-            matching: find.text('${chosen.day}'),
-          ),
+        final chosenDay = find.descendant(
+          of: find.byType(TableCalendar<HomeworkItem>),
+          matching: find.text('${chosen.day}'),
         );
+        await tester.ensureVisible(chosenDay);
         await tester.pumpAndSettle();
+        await tester.tap(chosenDay);
+        await tester.pumpAndSettle();
+        final summary = tester.widget<FocusSummary>(find.byType(FocusSummary));
+        expect(summary.title, '${chosen.month}月${chosen.day}日');
+        expect(summary.detail, '2 项截止');
         await tester.scrollUntilVisible(
           find.text('上午练习'),
           160,
