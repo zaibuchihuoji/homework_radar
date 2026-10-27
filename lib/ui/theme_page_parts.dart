@@ -33,10 +33,12 @@ class ThemePageHeader extends StatelessWidget {
       value,
       style: TextStyle(
         fontSize: size,
-        fontWeight: weight,
+        fontWeight: p.clay && size >= 19 ? FontWeight.w400 : weight,
         height: 1.35,
         color: color ?? p.ink,
-        fontFamily: p.terminal || p.pixel || p.receipt
+        fontFamily: p.clay && size >= 19
+            ? 'StudySerif'
+            : p.terminal || p.pixel || p.receipt
             ? 'monospace'
             : p.paper || p.journal
             ? 'serif'
@@ -670,7 +672,7 @@ class ThemePreferenceToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = paletteOf(context);
-    if (p.morandi || p.comic || p.clean) {
+    if (p.morandi || p.comic || p.clean || p.clay) {
       return Switch(
         value: value,
         onChanged: onChanged,

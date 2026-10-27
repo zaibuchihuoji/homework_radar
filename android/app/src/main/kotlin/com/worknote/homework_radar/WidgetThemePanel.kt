@@ -49,7 +49,7 @@ internal object WidgetThemePanel {
         if (h < 100f) {
             if (theme.style == "pixel") {
                 for (i in 0..2) { p.color=theme.focus; c.drawRect(w/2-8+i*6,h-3,w/2-5+i*6,h-1.5f,p) }
-            } else line(w/2-10,2f,w/2+10,2f,theme.focus,1.5f)
+            } else if (theme.style != "clay") line(w/2-10,2f,w/2+10,2f,theme.focus,1.5f)
         } else when (theme.style) {
             "clean" -> line(w / 2 - 12, 4f, w / 2 + 12, 4f, theme.focus, 3f)
             "green" -> line(4f, geometry.radius, 4f, minOf(h - geometry.radius, geometry.radius + 25), theme.focus, 3f)

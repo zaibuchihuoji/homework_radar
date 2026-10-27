@@ -7,20 +7,40 @@ import 'dart:convert';
 import '../models/course.dart';
 import '../models/homework.dart';
 import 'storage.dart';
+import 'local_recovery_store.dart';
+
+class BackupPreview {
+  const BackupPreview({
+    required this.courses,
+    required this.items,
+    required this.hiddenCount,
+    required this.trashCount,
+    required this.hasCourses,
+    required this.hasHomework,
+    this.exportedAt,
+    this.message = '',
+  });
+  final List<Course> courses;
+  final List<HomeworkItem> items;
+  final int hiddenCount, trashCount;
+  final bool hasCourses, hasHomework;
+  final DateTime? exportedAt;
+  final String message;
+}
 
 class BackupService {
   BackupService._();
 
   static const _magic = 'homework_radar';
-  static const _version = 2;
+  static const _version = 3;
 
   static Map<String, dynamic> exportMap() => {
     'app': _magic,
     'version': _version,
     'exportedAt': DateTime.now().toIso8601String(),
-    'courses': [for (final c in Storage.courses()) c.toJson()],
+    'courses': Storage.courseRowsForEdit(),
     // 作业列表（含手动添加与用户备注）——换机不丢手动作业
-    'homework': [for (final h in Storage.homework()) h.toJson()],
+    'homework': Storage.homeworkRowsForEdit(),
     'semesterStart': Storage.semesterStart()?.millisecondsSinceEpoch,
     // 手动校准标记不随备份走的话，换机后校准值会被下次抓取的
     // 自动检测覆盖（代码注释里明说要防的事故）
@@ -35,6 +55,9 @@ class BackupService {
     'courseColors': Storage.courseColors(),
     'timetableSource': Storage.timetableSource(),
     'accountArchives': Storage.accountArchives(),
+    'manualTrash': {
+      for (final e in LocalRecoveryStore.deleted()) e.item.id: e.toJson(),
+    },
     'settings': {
       'themeMode': Storage.themeMode(),
       'uiStyle': Storage.uiStyle(),
@@ -48,11 +71,28 @@ class BackupService {
 
   static String encode() => jsonEncode(exportMap());
 
+  static Future<void> ensureDailyRecoveryPoint() async {
+    try {
+      await Storage.waitForBusinessTransaction();
+      await LocalRecoveryStore.capture(encode(), reason: '每日自动备份', daily: true);
+    } catch (_) {
+      LocalRecoveryStore.error.value = '本地自动备份暂未完成，请先手动导出重要数据。';
+    }
+  }
+
+  static Future<BackupPreview> previewJson(String raw) =>
+      _process(raw, apply: false);
+  static Future<String> importJson(String raw) async =>
+      (await _process(raw, apply: true)).message;
+
   /// 从备份 JSON 恢复。返回给用户看的结果描述；格式不对抛 FormatException。
   ///
   /// 恢复是「先全部解析、解析完才落库」：此前边解析边写盘，中途一个坏
   /// sectionTimes 元素就留下半恢复状态（课表/作业已覆盖、作息还是旧值）。
-  static Future<String> importJson(String raw) async {
+  static Future<BackupPreview> _process(
+    String raw, {
+    required bool apply,
+  }) async {
     final dynamic decoded;
     try {
       decoded = jsonDecode(raw);
@@ -223,6 +263,35 @@ class BackupService {
           )
         : null;
 
+    final trashRaw = decoded['manualTrash'];
+    final trash = <DeletedHomework>[];
+    if (decoded.containsKey('manualTrash')) {
+      if (trashRaw is! Map) throw const FormatException('回收站格式损坏，未覆盖当前数据');
+      try {
+        for (final entry in trashRaw.entries) {
+          trash.add(
+            DeletedHomework.fromJson(
+              entry.key as String,
+              Map<String, dynamic>.from(entry.value as Map),
+            ),
+          );
+        }
+      } catch (_) {
+        throw const FormatException('回收站条目损坏，未覆盖当前数据');
+      }
+    }
+    BackupPreview preview([String message = '']) => BackupPreview(
+      courses: List.unmodifiable(courses),
+      items: List.unmodifiable(items),
+      hiddenCount: hidden.length,
+      trashCount: trash.length,
+      hasCourses: decoded.containsKey('courses'),
+      hasHomework: hw is List,
+      exportedAt: DateTime.tryParse(decoded['exportedAt']?.toString() ?? ''),
+      message: message,
+    );
+    if (!apply) return preview();
+
     // 备份没有可核验的账号归属。已有登录会话的平台只导入只读归档，
     // 不能让备份中的备注/完成状态/隐藏ID挂到当前另一个账号。
     bool loggedIn(PlatformKind p) => switch (p) {
@@ -237,7 +306,12 @@ class BackupService {
 
     // ---- 落库阶段（解析全部成功；日志保护整组写入）----
     await Storage.businessTransaction(() async {
-      final imported = items.where((h) => !loggedIn(h.platform)).toList();
+      // Keep a usable undo point even if applying the import later rolls back.
+      await LocalRecoveryStore.capture(encode(), reason: '恢复前备份');
+      final imported = <dynamic>[
+        for (var i = 0; i < items.length; i++)
+          if (!loggedIn(items[i].platform)) (hw as List)[i],
+      ];
       final activeHidden = Map<String, String>.from(hidden)
         ..removeWhere(
           (id, raw) => loggedIn(
@@ -266,7 +340,17 @@ class BackupService {
           });
         }
       }
-      imported.addAll(Storage.homework().where((h) => loggedIn(h.platform)));
+      for (final body in Storage.homeworkRowsForEdit()) {
+        try {
+          final item = HomeworkItem.fromJson(
+            Map<String, dynamic>.from(body as Map),
+          );
+          if (loggedIn(item.platform)) imported.add(body);
+        } catch (_) {
+          // No readable account identity: retain the only current raw copy.
+          imported.add(body);
+        }
+      }
       for (final e in Storage.hiddenItems().entries) {
         try {
           if (loggedIn(
@@ -279,11 +363,15 @@ class BackupService {
           throw const FormatException('当前隐藏作业损坏，请先导出数据再恢复备份');
         }
       }
-      if (decoded['courses'] is List) await Storage.saveCourses(courses);
+      if (decoded['courses'] is List) {
+        await Storage.saveCourseRows(
+          List<dynamic>.of(decoded['courses'] as List),
+        );
+      }
       // 作业：与课表同语义——备份里没有这个字段（旧版备份）才不动当前作业；
       // 有字段且合法的空列表也恢复为空，避免混入目标设备的旧数据。
       if (hw is List) {
-        await Storage.saveHomework(imported);
+        await Storage.saveHomeworkRows(imported);
       }
       if (start != null) await Storage.saveSemesterStart(start);
       if (decoded.containsKey('semesterStart') && start == null) {
@@ -305,6 +393,7 @@ class BackupService {
       if (hraw is Map) {
         await Storage.restoreHiddenItems(activeHidden);
       }
+      if (trashRaw is Map) await LocalRecoveryStore.saveDeleted(trash);
       if (colors is Map) await Storage.saveCourseColors(colorMap);
 
       final s = decoded['settings'];
@@ -338,10 +427,12 @@ class BackupService {
       if (badCourses > 0) '$badCourses 条坏课表数据被跳过',
       if (badHomework > 0) '$badHomework 条坏作业数据被跳过',
     ];
-    if (parts.isEmpty && warnings.isEmpty) return '备份为空，没有可恢复的数据';
+    if (trash.isNotEmpty) parts.add('回收站 ${trash.length} 条');
+    if (parts.isEmpty && warnings.isEmpty) return preview('备份为空，没有可恢复的数据');
     final base = parts.isEmpty ? '没有可恢复的数据' : '已恢复：${parts.join('、')}';
     final ownership = isolated.isEmpty ? '' : '；已登录平台的备份记录已放入只读归档，未关联当前账号';
-    return (warnings.isEmpty ? base : '$base（${warnings.join('、')}）') +
-        ownership;
+    return preview(
+      (warnings.isEmpty ? base : '$base（${warnings.join('、')}）') + ownership,
+    );
   }
 }

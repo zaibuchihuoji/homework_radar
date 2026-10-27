@@ -10,6 +10,28 @@ import 'package:homework_radar/pages/settings_page.dart';
 import 'package:homework_radar/services/storage.dart';
 import 'package:homework_radar/ui/tokens.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
+
+class _CancelledPicker extends FilePickerPlatform {
+  bool opened = false;
+  @override
+  Future<List<PlatformFile>> pickFiles({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    int compressionQuality = 0,
+    AndroidOptions androidOptions = const AndroidOptions(),
+    DarwinOptions darwinOptions = const DarwinOptions(),
+    WindowsOptions windowsOptions = const WindowsOptions(),
+    LinuxOptions linuxOptions = const LinuxOptions(),
+    WebOptions webOptions = const WebOptions(),
+  }) async {
+    opened = true;
+    return [];
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +39,10 @@ void main() {
   testWidgets(
     'five settings destinations keep existing data and import cancellation',
     (tester) async {
+      final originalPicker = FilePickerPlatform.instance;
+      final cancelledPicker = _CancelledPicker();
+      FilePickerPlatform.instance = cancelledPicker;
+      addTearDown(() => FilePickerPlatform.instance = originalPicker);
       SharedPreferences.setMockInitialValues({});
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(
@@ -57,13 +83,14 @@ void main() {
         if (title == '数据管理') {
           await tester.tap(find.text('导入数据'));
           await tester.pumpAndSettle();
-          expect(find.textContaining('将覆盖当前课表'), findsOneWidget);
-          await tester.tap(find.text('取消'));
-          await tester.pumpAndSettle();
+          expect(cancelledPicker.opened, isTrue);
+          expect(find.text('数据管理'), findsOneWidget);
           expect(
             jsonEncode(Storage.homework().map((h) => h.toJson()).toList()),
             before,
           );
+          await tester.ensureVisible(find.text('已隐藏的作业'));
+          await tester.pumpAndSettle();
           await tester.tap(find.text('已隐藏的作业'));
           await tester.pumpAndSettle();
           expect(find.text('旧作业'), findsOneWidget);

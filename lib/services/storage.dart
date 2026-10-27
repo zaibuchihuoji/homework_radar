@@ -45,6 +45,19 @@ class ReminderSettings {
 class Storage {
   static late SharedPreferences _sp;
 
+  static String? recognitionDraft() => _sp.getString('recognition_draft_v1');
+  static Future<void> saveRecognitionDraft(String? raw) => raw == null
+      ? _remove('recognition_draft_v1')
+      : _setString('recognition_draft_v1', raw);
+  static String manualHomeworkTrashRaw() =>
+      _sp.getString('manual_homework_trash_v1') ?? '{}';
+  static Future<void> saveManualHomeworkTrash(Map<String, dynamic> items) =>
+      _setString('manual_homework_trash_v1', jsonEncode(items));
+  static List<String> localRecoveryPoints() =>
+      _sp.getStringList('local_recovery_points_v1') ?? [];
+  static Future<void> saveLocalRecoveryPoints(List<String> points) =>
+      _setStringList('local_recovery_points_v1', points);
+
   /// 进程内数据世代。用户编辑、账号切换或恢复备份后旧抓取不得提交。
   static int _syncEpoch = 0;
   static int get syncEpoch => _syncEpoch;
@@ -92,6 +105,7 @@ class Storage {
     'account_archives',
     'zf_raw_page',
     'zf_xh',
+    'manual_homework_trash_v1',
   ];
 
   static SyncConfig syncConfig() {
@@ -242,7 +256,7 @@ class Storage {
   }
 
   static Future<void> archiveCourses() async {
-    final list = courses();
+    final list = courseRowsForEdit();
     if (list.isEmpty) return;
     final now = DateTime.now();
     await mergeAccountArchives([
@@ -252,7 +266,7 @@ class Storage {
         'platform': 'timetable',
         'homework': <Map<String, dynamic>>[],
         'hiddenItems': <String, String>{},
-        'courses': [for (final c in list) c.toJson()],
+        'courses': list,
         'semesterStart': semesterStart()?.millisecondsSinceEpoch,
         'timetableSemester': timetableSemester(),
         'timetableSource': timetableSource(),
@@ -292,7 +306,20 @@ class Storage {
   /// 无法确认同一账号时保留无凭据归档，活动数据不跨账号继承。
   static Future<void> archivePlatform(PlatformKind platform) async {
     invalidateSync();
-    final old = homework().where((h) => h.platform == platform).toList();
+    final disk = homeworkRowsForEdit();
+    bool bodyBelongs(dynamic body) {
+      if (body is! Map) return false;
+      try {
+        return HomeworkItem.fromJson(Map<String, dynamic>.from(body))
+                .platform ==
+            platform;
+      } catch (_) {
+        // A malformed title/date does not erase explicit account ownership.
+        return body['platform'] == platform.key;
+      }
+    }
+
+    final old = disk.where(bodyBelongs).toList();
     final hidden = hiddenItems();
     bool belongs(String id, String raw) {
       try {
@@ -323,14 +350,12 @@ class Storage {
       'id': '${now.microsecondsSinceEpoch}_${platform.key}',
       'createdAt': now.toIso8601String(),
       'platform': platform.key,
-      'homework': [for (final h in old) h.toJson()],
+      'homework': old,
       'hiddenItems': removed,
     });
     // 归档确认保存后才删除活动副本；中断最多重复，不会只剩空表。
     await _setString('account_archives', jsonEncode(archives));
-    await saveHomework(
-      homework().where((h) => h.platform != platform).toList(),
-    );
+    await saveHomeworkRows(disk.where((body) => !bodyBelongs(body)).toList());
     await restoreHiddenItems(
       hidden..removeWhere((id, _) => removed.containsKey(id)),
     );
@@ -470,8 +495,11 @@ class Storage {
   static Future<void> clearZf() async {
     invalidateSync();
     final manual = [
-      for (final c in courses())
-        if (c.id.startsWith('manual_')) c,
+      for (final body in courseRowsForEdit())
+        if (body is Map &&
+            body['id'] is String &&
+            (body['id'] as String).startsWith('manual_'))
+          body,
     ];
     await SecureStore.delete('zf_cookie');
     await _remove('zf_xh');
@@ -482,7 +510,7 @@ class Storage {
     await _remove('course_colors');
     await _remove('timetable_source');
     await _remove('semester_start_manual');
-    if (manual.isNotEmpty) await saveCourses(manual);
+    if (manual.isNotEmpty) await saveCourseRows(manual);
   }
 
   // ---- 课表 ----
@@ -492,6 +520,50 @@ class Storage {
     'courses_json',
     jsonEncode(list.map((e) => e.toJson()).toList()),
   );
+
+  static List<dynamic> courseRowsForEdit() =>
+      _rowsForEdit('courses_json', '课表');
+  static Future<void> saveCourseRows(List<dynamic> rows) =>
+      _setString('courses_json', jsonEncode(rows));
+
+  static Future<void> saveImportedCourses(
+    List<Course> courses, {
+    required bool sameSemester,
+    required bool partial,
+  }) {
+    final previous = <(String, String), Map<String, dynamic>>{};
+    final opaque = <dynamic>[];
+    (String, String) key(Course c) =>
+        (c.id, (c.weeks.toList()..sort()).join(','));
+    const known = {
+      'id',
+      'name',
+      'teacher',
+      'room',
+      'weekday',
+      'start',
+      'end',
+      'weeks',
+      'edited',
+      'anchorKey',
+    };
+    for (final row in courseRowsForEdit()) {
+      try {
+        final body = Map<String, dynamic>.from(row as Map);
+        final course = Course.fromJson(body);
+        if (sameSemester || course.id.startsWith('manual_')) {
+          previous[key(course)] = body
+            ..removeWhere((field, _) => known.contains(field));
+        }
+      } catch (_) {
+        if (partial) opaque.add(row);
+      }
+    }
+    return saveCourseRows([
+      for (final c in courses) {...?previous[key(c)], ...c.toJson()},
+      ...opaque,
+    ]);
+  }
 
   /// 最近一次课表对应的学期文本，用于判断重新抓取是否同一学期（决定合并策略）。
   static String timetableSemester() =>
@@ -776,11 +848,94 @@ class Storage {
     bool fromSync = false,
   }) {
     if (!fromSync) invalidateSync();
+    if (fromSync) {
+      // A successful fetch does not make an unreadable local row disposable.
+      // Carry extensions only across the same verified identity, never across
+      // a platform/source collision that the merge deliberately replaced.
+      final opaque = <dynamic>[];
+      final previous = <String, Map<String, dynamic>>{};
+      for (final row in homeworkRowsForEdit()) {
+        try {
+          final body = Map<String, dynamic>.from(row as Map);
+          final old = HomeworkItem.fromJson(body);
+          previous['${old.platform.name}\u001f${old.id}\u001f${old.sourceKey}'] =
+              body;
+        } catch (_) {
+          opaque.add(row);
+        }
+      }
+      const known = {
+        'id',
+        'platform',
+        'course',
+        'title',
+        'dueAt',
+        'status',
+        'url',
+        'score',
+        'note',
+        'sourceKey',
+      };
+      Map<String, dynamic> extensions(HomeworkItem item) => {
+        ...?previous['${item.platform.name}\u001f${item.id}\u001f${item.sourceKey}'],
+      }..removeWhere((key, _) => known.contains(key));
+      return _setString(
+        'homework_json',
+        jsonEncode([
+          for (final item in items) {...extensions(item), ...item.toJson()},
+          ...opaque,
+        ]),
+      );
+    }
     return _setString(
       'homework_json',
       jsonEncode(items.map((e) => e.toJson()).toList()),
     );
   }
+
+  /// Local targeted edits retain unknown rows and fields verbatim.
+  static List<dynamic> homeworkRowsForEdit() {
+    return _rowsForEdit('homework_json', '作业');
+  }
+
+  static List<dynamic> _rowsForEdit(String key, String label) {
+    final raw = _sp.getString(key);
+    try {
+      final decoded = raw == null ? <dynamic>[] : jsonDecode(raw);
+      if (decoded is! List) throw const FormatException();
+      return List<dynamic>.of(decoded);
+    } catch (_) {
+      throw StateError('原有$label无法完整读取，已停止操作以保留原数据');
+    }
+  }
+
+  static Future<void> saveHomeworkRows(List<dynamic> rows) {
+    invalidateSync();
+    return _setString('homework_json', jsonEncode(rows));
+  }
+
+  /// Patch just the fields edited by the user, under the same transaction used
+  /// by imports/deletes. Unrelated rows and unknown fields stay byte-equivalent
+  /// as JSON values, including rows this app version cannot interpret.
+  static Future<void> patchHomework(
+    String id,
+    Map<String, dynamic> fields, {
+    bool manualOnly = false,
+  }) => businessTransaction(() async {
+    final rows = homeworkRowsForEdit();
+    final indices = [
+      for (var i = 0; i < rows.length; i++)
+        if (rows[i] is Map && (rows[i] as Map)['id'] == id) i,
+    ];
+    if (indices.length != 1) throw StateError('作业已变化或标识冲突，请重新打开后编辑');
+    final body = Map<String, dynamic>.from(rows[indices.single] as Map);
+    final item = HomeworkItem.fromJson(body);
+    if (manualOnly && item.platform != PlatformKind.manual) {
+      throw StateError('平台作业请在官方 App 中修改');
+    }
+    rows[indices.single] = {...body, ...fields};
+    await saveHomeworkRows(rows);
+  });
 
   // ---- 排序偏好 ----
   static String sortMode() => _sp.getString('sort_mode') ?? 'time';

@@ -30,7 +30,7 @@ class ThemedNavigationBar extends StatelessWidget {
     final pal = paletteOf(context);
     final indicatorExtent = pal.sunny
         ? 32.0
-        : pal.morandi || pal.paper || pal.terminal
+        : pal.morandi || pal.paper || pal.terminal || pal.clay
         ? 38.0
         : 36.0;
     // Preserve each theme's existing row height, including its old frame inset.
@@ -46,7 +46,7 @@ class ThemedNavigationBar extends StatelessWidget {
         ? 0.0
         : pal.terminal
         ? 2.0
-        : pal.morandi
+        : pal.morandi || pal.clay
         ? indicatorExtent / 2
         : pal.paper
         ? 5.0
@@ -126,7 +126,10 @@ class ThemedNavigationBar extends StatelessWidget {
                                         ? Colors.transparent
                                         : pal.editorial
                                         ? pal.ink
-                                        : pal.sunny || pal.pixel || pal.inkWash
+                                        : pal.sunny ||
+                                              pal.pixel ||
+                                              pal.inkWash ||
+                                              pal.clay
                                         ? pal.accentFill
                                         : pal.receipt
                                         ? Colors.transparent
@@ -189,7 +192,10 @@ class ThemedNavigationBar extends StatelessWidget {
                                         ? pal.ink2
                                         : pal.editorial
                                         ? pal.card
-                                        : pal.pixel || pal.sunny || pal.inkWash
+                                        : pal.pixel ||
+                                              pal.sunny ||
+                                              pal.inkWash ||
+                                              pal.clay
                                         ? pal.onAccent
                                         : pal.accent,
                                   ),

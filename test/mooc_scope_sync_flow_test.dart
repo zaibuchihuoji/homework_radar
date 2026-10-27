@@ -193,6 +193,11 @@ void main() {
     await SyncService.run(platforms: {PlatformKind.mooc});
     expect(Storage.homework().map((h) => h.id), ['manual']);
     expect(Storage.accountArchives().single['homework'], hasLength(3));
+    final summary = Storage.syncStatuses()[PlatformKind.mooc]!.toJson()['summary'] as Map?;
+    expect(summary, isNotNull);
+    expect(summary!['archived'], 3);
+    expect(summary['added'], 0);
+    expect(summary['removed'], 0);
   });
 
   for (final failure in ['unknown', 'term', 'expired']) {
@@ -210,6 +215,13 @@ void main() {
           containsAll(['current', 'old-public', 'legacy', 'manual']),
         );
         expect(Storage.accountArchives(), isEmpty);
+        final summary = Storage.syncStatuses()[PlatformKind.mooc]!.toJson()['summary'] as Map?;
+        expect(summary, isNotNull);
+        expect(summary!['retained'], 3);
+        expect(summary['removed'], 0);
+        if (failure == 'term') {
+          expect(summary['details'], contains('《Course 1》作业获取未完成'));
+        }
       },
     );
   }

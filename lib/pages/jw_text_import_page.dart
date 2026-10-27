@@ -47,6 +47,7 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
   }
 
   Future<void> _parseAndPreview() async {
+    if (_parsing) return;
     final text = _ctrl.text.trim();
     if (text.isEmpty) {
       setState(() => _error = '先粘贴课表文本');
@@ -75,8 +76,8 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
       return;
     }
     if (!mounted) return;
-    setState(() => _parsing = false);
     if (courses.isEmpty) {
+      setState(() => _parsing = false);
       setState(
         () => _error =
             '没解析出课程。每门课至少要有名称和周次（如「1-16周」），'
@@ -119,6 +120,8 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
       if (!mounted) return;
       setState(() => _error = '导入失败：$e');
       return;
+    } finally {
+      if (mounted) setState(() => _parsing = false);
     }
     if (mounted) Navigator.of(context).pop(true);
   }
@@ -160,6 +163,7 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _ctrl,
+                  enabled: !_parsing,
                   maxLines: 14,
                   minLines: 8,
                   decoration: InputDecoration(
@@ -180,7 +184,7 @@ class _JwTextImportPageState extends State<JwTextImportPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   OutlinedButton.icon(
-                    onPressed: _paste,
+                    onPressed: _parsing ? null : _paste,
                     icon: const Icon(Icons.content_paste_rounded, size: 18),
                     label: const Text('从剪贴板粘贴'),
                   ),

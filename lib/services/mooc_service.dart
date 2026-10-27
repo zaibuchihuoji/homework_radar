@@ -40,6 +40,7 @@ class MoocService {
 
   /// 课程级请求失败次数。
   int failedCount = 0;
+  final List<String> failedCourses = [];
 
   /// Only a complete, authenticated scan may narrow the active local scope.
   /// null means unknown, while an empty set is a confirmed empty school term.
@@ -666,12 +667,14 @@ class MoocService {
         try {
           final list = await homeworkOf(c);
           if (list == null) {
+            failedCourses.add('《${c.name}》作业获取未完成');
             failedCount++; // 失败不能当「没有作业」，同步层靠它判定能否清理
           } else {
             out.addAll(list);
           }
         } catch (_) {
           failedCount++;
+          failedCourses.add('《${c.name}》作业获取未完成');
         }
         done++;
         onProgress?.call(done, cs.length);

@@ -29,7 +29,9 @@ void main() {
     );
     messenger.setMockMethodCallHandler(
       const MethodChannel('dexterous.com/flutter/local_notifications'),
-      (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
+      (call) async => call.method == 'pendingNotificationRequests'
+          ? <Map<String, Object?>>[]
+          : true,
     );
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
@@ -133,6 +135,94 @@ void main() {
     expect(Storage.homework().last.dueAt, DateTime(2026, 10, 23, 20));
   });
   testWidgets(
+    'review edits, cleared deadline and selection survive reopening',
+    (tester) async {
+      await tester.pumpWidget(harness(HomeworkRecognitionPage(state: state)));
+      await tester.enterText(
+        find.byKey(const ValueKey('recognition_input')),
+        '1. 【英语】阅读第四单元，截止2026-10-23 20:00\n2. 【数学】完成第五章练习',
+      );
+      await tester.tap(find.text('识别并核对'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('course_0')), '大学英语');
+      await tester.enterText(find.byKey(const ValueKey('title_0')), '人工修正阅读');
+      await tester.tap(find.text('清除时间'));
+      await tester.tap(find.byKey(const ValueKey('select_0')));
+      tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+      await tester.pumpAndSettle();
+      expect(Storage.recognitionDraft(), contains('人工修正阅读'));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(harness(HomeworkRecognitionPage(state: state)));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('recognition_input')))
+            .controller!
+            .text,
+        contains('阅读第四单元'),
+      );
+      await tester.tap(find.text('识别并核对'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('course_0')))
+            .controller!
+            .text,
+        '大学英语',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('title_0')))
+            .controller!
+            .text,
+        '人工修正阅读',
+      );
+      expect(
+        tester.widget<Checkbox>(find.byKey(const ValueKey('select_0'))).value,
+        isFalse,
+      );
+      expect(find.text('清除时间'), findsNothing);
+      expect(Storage.homework().single.note, '保留旧备注');
+    },
+  );
+  testWidgets(
+    'changed recognition source does not reuse unrelated reviewed rows',
+    (tester) async {
+      await tester.pumpWidget(harness(HomeworkRecognitionPage(state: state)));
+      await tester.enterText(
+        find.byKey(const ValueKey('recognition_input')),
+        '【英语】阅读第四单元',
+      );
+      await tester.tap(find.text('识别并核对'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('title_0')), '不应挪到数学');
+      tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('recognition_input')),
+        '【数学】完成第六章作业',
+      );
+      await tester.tap(find.text('识别并核对'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('course_0')))
+            .controller!
+            .text,
+        '数学',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('title_0')))
+            .controller!
+            .text,
+        contains('第六章'),
+      );
+      expect(Storage.homework(), hasLength(1));
+    },
+  );
+  testWidgets(
     'screenshot path uses the same review and large text fits a small screen',
     (tester) async {
       tester.view.physicalSize = const Size(320, 740);
@@ -156,6 +246,29 @@ void main() {
       expect(find.textContaining('截止时间待确认'), findsOneWidget);
       expect(Storage.homework(), hasLength(1));
       expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'discard clears only the recognition draft and not saved homework',
+    (tester) async {
+      await tester.pumpWidget(harness(HomeworkRecognitionPage(state: state)));
+      await tester.enterText(
+        find.byKey(const ValueKey('recognition_input')),
+        '【数学】待核对的作业',
+      );
+      await tester.tap(find.byTooltip('清空草稿'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('清空草稿'));
+      await tester.pumpAndSettle();
+      expect(Storage.recognitionDraft(), isNull);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('recognition_input')))
+            .controller!
+            .text,
+        isEmpty,
+      );
+      expect(Storage.homework().single.note, '保留旧备注');
     },
   );
   testWidgets('date picker cancellation and clear never fabricate a deadline', (

@@ -63,7 +63,7 @@ class _BrushPainter extends CustomPainter {
 Widget appBarTitle(BuildContext c, String text) {
   final pal = paletteOf(c);
   final base = TextStyle(
-    fontSize: pal.sunny
+    fontSize: pal.sunny || pal.clay
         ? 25
         : pal.editorial
         ? 19

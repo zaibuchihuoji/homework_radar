@@ -7,8 +7,13 @@ StylePalette _formPalette(BuildContext context) =>
     stylePalette(ThemeStyle.clean, Theme.of(context).brightness);
 
 /// Shared presentation for app-owned forms and routes, never their state.
-ShapeBorder themeModalShape(StylePalette p) => p.clean
-    ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))
+ShapeBorder themeModalShape(StylePalette p) => p.clean || p.clay
+    ? RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: p.clay
+            ? BorderSide(color: p.cardBorder, width: .7)
+            : BorderSide.none,
+      )
     : _ModalBorder(p);
 
 class _ModalBorder extends ShapeBorder {
@@ -166,7 +171,7 @@ InputBorder themeFieldBorder(
   }
   return OutlineInputBorder(
     borderRadius: BorderRadius.circular(
-      p.clean
+      p.clean || p.clay
           ? 12
           : p.morandi
           ? 18
@@ -336,9 +341,7 @@ class ThemedAlertDialog extends StatelessWidget {
       backgroundColor: p.clean ? backgroundColor : p.modal,
       surfaceTintColor: Colors.transparent,
       shape: p.clean ? (shape ?? themeModalShape(p)) : themeModalShape(p),
-      titlePadding:
-          titlePadding ??
-          const EdgeInsets.fromLTRB(24, 24, 24, 4),
+      titlePadding: titlePadding ?? const EdgeInsets.fromLTRB(24, 24, 24, 4),
       contentPadding:
           contentPadding ?? const EdgeInsets.fromLTRB(24, 20, 24, 24),
       actionsPadding: actionsPadding,
@@ -392,7 +395,12 @@ class _ModalHeading extends StatelessWidget {
         DefaultTextStyle.merge(
           style: TextStyle(
             fontSize: 20,
-            fontWeight: p.comic ? FontWeight.w800 : FontWeight.w600,
+            fontFamily: p.clay ? 'StudySerif' : null,
+            fontWeight: p.clay
+                ? FontWeight.w400
+                : p.comic
+                ? FontWeight.w800
+                : FontWeight.w600,
             height: 1.35,
             color: p.ink,
           ),

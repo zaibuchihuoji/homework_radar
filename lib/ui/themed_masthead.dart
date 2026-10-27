@@ -15,8 +15,13 @@ class ThemedMasthead extends StatelessWidget {
         Text(
           '作业通',
           style: TextStyle(
-            fontSize: 22,
-            fontWeight: p.comic ? FontWeight.w800 : FontWeight.w600,
+            fontSize: p.clay ? 25 : 22,
+            fontFamily: p.clay ? 'StudySerif' : null,
+            fontWeight: p.clay
+                ? FontWeight.w400
+                : p.comic
+                ? FontWeight.w800
+                : FontWeight.w600,
             color: p.ink,
           ),
         ),

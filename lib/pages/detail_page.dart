@@ -67,7 +67,22 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
   Future<void> _hide(HomeworkItem hw) async {
     final state = _state;
     if (state == null) return;
-    await state.dismissHomework(hw);
+    try {
+      await state.dismissHomework(hw);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              state.homework.any((h) => h.id == hw.id)
+                  ? '隐藏未完成，作业已保留，请重试。'
+                  : '作业已隐藏，提醒或小组件刷新稍有延迟。',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     if (Navigator.of(context).canPop()) Navigator.of(context).pop();
@@ -152,7 +167,9 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
                                       ? Icons.undo_rounded
                                       : Icons.check_circle_outline_rounded,
                                   size: 20,
-                                  color: p.sunny && !isDark(context)
+                                  color: p.clay
+                                      ? Colors.white
+                                      : p.sunny && !isDark(context)
                                       ? p.accentFill
                                       : p.onAccent,
                                 ),
@@ -189,7 +206,8 @@ class _HomeworkDetailPageState extends State<HomeworkDetailPage> {
                   style: TextStyle(
                     fontSize: 24,
                     height: 1.4,
-                    fontWeight: FontWeight.w600,
+                    fontFamily: p.clay ? 'StudySerif' : null,
+                    fontWeight: p.clay ? FontWeight.w400 : FontWeight.w600,
                     color: p.ink,
                   ),
                 ),

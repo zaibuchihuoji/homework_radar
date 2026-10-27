@@ -66,8 +66,10 @@ internal class StudyWidgetStyle(private val context: Context, size: WidgetDimens
     private val darkHalo by lazy { android.text.style.TextAppearanceSpan(context, R.style.WidgetTextHaloDark) }
     private val lightHalo by lazy { android.text.style.TextAppearanceSpan(context, R.style.WidgetTextHaloLight) }
 
-    fun label(value: CharSequence, ambient: Boolean = true, foreground: Int = ink): CharSequence = android.text.SpannableString(value).apply {
+    fun label(value: CharSequence, ambient: Boolean = true, foreground: Int = ink,
+        heading: Boolean = false): CharSequence = android.text.SpannableString(value).apply {
         val family = when {
+            heading && theme.style == "clay" -> theme.headingFont
             theme.style == "editorial" -> "sans-serif-condensed"
             transparent && ambient && theme.font == "sans-serif" -> "sans-serif-medium"
             else -> theme.font

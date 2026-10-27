@@ -59,6 +59,7 @@ class _HomePageState extends State<HomePage> {
 
   /// 正在撕的作业（防重复触发）
   final Set<String> _tearing = {};
+  final Map<String, int> _dismissVersions = {};
 
   @override
   void initState() {
@@ -135,7 +136,12 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 if (state.hasAnyAccount || state.homework.isNotEmpty)
-                  SliverToBoxAdapter(child: _buildFilters()),
+                  PinnedHeaderSliver(
+                    child: Material(
+                      color: bgColor(context),
+                      child: _buildFilters(),
+                    ),
+                  ),
                 if (!state.syncing && state.lastSyncMessage.isNotEmpty)
                   SliverToBoxAdapter(child: _warnBanner(state.lastSyncMessage)),
                 _buildList(context, state),
@@ -147,14 +153,16 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Decoration? _actionDecoration() {
+  BoxDecoration? _actionDecoration({bool primary = false}) {
     final p = paletteOf(context);
-    if (p.clean) return null;
+    if (p.clean && !primary) return null;
     final square = p.pixel || p.editorial || p.terminal || p.receipt;
     return BoxDecoration(
-      color: p.card,
+      color: primary ? p.accentFill : p.card,
       borderRadius: BorderRadius.circular(
-        square
+        p.clean
+            ? 12
+            : square
             ? 2
             : p.morandi
             ? 22
@@ -162,7 +170,7 @@ class _HomePageState extends State<HomePage> {
             ? 10
             : 6,
       ),
-      border: p.morandi
+      border: p.clean || p.morandi
           ? null
           : Border.all(
               color: p.inkWash ? p.ink.withValues(alpha: 0.12) : p.cardBorder,
@@ -180,14 +188,28 @@ class _HomePageState extends State<HomePage> {
     VoidCallback? onTap,
     Color? color,
     String? tooltip,
+    bool primary = false,
   }) {
-    return Container(
-      decoration: _actionDecoration(),
-      child: IconButton(
-        onPressed: onTap,
-        icon: child ?? Icon(icon, size: 21),
-        color: color,
-        tooltip: tooltip,
+    final decoration = _actionDecoration(primary: primary);
+    return SizedBox.square(
+      dimension: 48,
+      child: DecoratedBox(
+        decoration: decoration ?? const BoxDecoration(),
+        child: IconButton(
+          onPressed: onTap,
+          icon: child ?? Icon(icon, size: 22),
+          color: color,
+          tooltip: tooltip,
+          style: IconButton.styleFrom(
+            fixedSize: const Size.square(48),
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.standard,
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  decoration?.borderRadius ?? BorderRadius.circular(12),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -230,13 +252,12 @@ class _HomePageState extends State<HomePage> {
                   if (!_searching) _searchCtrl.clear();
                 }),
               ),
-              const SizedBox(width: 4),
-              const SizedBox(width: 4),
+              const SizedBox(width: 8),
               _iconBtn(
                 child: ActivityIcon(
                   Icons.refresh_rounded,
                   active: state.syncing,
-                  size: 21,
+                  size: 22,
                 ),
                 tooltip: '同步作业',
                 onTap: state.syncing ? null : () => state.syncAll(),
@@ -244,21 +265,14 @@ class _HomePageState extends State<HomePage> {
                     ? textFaint(context)
                     : accentColor(context),
               ),
-              ...[
-                const SizedBox(width: 6),
-                IconButton.filledTonal(
-                  tooltip: '添加作业',
-                  onPressed: () => _openAddMenu(context),
-                  style: IconButton.styleFrom(
-                    backgroundColor: paletteOf(context).accentFill,
-                    foregroundColor: paletteOf(context).onAccent,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  icon: const Icon(Icons.add_rounded, size: 24),
-                ),
-              ],
+              const SizedBox(width: 8),
+              _iconBtn(
+                tooltip: '添加作业',
+                onTap: () => _openAddMenu(context),
+                primary: true,
+                color: paletteOf(context).onAccent,
+                icon: Icons.add_rounded,
+              ),
             ],
           ),
         ],
@@ -755,7 +769,7 @@ class _HomePageState extends State<HomePage> {
       onTap: () => _openHw(hw),
       onLongPress: () => _openHwOptions(hw),
       child: Dismissible(
-        key: ValueKey(hw.id),
+        key: ValueKey((hw.id, _dismissVersions[hw.id] ?? 0)),
         direction: DismissDirection.endToStart,
         background: Container(
           alignment: Alignment.centerRight,
@@ -873,7 +887,9 @@ class _HomePageState extends State<HomePage> {
                           context: context,
                           builder: (confirmContext) => ThemedAlertDialog(
                             title: const Text('删除这条作业？'),
-                            content: Text('「${hw.title}」删除后无法恢复。'),
+                            content: Text(
+                              '「${hw.title}」将移入回收站，可在设置的“本地恢复”中找回。',
+                            ),
                             actions: [
                               TextButton(
                                 onPressed: () =>
@@ -889,7 +905,43 @@ class _HomePageState extends State<HomePage> {
                           ),
                         );
                         if (ok == true) {
-                          widget.state.deleteManualHomework(hw.id);
+                          try {
+                            await widget.state.deleteManualHomework(hw.id);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('「${hw.title}」已移入回收站'),
+                                action: SnackBarAction(
+                                  label: '撤销',
+                                  onPressed: () async {
+                                    try {
+                                      await widget.state.restoreDeletedHomework(
+                                        hw.id,
+                                      );
+                                    } catch (_) {
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('请在“本地恢复”中查看恢复结果'),
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  },
+                                ),
+                              ),
+                            );
+                          } catch (_) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('删除未完成，请核对作业列表和回收站后重试'),
+                                ),
+                              );
+                            }
+                          }
                         }
                       },
                     )
@@ -937,7 +989,12 @@ class _HomePageState extends State<HomePage> {
                         '添加作业',
                         style: TextStyle(
                           fontSize: 22,
-                          fontWeight: FontWeight.w800,
+                          fontFamily: paletteOf(dialogContext).clay
+                              ? 'StudySerif'
+                              : null,
+                          fontWeight: paletteOf(dialogContext).clay
+                              ? FontWeight.w400
+                              : FontWeight.w800,
                           color: textPrimary(dialogContext),
                         ),
                       ),
@@ -993,7 +1050,25 @@ class _HomePageState extends State<HomePage> {
       showManualHomeworkEditor(context, widget.state, edit: edit);
 
   Future<void> _dismissHw(HomeworkItem hw) async {
-    await widget.state.dismissHomework(hw);
+    // A failed save can restore the row in the same frame. Its old swipe/tear
+    // animation has finished and cannot be reused for the restored card.
+    _dismissVersions[hw.id] = (_dismissVersions[hw.id] ?? 0) + 1;
+    _tearKeys.remove(hw.id);
+    try {
+      await widget.state.dismissHomework(hw);
+    } catch (_) {
+      if (mounted) {
+        final retained = widget.state.homework.any((h) => h.id == hw.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              retained ? '隐藏未完成，作业已保留，请重试。' : '作业已隐藏，提醒或小组件刷新稍有延迟。',
+            ),
+          ),
+        );
+      }
+      return;
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

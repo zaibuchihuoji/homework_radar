@@ -71,6 +71,12 @@ Future<void> main() async {
   await runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      LicenseRegistry.addLicense(() async* {
+        final license = await rootBundle.loadString(
+          'assets/fonts/OFL-NotoSerifSC.txt',
+        );
+        yield LicenseEntryWithLineBreaks(['Noto Serif SC'], license);
+      });
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
       };
@@ -145,7 +151,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
       : null;
   final controlShape = RoundedRectangleBorder(
     borderRadius: BorderRadius.circular(
-      pal.clean
+      pal.clean || pal.clay
           ? 12
           : pal.morandi
           ? 14
@@ -170,13 +176,19 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
         brightness: brightness,
       ).copyWith(
         primary: pal.accent,
-        onPrimary: pal.sunny ? (dark ? pal.onAccent : Colors.white) : null,
-        primaryContainer: pal.sunny
+        onPrimary: pal.clay
+            ? Colors.white
+            : pal.sunny
+            ? (dark ? pal.onAccent : Colors.white)
+            : null,
+        primaryContainer: pal.clay
+            ? pal.accentFill
+            : pal.sunny
             ? pal.accentFill.withValues(alpha: dark ? .18 : .32)
             : null,
-        onPrimaryContainer: pal.sunny ? pal.ink : null,
-        secondaryContainer: pal.sunny ? pal.accentFill : null,
-        onSecondaryContainer: pal.sunny ? pal.onAccent : null,
+        onPrimaryContainer: pal.sunny || pal.clay ? pal.ink : null,
+        secondaryContainer: pal.sunny || pal.clay ? pal.accentFill : null,
+        onSecondaryContainer: pal.sunny || pal.clay ? pal.onAccent : null,
         surface: pal.modal,
         surfaceContainerLowest: pal.modal,
       );
@@ -186,7 +198,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
     colorScheme: scheme,
     scaffoldBackgroundColor: pal.bg,
     extensions: [pal],
-    textSelectionTheme: pal.sunny
+    textSelectionTheme: pal.sunny || pal.clay
         ? TextSelectionThemeData(
             cursorColor: pal.accent,
             selectionColor: pal.accentFill.withValues(alpha: .45),
@@ -224,19 +236,21 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
           )
         : null,
     textTheme: TextTheme(
-      bodyLarge: pal.clean
+      bodyLarge: pal.clean || pal.clay
           ? TextStyle(fontSize: 15, height: 1.5, color: pal.ink)
           : TextStyle(fontSize: 14, color: pal.ink, fontFamily: formFont),
       displayLarge: TextStyle(
         fontSize: 30,
         height: 1.1,
-        fontWeight: FontWeight.w600,
+        fontWeight: pal.clay ? FontWeight.w400 : FontWeight.w600,
+        fontFamily: pal.clay ? 'StudySerif' : null,
         letterSpacing: -0.5,
         color: pal.ink,
       ),
       titleLarge: TextStyle(
         fontSize: 20,
-        fontWeight: FontWeight.w700,
+        fontWeight: pal.clay ? FontWeight.w400 : FontWeight.w700,
+        fontFamily: pal.clay ? 'StudySerif' : null,
         color: pal.ink,
       ),
       titleMedium: TextStyle(
@@ -264,9 +278,13 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
           : SystemUiOverlayStyle.dark,
       titleTextStyle: TextStyle(
         fontSize: 20,
-        fontWeight: FontWeight.w600,
+        fontWeight: pal.clay ? FontWeight.w400 : FontWeight.w600,
         color: pal.ink,
-        fontFamily: pal.paper ? 'serif' : null,
+        fontFamily: pal.clay
+            ? 'StudySerif'
+            : pal.paper
+            ? 'serif'
+            : null,
         letterSpacing: pal.inkWash ? 5 : null,
       ),
     ),
@@ -311,7 +329,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: ButtonStyle(
         shape: WidgetStateProperty.all(
-          pal.clean
+          pal.clean || pal.clay
               ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
               : pal.receipt || pal.terminal || pal.editorial || pal.pixel
               ? const RoundedRectangleBorder(
@@ -334,6 +352,7 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
           (s) => s.contains(WidgetState.disabled)
               ? 0
               : pal.clean ||
+                    pal.clay ||
                     pal.pixel ||
                     pal.terminal ||
                     pal.receipt ||
@@ -353,6 +372,8 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
               ? (dark
                     ? Colors.white.withValues(alpha: 0.07)
                     : Colors.black.withValues(alpha: 0.05))
+              : pal.clay
+              ? pal.accent
               : pal.sunny && !dark
               ? pal.ink
               : pal.accentFill,
@@ -360,12 +381,14 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
         foregroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.disabled)
               ? (dark ? Tokens.ink2Dark : Tokens.ink2)
+              : pal.clay
+              ? Colors.white
               : pal.sunny && !dark
               ? Colors.white
               : pal.onAccent,
         ),
         shape: WidgetStateProperty.all(
-          pal.clean
+          pal.clean || pal.clay
               ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
               : pal.pixel
               ? RoundedRectangleBorder(
@@ -401,6 +424,14 @@ ThemeData buildTheme(Brightness brightness, ThemeStyle style) {
       backgroundColor: pal.modal,
       shape: themeModalShape(pal),
       surfaceTintColor: pal.clean ? null : Colors.transparent,
+      titleTextStyle: pal.clay
+          ? TextStyle(
+              fontFamily: 'StudySerif',
+              fontSize: 22,
+              height: 1.4,
+              color: pal.ink,
+            )
+          : null,
     ),
     inputDecorationTheme: pal.clean && !pal.sunny
         ? null
@@ -802,7 +833,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   }
 
   void _go(int i) {
-    if (i == _selected) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    // During an animation the selected index can still be the origin. A tap
+    // back to it must cancel that animation instead of being ignored.
+    if (i == _selected && !_pageController.position.isScrollingNotifier.value) {
+      return;
+    }
     if ((i - _selected).abs() == 1) {
       _pageController.animateToPage(
         i,
@@ -852,7 +888,10 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
         body: PageView(
           controller: _pageController,
           allowImplicitScrolling: true,
-          onPageChanged: (i) => setState(() => _selected = i),
+          onPageChanged: (i) {
+            FocusManager.instance.primaryFocus?.unfocus();
+            setState(() => _selected = i);
+          },
           children: [
             KeepAlivePage(
               child: HomePage(state: state, onGoAccounts: () => _go(3)),

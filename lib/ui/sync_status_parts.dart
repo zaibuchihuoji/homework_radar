@@ -171,6 +171,45 @@ class SyncPlatformStatus extends StatelessWidget {
               ),
               const SizedBox(height: 7),
               SettingsNote(note),
+              if (status?.summary case final summary?) ...[
+                const SizedBox(height: 10),
+                Text(
+                  '新增 ${summary.added} 项 · 更新 ${summary.changed} 项',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: textPrimary(context),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                SettingsNote(
+                  '保留原记录 ${summary.retained} 项'
+                  '${summary.archived > 0 ? ' · 已归档 ${summary.archived} 项' : ''}'
+                  '${summary.removed > 0 ? ' · 移出列表 ${summary.removed} 项' : ''}',
+                ),
+                SettingsNote('结果保存于 ${syncTime(summary.at)}'),
+                if (summary.listIncomplete)
+                  const SettingsNote('课程列表或登录状态未完整核实，本次结果不代表全部作业。'),
+                if (summary.failedRequests > 0)
+                  SettingsNote(
+                    '记录到 ${summary.failedRequests} 处获取异常，未确认的旧作业继续保留。',
+                  ),
+                if (summary.details.isNotEmpty)
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: Text('查看未完成项目（${summary.details.length}）'),
+                    children: [
+                      for (final detail in summary.details)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: SettingsNote(detail),
+                          ),
+                        ),
+                    ],
+                  ),
+              ],
               if (outcome == SyncOutcome.retry &&
                   status?.nextRetry != null) ...[
                 const SizedBox(height: 6),

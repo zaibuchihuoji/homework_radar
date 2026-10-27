@@ -2,7 +2,6 @@
 /// （tokens.dart，随样式与明暗双维变化），不要在这里新增色值。
 library;
 
-
 import 'package:flutter/material.dart';
 
 import 'dashed_line.dart';
@@ -31,9 +30,9 @@ Border? cardBorderOf(BuildContext c) {
   final pal = _pal(c);
   if (pal.cardBorder.a == 0) return null;
   return Border.all(
-      color: pal.cardBorder,
-      width: (pal.comic || pal.pixel) ? 2.0 : 1.0,
-    );
+    color: pal.cardBorder,
+    width: (pal.comic || pal.pixel) ? 2.0 : 1.0,
+  );
 }
 
 /// 漫画对话框徽标：圆角气泡 + 左下一条小尾巴（谁在说话一目了然），
@@ -208,9 +207,7 @@ Decoration? receiptTear(BuildContext c) {
   if (!pal.receipt) return null;
   return ReceiptTearDecoration(
     fill: pal.card,
-    shadow: pal.shadow.isEmpty
-        ? null
-        : pal.shadow.first.color,
+    shadow: pal.shadow.isEmpty ? null : pal.shadow.first.color,
   );
 }
 
@@ -272,9 +269,7 @@ class _ReceiptTearPainter extends BoxPainter {
 Decoration? editorialRules(BuildContext c) {
   final pal = _pal(c);
   if (!pal.editorial) return null;
-  return EditorialRulesDecoration(
-    rule: pal.cardBorder,
-    hairline: pal.hairline);
+  return EditorialRulesDecoration(rule: pal.cardBorder, hairline: pal.hairline);
 }
 
 class EditorialRulesDecoration extends Decoration {
@@ -302,7 +297,8 @@ class _EditorialRulesPainter extends BoxPainter {
     // Oxford 双线：粗线压顶，隔 2px 一道细线——报纸版块的经典记号
     canvas.drawRect(Rect.fromLTWH(rect.left, rect.top, rect.width, 2.2), rp);
     canvas.drawRect(
-        Rect.fromLTWH(rect.left, rect.top + 4.2, rect.width, 1), rp,
+      Rect.fromLTWH(rect.left, rect.top + 4.2, rect.width, 1),
+      rp,
     );
     canvas.drawRect(
       Rect.fromLTWH(rect.left, rect.bottom - 1, rect.width, 1),
@@ -460,6 +456,13 @@ BoxDecoration? inkWashFill(BuildContext c, double radius) {
 /// 暖纸印刷感：标题类文字换衬线体（系统缺中文衬线时自动回退黑体）。
 /// 只用于标题/徽标类大字，正文与小字保持黑体保证可读性。
 TextStyle serifTitle(BuildContext c, TextStyle base) {
+  if (_pal(c).clay) {
+    return base.copyWith(
+      fontFamily: 'StudySerif',
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0,
+    );
+  }
   if (!_pal(c).paper) return base;
   return base.copyWith(fontFamily: 'serif', letterSpacing: 0.3);
 }
@@ -475,7 +478,7 @@ TextStyle inkTitle(BuildContext c, TextStyle base) {
 /// 像素=对角硬投影（按键立体感）；莫兰迪=雾面软影；其余=品牌光晕。
 List<BoxShadow> primaryButtonShadow(BuildContext c) {
   final pal = _pal(c);
-  if (pal.clean) return const [];
+  if (pal.clean || pal.clay) return const [];
   if (pal.comic) {
     return [
       BoxShadow(

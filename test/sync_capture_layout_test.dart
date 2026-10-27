@@ -12,6 +12,7 @@ import 'package:homework_radar/pages/homework_recognition_review_page.dart';
 import 'package:homework_radar/services/homework_recognition.dart';
 import 'package:homework_radar/services/storage.dart';
 import 'package:homework_radar/services/sync_policy.dart';
+import 'package:homework_radar/services/sync_summary.dart';
 import 'package:homework_radar/ui/settings_parts.dart';
 import 'package:homework_radar/ui/sync_status_parts.dart';
 import 'package:homework_radar/ui/tokens.dart';
@@ -74,6 +75,12 @@ void main() {
                     lastSuccess: success,
                     lastAttempt: attempt,
                     outcome: outcome,
+                    summary: SyncSummary(
+                      at: attempt,
+                      added: 3,
+                      changed: 2,
+                      retained: 12,
+                    ),
                     nextRetry: outcome == SyncOutcome.retry
                         ? attempt.add(const Duration(minutes: 5))
                         : null,
@@ -87,6 +94,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('上次完整同步：2025/5/17 22:30'), findsOneWidget);
       expect(find.textContaining('最近尝试：'), findsOneWidget);
+      expect(find.text('新增 3 项 · 更新 2 项'), findsOneWidget);
       expect(
         find.text('完整同步'),
         outcome == SyncOutcome.success ? findsOneWidget : findsNothing,
@@ -172,8 +180,17 @@ void main() {
                 children: [
                   SyncPlatformStatus(
                     platform: PlatformKind.mooc,
-                    status: const PlatformSyncStatus(
+                    status: PlatformSyncStatus(
                       outcome: SyncOutcome.loginExpired,
+                      summary: SyncSummary(
+                        at: DateTime(2026, 10, 26),
+                        added: 3,
+                        changed: 2,
+                        retained: 12,
+                        archived: 1,
+                        failedRequests: 2,
+                        details: const ['《数学》作业获取未完成', '《英语》作业获取未完成'],
+                      ),
                     ),
                   ),
                 ],

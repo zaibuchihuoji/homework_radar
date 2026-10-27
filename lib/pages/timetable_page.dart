@@ -116,6 +116,7 @@ class _TimetablePageState extends State<TimetablePage> {
   int _agendaDay = DateTime.now().weekday;
   int? _week; // 当前查看的周次；null = 跟随本周
   PageController? _pageController;
+  PageController? _agendaPageController;
 
   /// 页面常驻不销毁（KeepAlivePage）且无跨天刷新，「本周」标记/今日列高亮/
   /// 回到本周 FAB 会按旧日期显示——定时重建保持日期新鲜
@@ -126,6 +127,11 @@ class _TimetablePageState extends State<TimetablePage> {
     super.initState();
     _pageController = PageController(
       initialPage: (_displayWeek - 1).clamp(0, _maxWeeks - 1),
+      keepPage: false,
+    );
+    _agendaPageController = PageController(
+      initialPage: (_displayWeek - 1) * 7 + _agendaDay - 1,
+      keepPage: false,
     );
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
@@ -136,6 +142,7 @@ class _TimetablePageState extends State<TimetablePage> {
   void dispose() {
     _clock?.cancel();
     _pageController?.dispose();
+    _agendaPageController?.dispose();
     super.dispose();
   }
 
@@ -161,8 +168,10 @@ class _TimetablePageState extends State<TimetablePage> {
   }
 
   void _animateToWeek(int week) {
-    final page = (week - 1).clamp(0, _maxWeeks - 1);
-    _pageController?.animateToPage(
+    final page = _pageOf(week.clamp(1, _maxWeeks));
+    final controller = _activePageController;
+    if (controller?.hasClients != true) return;
+    controller!.animateToPage(
       page,
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
@@ -172,16 +181,43 @@ class _TimetablePageState extends State<TimetablePage> {
   /// 导入/校准后回到当前周（清除手动选中的周次）。
   void _resetToCurrentWeek() {
     setState(() => _week = null);
-    final page = ((_currentWeek() ?? 1) - 1).clamp(0, _maxWeeks - 1);
-    _pageController?.jumpToPage(page);
+    final controller = _activePageController;
+    if (controller?.hasClients == true) {
+      controller!.jumpToPage(_pageOf(_displayWeek));
+    }
+  }
+
+  PageController? get _activePageController =>
+      _agenda ? _agendaPageController : _pageController;
+  int _pageOf(int week) => _agenda ? (week - 1) * 7 + _agendaDay - 1 : week - 1;
+
+  void _setAgenda(bool agenda) {
+    if (_agenda == agenda) return;
+    final week = _displayWeek;
+    setState(() => _agenda = agenda);
+    // The two views use different paging units. Align only after attachment.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _agenda != agenda) return;
+      final controller = _activePageController;
+      if (controller?.hasClients == true) controller!.jumpToPage(_pageOf(week));
+    });
+  }
+
+  void _selectAgendaDay(int day) {
+    setState(() => _agendaDay = day);
+    if (_agendaPageController?.hasClients == true) {
+      _agendaPageController!.jumpToPage(_pageOf(_displayWeek));
+    }
   }
 
   void _followCurrentWeek() {
     if (_week != null) return;
-    final target = ((_currentWeek() ?? 1) - 1).clamp(0, _maxWeeks - 1);
+    final agenda = _agenda;
+    final target = _pageOf((_currentWeek() ?? 1).clamp(1, _maxWeeks));
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final controller = _pageController;
+      final controller = _activePageController;
       if (!mounted ||
+          _agenda != agenda ||
           _week != null ||
           controller == null ||
           !controller.hasClients ||
@@ -826,7 +862,7 @@ class _TimetablePageState extends State<TimetablePage> {
           child: FocusViewSwitch(
             labels: const ['周视图', '当日清单'],
             selected: _agenda ? 1 : 0,
-            onChanged: (i) => setState(() => _agenda = i == 1),
+            onChanged: (i) => _setAgenda(i == 1),
           ),
         ),
         if (currentWeek == null)
@@ -844,7 +880,7 @@ class _TimetablePageState extends State<TimetablePage> {
                     child: Semantics(
                       selected: d == _agendaDay,
                       child: InkWell(
-                        onTap: () => setState(() => _agendaDay = d),
+                        onTap: () => _selectAgendaDay(d),
                         child: Container(
                           constraints: const BoxConstraints(minHeight: 44),
                           alignment: Alignment.center,
@@ -868,16 +904,20 @@ class _TimetablePageState extends State<TimetablePage> {
           ),
         Expanded(
           child: PageView.builder(
-            controller: _pageController,
-            itemCount: _maxWeeks,
-            onPageChanged: (page) => setState(
-              () =>
-                  _week = page + 1 == (_currentWeek() ?? 1).clamp(1, _maxWeeks)
-                  ? null
-                  : page + 1,
+            key: ValueKey(
+              _agenda ? 'timetable_day_pages' : 'timetable_week_pages',
             ),
+            controller: _activePageController,
+            itemCount: _agenda ? _maxWeeks * 7 : _maxWeeks,
+            onPageChanged: (page) => setState(() {
+              final week = _agenda ? page ~/ 7 + 1 : page + 1;
+              if (_agenda) _agendaDay = page % 7 + 1;
+              _week = week == (_currentWeek() ?? 1).clamp(1, _maxWeeks)
+                  ? null
+                  : week;
+            }),
             itemBuilder: (context, page) => _agenda
-                ? _focusDayList(state, page + 1)
+                ? _focusDayList(state, page ~/ 7 + 1, page % 7 + 1)
                 : Padding(
                     padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
                     child: _weekPage(
@@ -894,13 +934,13 @@ class _TimetablePageState extends State<TimetablePage> {
     );
   }
 
-  Widget _focusDayList(AppState state, int week) {
+  Widget _focusDayList(AppState state, int week, int day) {
     final p = paletteOf(context);
     final courses =
         state.courses
             .where(
               (c) =>
-                  c.weekday == _agendaDay &&
+                  c.weekday == day &&
                   (c.inWeek(week) || Storage.showNonWeekCourses()),
             )
             .toList()
@@ -909,7 +949,7 @@ class _TimetablePageState extends State<TimetablePage> {
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
       children: [
         FocusSectionTitle(
-          '周${_weekdayNames[_agendaDay - 1]}的安排',
+          '周${_weekdayNames[day - 1]}的安排',
           detail: '${courses.length} 门课',
         ),
         if (courses.isEmpty)
@@ -1559,13 +1599,19 @@ class _TimetablePageState extends State<TimetablePage> {
     // 课与课靠墨阶深浅区分，字用焦墨/白墨，整张课表保持黑白灰。
     // 漫画：色块保留，但加贴纸剪影描边。
     final inkBlock = isInkStyle(context);
+    final palette = paletteOf(context);
+    final clayBlock = palette.clay && custom == null;
     final blockFg = inkBlock
         ? (isDark(context) ? const Color(0xFFEDEAE2) : const Color(0xFF161613))
+        : clayBlock
+        ? palette.ink
         : Colors.white;
     final blockColor = inkBlock
         ? (isDark(context) ? Colors.white : Colors.black).withValues(
             alpha: 0.10 + (stableHash(c.name) % 5) * 0.045,
           )
+        : clayBlock
+        ? Color.alphaBlend(accent.withValues(alpha: .12), palette.card)
         : accent;
     final collapsed = clusterCourses != null && clusterCourses.length > 1;
     final occupied = collapsed ? clusterCourses : [c];
@@ -1661,7 +1707,7 @@ class _TimetablePageState extends State<TimetablePage> {
           ? null
           : blockRadius,
       clipBehavior: Clip.hardEdge,
-      elevation: isDark(context) ? 0 : 1,
+      elevation: isDark(context) || palette.clay ? 0 : 1,
       shadowColor: Colors.black26,
       child: InkWell(
         borderRadius: blockRadius,
@@ -1961,6 +2007,7 @@ class _CourseMaterialPainter extends CustomPainter {
         canvas.drawCircle(Offset(size.width - 7, size.height - 7), 3, line);
       case ThemeStyle.clean:
       case ThemeStyle.green:
+      case ThemeStyle.clay:
         break;
     }
   }
@@ -1991,6 +2038,7 @@ class _TimetableRulePainter extends CustomPainter {
           );
         }
       } else if (style == ThemeStyle.paper ||
+          style == ThemeStyle.clay ||
           style == ThemeStyle.journal ||
           style == ThemeStyle.editorial ||
           style == ThemeStyle.pixel) {

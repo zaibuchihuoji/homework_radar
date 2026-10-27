@@ -1,4 +1,5 @@
 import '../models/homework.dart';
+import 'sync_summary.dart';
 
 enum SyncOutcome { success, retry, loginExpired, signatureRejected }
 
@@ -22,17 +23,23 @@ class PlatformSyncStatus {
     this.outcome,
     this.failures = 0,
     this.nextRetry,
+    this.summary,
   });
   final DateTime? lastAttempt;
   final DateTime? lastSuccess;
   final SyncOutcome? outcome;
   final int failures;
   final DateTime? nextRetry;
+  final SyncSummary? summary;
   bool get paused =>
       outcome == SyncOutcome.loginExpired ||
       outcome == SyncOutcome.signatureRejected;
 
-  PlatformSyncStatus finish(SyncOutcome result, DateTime at) {
+  PlatformSyncStatus finish(
+    SyncOutcome result,
+    DateTime at, {
+    SyncSummary? summary,
+  }) {
     final count = result == SyncOutcome.retry ? failures + 1 : 0;
     final delay = count <= 1
         ? 5
@@ -43,6 +50,7 @@ class PlatformSyncStatus {
       lastAttempt: at,
       lastSuccess: result == SyncOutcome.success ? at : lastSuccess,
       outcome: result,
+      summary: summary ?? this.summary,
       failures: count,
       nextRetry: result == SyncOutcome.retry
           ? at.add(Duration(minutes: delay))
@@ -51,10 +59,21 @@ class PlatformSyncStatus {
   }
 
   factory PlatformSyncStatus.fromJson(Map<String, dynamic> j) {
+    SyncSummary? summary;
+    try {
+      if (j['summary'] is Map) {
+        summary = SyncSummary.fromJson(
+          Map<String, dynamic>.from(j['summary'] as Map),
+        );
+      }
+    } catch (_) {
+      /* Corrupt optional detail cannot erase retry/login state. */
+    }
     DateTime? date(String key) => j[key] is int
         ? DateTime.fromMillisecondsSinceEpoch(j[key] as int)
         : null;
     return PlatformSyncStatus(
+      summary: summary,
       lastAttempt: date('attempt'),
       lastSuccess: date('success'),
       outcome: SyncOutcome.values
@@ -72,6 +91,7 @@ class PlatformSyncStatus {
     'outcome': outcome?.name,
     'failures': failures,
     'retry': nextRetry?.millisecondsSinceEpoch,
+    if (summary != null) 'summary': summary!.toJson(),
   };
 }
 

@@ -20,6 +20,7 @@ enum ThemeStyle {
   terminal,
   journal,
   green,
+  clay,
 }
 
 extension ThemeStyleX on ThemeStyle {
@@ -35,6 +36,7 @@ extension ThemeStyleX on ThemeStyle {
     ThemeStyle.editorial => '杂志',
     ThemeStyle.terminal => '终端',
     ThemeStyle.journal => '手账',
+    ThemeStyle.clay => '陶白',
   };
 }
 
@@ -76,6 +78,7 @@ class StylePalette extends ThemeExtension<StylePalette> {
     this.editorial = false,
     this.terminal = false,
     this.journal = false,
+    this.clay = false,
     this.cardWash,
     this.inkWash = false,
   });
@@ -115,6 +118,7 @@ class StylePalette extends ThemeExtension<StylePalette> {
   final bool editorial;
   final bool terminal;
   final bool journal;
+  final bool clay;
 
   /// 该样式是否有自绘底衬（StyleBackground 里的专属画布）。
   /// 有的话页面 Scaffold 必须透明，否则底衬被不透明底色整个盖住
@@ -170,6 +174,7 @@ class StylePalette extends ThemeExtension<StylePalette> {
       editorial: t < 0.5 ? editorial : other.editorial,
       terminal: t < 0.5 ? terminal : other.terminal,
       journal: t < 0.5 ? journal : other.journal,
+      clay: t < 0.5 ? clay : other.clay,
       inkWash: t < 0.5 ? inkWash : other.inkWash,
     );
   }
@@ -184,6 +189,24 @@ StylePalette paletteOf(BuildContext c) =>
 StylePalette stylePalette(ThemeStyle style, Brightness brightness) {
   final dark = brightness == Brightness.dark;
   return switch (style) {
+    // Quiet paper, readable terracotta actions and locally bundled serif headings.
+    // This theme intentionally uses the same light palette in every system mode.
+    ThemeStyle.clay => const StylePalette(
+      clay: true,
+      bg: Color(0xFFF4F3EE),
+      card: Color(0xFFFAF9F5),
+      cardBorder: Color(0xFFDEDAD1),
+      shadow: [],
+      radius: 12,
+      accent: Color(0xFFAF563C),
+      actionFill: Color(0xFFEFDFD4),
+      onAccent: Color(0xFF302E29),
+      ink: Color(0xFF302E29),
+      ink2: Color(0xFF6B665D),
+      ink3: Color(0xFF6B665D),
+      hairline: Color(0xFFDEDAD1),
+      modal: Color(0xFFFAF9F5),
+    ),
     // ---- 晴黄（默认）：暖白纸面、品牌黄操作面、深墨文字 ----
     ThemeStyle.clean =>
       dark

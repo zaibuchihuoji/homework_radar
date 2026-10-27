@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../models/homework_draft.dart';
 import '../services/homework_recognition.dart';
 import '../services/image_text_reader.dart';
+import '../services/recognition_draft_store.dart';
 import '../ui/adaptive.dart';
 import '../ui/tokens.dart';
 import '../ui/settings_parts.dart';
@@ -34,8 +35,81 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
   bool _reviewing = false;
   bool _imageMode = false;
   String? _imagePath;
+  RecognitionSession _session = RecognitionSession();
+  bool _consumed = false;
+  bool _resumed = false;
+  String? _draftError;
+
+  @override
+  void initState() {
+    super.initState();
+    try {
+      final saved = RecognitionDraftStore.read();
+      if (saved != null) {
+        _session = saved;
+        _text.text = saved.text;
+        _noticeDate = saved.noticeDate;
+        _imageMode = saved.imageMode;
+        _imagePath = saved.imagePath;
+        _resumed = saved.text.isNotEmpty;
+      }
+    } catch (_) {
+      _draftError = '上次草稿暂时无法读取，原始草稿仍保留在本机。';
+    }
+    _text.addListener(_remember);
+  }
+
+  void _remember() {
+    if (_consumed) return;
+    _session.updateSource(_text.text, _noticeDate);
+    _session.imageMode = _imageMode;
+    _session.imagePath = _imagePath;
+    RecognitionDraftStore.save(_session).catchError((Object _) {
+      if (mounted) setState(() => _draftError = '草稿未能保存到本机，请暂时保留此页面并重试。');
+    });
+  }
+
+  Future<void> _discard() async {
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (context) => SettingsAlertDialog(
+        title: const Text('清空识别草稿？'),
+        content: const Text('只清空这次未添加的内容，已经保存的作业不受影响。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('保留'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('清空草稿'),
+          ),
+        ],
+      ),
+    );
+    if (discard != true || !mounted) return;
+    try {
+      await RecognitionDraftStore.clear();
+      if (!mounted) return;
+      _text.removeListener(_remember);
+      setState(() {
+        _session = RecognitionSession();
+        _text.clear();
+        _noticeDate = null;
+        _imagePath = null;
+        _imageMode = false;
+        _resumed = false;
+        _draftError = null;
+      });
+      _text.addListener(_remember);
+    } catch (_) {
+      if (mounted) _message('清空未完成，草稿仍保留，请重试');
+    }
+  }
+
   @override
   void dispose() {
+    _text.removeListener(_remember);
     _text.dispose();
     super.dispose();
   }
@@ -64,6 +138,7 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
         _text.text = text;
         _imageMode = selectedPath != null;
       });
+      _remember();
     } on FormatException catch (e) {
       if (mounted) _message(e.message);
     } catch (_) {
@@ -80,11 +155,13 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
       ...widget.state.homework.map((h) => h.course),
     }.where((c) => c.trim().isNotEmpty).toList();
     try {
-      final drafts = HomeworkRecognition.parse(
-        _text.text,
-        knownCourses: known,
-        referenceDate: _noticeDate,
-      );
+      final drafts =
+          _session.rows?.map((row) => row.source).toList() ??
+          HomeworkRecognition.parse(
+            _text.text,
+            knownCourses: known,
+            referenceDate: _noticeDate,
+          );
       if (drafts.isEmpty) {
         _message('请先选择截图或输入作业文字');
         return;
@@ -97,14 +174,25 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
             state: widget.state,
             drafts: drafts,
             knownCourses: known,
+            session: _session,
+            onDraftChanged: _remember,
           ),
         ),
       );
       if (!mounted || result == null) return;
+      _consumed = true;
+      try {
+        await RecognitionDraftStore.clear();
+      } catch (_) {
+        // Homework was committed. Cleanup must not turn success into a retry.
+      }
+      if (!mounted) return;
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop(result);
       } else {
         _text.clear();
+        _session = RecognitionSession();
+        _consumed = false;
         _message(
           '已添加 ${result.count} 项${result.outputsDelayed ? '，提醒或小组件刷新稍有延迟，请勿重复添加' : ''}',
         );
@@ -134,6 +222,13 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
     final p = paletteOf(context);
     return SettingsScaffold(
       title: '识别添加',
+      actions: [
+        IconButton(
+          tooltip: '清空草稿',
+          onPressed: _busy || _reviewing ? null : _discard,
+          icon: const Icon(Icons.delete_sweep_outlined),
+        ),
+      ],
       bottomNavigationBar: CaptureBottomBar(
         busy: _busy,
         label: _busy ? '正在本机读取截图…' : '核对后确认添加',
@@ -180,6 +275,8 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (_draftError != null) SettingsNote(_draftError!),
+              if (_resumed) const SettingsNote('已恢复未完成的草稿，核对后再添加。'),
               Row(
                 children: [
                   for (final image in [true, false])
@@ -198,7 +295,10 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
                         child: TextButton(
                           onPressed: _busy
                               ? null
-                              : () => setState(() => _imageMode = image),
+                              : () {
+                                  setState(() => _imageMode = image);
+                                  _remember();
+                                },
                           child: Text(
                             image ? '截图' : '文字',
                             style: TextStyle(
@@ -311,11 +411,14 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
                       TextButton(
                         onPressed: _busy
                             ? null
-                            : () => setState(
-                                () => _noticeDate = DateUtils.dateOnly(
-                                  DateTime.now(),
-                                ),
-                              ),
+                            : () {
+                                setState(
+                                  () => _noticeDate = DateUtils.dateOnly(
+                                    DateTime.now(),
+                                  ),
+                                );
+                                _remember();
+                              },
                         child: const Text('使用今天'),
                       ),
                       TextButton(
@@ -330,6 +433,7 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
                                 );
                                 if (mounted && date != null) {
                                   setState(() => _noticeDate = date);
+                                  _remember();
                                 }
                               },
                         child: const Text('选择日期'),
@@ -338,7 +442,10 @@ class _HomeworkRecognitionPageState extends State<HomeworkRecognitionPage> {
                         TextButton(
                           onPressed: _busy
                               ? null
-                              : () => setState(() => _noticeDate = null),
+                              : () {
+                                  setState(() => _noticeDate = null);
+                                  _remember();
+                                },
                           child: const Text('清除'),
                         ),
                     ],

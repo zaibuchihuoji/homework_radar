@@ -66,9 +66,8 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
     final pickedMinute = picked.hour * 60 + picked.minute;
     final m = !start && pickedMinute == 0 ? 24 * 60 : pickedMinute;
     // 不能与相邻节重叠：乱序/重叠的作息会让上课提醒和时刻指示线错位。
-    // 相接（本节下课 = 上节下课时间）是允许的；与下一节**相等也算重叠**——
-    // 只拦严格大于的话能存出零长度节，读回时被存储层静默换成默认表，
-    // 页面显示与提醒/小组件实际生效时间分叉。
+    // 本节下课 = 下节上课是合法相接；本节上课 = 下节上课则没有
+    // 正时长的空间。两种边界要区分，避免拒绝正常的连排课程。
     if (start && section > 1 && m < _times[section - 2].$2) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -79,7 +78,8 @@ class _SectionTimesPageState extends State<SectionTimesPage> {
       );
       return;
     }
-    if (section < _times.length && m >= _times[section].$1) {
+    if (section < _times.length &&
+        (start ? m >= _times[section].$1 : m > _times[section].$1)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(

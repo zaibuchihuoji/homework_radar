@@ -53,7 +53,10 @@ class FocusAccountRow extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 25,
                     height: 1.4,
-                    fontWeight: FontWeight.w600,
+                    fontFamily: paletteOf(dc).clay ? 'StudySerif' : null,
+                    fontWeight: paletteOf(dc).clay
+                        ? FontWeight.w400
+                        : FontWeight.w600,
                     color: textPrimary(dc),
                   ),
                 ),

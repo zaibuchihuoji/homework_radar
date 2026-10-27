@@ -11,6 +11,8 @@ import 'models/course.dart';
 import 'models/homework.dart';
 import 'models/homework_draft.dart';
 import 'services/homework_duplicates.dart';
+import 'services/backup_service.dart';
+import 'services/local_recovery_store.dart';
 import 'services/notification_service.dart';
 import 'services/jw_config.dart';
 import 'services/storage.dart';
@@ -115,6 +117,7 @@ class AppState extends ChangeNotifier {
     zfState = Storage.zfCookie()?.isNotEmpty == true
         ? AccountState.ok
         : AccountState.notLoggedIn;
+    await BackupService.ensureDailyRecoveryPoint();
     notifyListeners();
   }
 
@@ -598,7 +601,11 @@ class AppState extends ChangeNotifier {
                 ...courses,
                 ...existing.where((c) => c.id.startsWith('manual_')),
               ];
-        await Storage.saveCourses(merged);
+        await Storage.saveImportedCourses(
+          merged,
+          sameSemester: sameSemester,
+          partial: !fullImport,
+        );
         nextMessage =
             '课表已更新：${merged.length} 节课'
             '${source.isEmpty ? '' : ' · $source'}'
@@ -666,10 +673,13 @@ class AppState extends ChangeNotifier {
 
   /// 手动添加课程（选修课、体育课等教务里没有的）。
   Future<void> addManualCourse(Course c) async {
-    await Storage.waitForBusinessTransaction();
-    final list = Storage.courses()..add(c);
-    await Storage.saveCourses(list);
-    courses = list;
+    await Storage.businessTransaction(() async {
+      await Storage.saveCourseRows([
+        ...Storage.courseRowsForEdit(),
+        c.toJson(),
+      ]);
+    });
+    courses = Storage.courses();
     await NotificationService.reschedule(homework, courses: courses);
     await TimetableWidget.push(courses);
     notifyListeners();
@@ -679,13 +689,8 @@ class AppState extends ChangeNotifier {
   /// [original] 是编辑前的对象：同 id 双胞胎（不同周次）按「id+周次」
   /// 字段身份定位；过期编辑不能猜测目标并覆盖另一条课程。
   Future<void> updateCourse(Course original, Course updated) async {
-    await Storage.waitForBusinessTransaction();
-    final list = Storage.courses();
-    final i = courseIndex(list, original);
-    if (i < 0) throw StateError('课程已变化，请重新打开后编辑');
-    list[i] = updated;
-    await Storage.saveCourses(list);
-    courses = list;
+    await _changeCourse(original, updated);
+    courses = Storage.courses();
     await NotificationService.reschedule(homework, courses: courses);
     await TimetableWidget.push(courses);
     notifyListeners();
@@ -696,17 +701,42 @@ class AppState extends ChangeNotifier {
   /// 按「id+周次」字段身份删：同 id 双胞胎（不同周次）只删目标那条；
   /// 目标已变化时停止，避免删除其他周次的同名课程。
   Future<void> deleteCourse(Course target) async {
-    await Storage.waitForBusinessTransaction();
-    final list = Storage.courses();
-    final i = courseIndex(list, target);
-    if (i < 0) throw StateError('课程已变化，请重新打开后删除');
-    list.removeAt(i);
-    await Storage.saveCourses(list);
-    courses = list;
+    await _changeCourse(target, null);
+    courses = Storage.courses();
     await NotificationService.reschedule(homework, courses: courses);
     await TimetableWidget.push(courses);
     notifyListeners();
   }
+
+  Future<void> _changeCourse(Course target, Course? updated) =>
+      Storage.businessTransaction(() async {
+        final rows = Storage.courseRowsForEdit();
+        final matches = <int>[];
+        for (var i = 0; i < rows.length; i++) {
+          try {
+            final c = Course.fromJson(
+              Map<String, dynamic>.from(rows[i] as Map),
+            );
+            if (c.id == target.id && _sameWeeks(c.weeks, target.weeks)) {
+              matches.add(i);
+            }
+          } catch (_) {
+            // An unrelated unreadable row is retained, never rewritten.
+          }
+        }
+        if (matches.length != 1) throw StateError('课程已变化或标识冲突，请重新打开后操作');
+        final i = matches.single;
+        if (updated == null) {
+          rows.removeAt(i);
+        } else {
+          final body = Map<String, dynamic>.from(rows[i] as Map);
+          // Optional modeled fields may be intentionally removed by an edit.
+          body.remove('edited');
+          body.remove('anchorKey');
+          rows[i] = {...body, ...updated.toJson()};
+        }
+        await Storage.saveCourseRows(rows);
+      });
 
   /// 备份导入后全量重载并重排提醒。
   Future<void> reloadLocal() async {
@@ -775,41 +805,43 @@ class AppState extends ChangeNotifier {
     // 留了断言/回弹窗口
     homework = homework.where((h) => h.id != hw.id).toList();
     notifyListeners();
-    await Storage.dismiss(hw.id, jsonEncode(hw.toJson()));
+    try {
+      await Storage.businessTransaction(() async {
+        final body = Storage.homeworkRowsForEdit()
+            .whereType<Map>()
+            .where((row) => row['id'] == hw.id)
+            .firstOrNull;
+        await Storage.dismiss(hw.id, jsonEncode(body ?? hw.toJson()));
+      });
+    } catch (_) {
+      homework = _visibleHomework();
+      notifyListeners();
+      rethrow;
+    }
     await _refreshHomeworkOutputs();
   }
 
   /// 恢复隐藏的作业（立即可见；下次同步因 id 已不再被隐藏而保留）。
   Future<void> restoreHomework(String id) async {
-    await Storage.waitForBusinessTransaction();
-    final raw = Storage.hiddenItems()[id];
-    if (raw != null) {
-      final item = HomeworkItem.fromJson(
-        jsonDecode(raw) as Map<String, dynamic>,
-      );
-      final disk = Storage.homework();
-      if (!disk.any((h) => h.id == id)) {
-        disk.add(item);
-        await Storage.saveHomework(disk);
+    await Storage.businessTransaction(() async {
+      final raw = Storage.hiddenItems()[id];
+      if (raw != null) {
+        final item = HomeworkItem.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>,
+        );
+        if (item.id != id) throw const FormatException('隐藏作业标识不匹配，原记录已保留');
+        final disk = Storage.homeworkRowsForEdit();
+        if (!disk.whereType<Map>().any((h) => h['id'] == id)) {
+          disk.add(jsonDecode(raw));
+          await Storage.saveHomeworkRows(disk);
+        }
+        await Storage.restoreDismissed(id);
+        // 落库：restoreDismissed 只清隐藏名单、restore 只改内存，条目本体
+        // 若已被上次同步从 homework_json 清掉（平台侧条目的常规路径），
+        // 不写回的话重启/下次同步后条目消失——手动作业更是永久丢失。
       }
-      await Storage.restoreDismissed(id);
-      if (!homework.any((h) => h.id == id)) {
-        homework = [...homework, item]
-          ..sort((a, b) {
-            final at = a.status == HwStatus.done ? 1 : 0;
-            final bt = b.status == HwStatus.done ? 1 : 0;
-            if (at != bt) return at - bt;
-            final ad = a.dueAt, bd = b.dueAt;
-            if (ad == null && bd == null) return 0;
-            if (ad == null) return 1;
-            if (bd == null) return -1;
-            return ad.compareTo(bd);
-          });
-      }
-      // 落库：restoreDismissed 只清隐藏名单、restore 只改内存，条目本体
-      // 若已被上次同步从 homework_json 清掉（平台侧条目的常规路径），
-      // 不写回的话重启/下次同步后条目消失——手动作业更是永久丢失。
-    }
+    });
+    homework = _visibleHomework();
     notifyListeners();
     await _refreshHomeworkOutputs();
   }
@@ -867,46 +899,108 @@ class AppState extends ChangeNotifier {
   }
 
   /// 手动添加的自定义作业（同步不会删除）。
-  Future<void> addManualHomework({
+  Future<HomeworkImportResult> addManualHomework({
     required String course,
     required String title,
     DateTime? dueAt,
     String note = '',
   }) async {
-    await Storage.waitForBusinessTransaction();
-    final hw = HomeworkItem(
-      id: 'manual_${DateTime.now().millisecondsSinceEpoch}',
-      platform: PlatformKind.manual,
-      course: course,
-      title: title,
-      dueAt: dueAt,
-      status: HwStatus.todo,
-      note: note,
-    );
-    // 磁盘写全量（隐藏条目按存储模型继续躺在 homework_json，恢复时才有本体），
-    // 内存回填走过滤后的可见集——见 _visibleHomework 的注释
-    final disk = Storage.homework()..add(hw);
-    await Storage.saveHomework(disk);
-    homework = _visibleHomework();
-    notifyListeners();
-    await _refreshHomeworkOutputs();
+    await Storage.appendManualHomeworkBatch((existing, ids) {
+      var serial = DateTime.now().microsecondsSinceEpoch;
+      while (ids.contains('manual_$serial')) {
+        serial++;
+      }
+      final hw = HomeworkItem(
+        id: 'manual_$serial',
+        platform: PlatformKind.manual,
+        course: course,
+        title: title,
+        dueAt: dueAt,
+        status: HwStatus.todo,
+        note: note,
+      );
+      // 磁盘写全量（隐藏条目按存储模型继续躺在 homework_json，恢复时才有本体），
+      // 内存回填走过滤后的可见集——见 _visibleHomework 的注释
+      return [hw];
+    });
+    return _finishManualHomeworkSave();
   }
 
-  Future<void> updateManualHomework(HomeworkItem hw) async {
-    await Storage.waitForBusinessTransaction();
-    final disk = Storage.homework();
-    final i = disk.indexWhere((h) => h.id == hw.id);
-    if (i >= 0) disk[i] = hw;
-    await Storage.saveHomework(disk);
+  Future<HomeworkImportResult> updateManualHomework(HomeworkItem hw) async {
+    await Storage.patchHomework(hw.id, {
+      'course': hw.course,
+      'title': hw.title,
+      'dueAt': hw.dueAt?.millisecondsSinceEpoch,
+      'note': hw.note,
+    }, manualOnly: true);
+    return _finishManualHomeworkSave();
+  }
+
+  Future<HomeworkImportResult> _finishManualHomeworkSave() async {
     homework = _visibleHomework();
     notifyListeners();
-    await _refreshHomeworkOutputs();
+    try {
+      await _refreshHomeworkOutputs();
+      return const HomeworkImportResult(1);
+    } catch (_) {
+      // The record is already committed. A second add would duplicate it.
+      return const HomeworkImportResult(1, outputsDelayed: true);
+    }
   }
 
   Future<void> deleteManualHomework(String id) async {
-    await Storage.waitForBusinessTransaction();
-    final disk = Storage.homework()..removeWhere((h) => h.id == id);
-    await Storage.saveHomework(disk);
+    await Storage.businessTransaction(() async {
+      final disk = Storage.homeworkRowsForEdit();
+      final body = disk
+          .whereType<Map>()
+          .where((row) => row['id'] == id)
+          .firstOrNull;
+      if (body == null) return;
+      if (disk.whereType<Map>().where((row) => row['id'] == id).length != 1) {
+        throw StateError('作业标识有冲突，已保留全部记录，请先核对');
+      }
+      final target = HomeworkItem.fromJson(Map<String, dynamic>.from(body));
+      if (target.platform != PlatformKind.manual) {
+        throw ArgumentError('平台作业请使用隐藏功能');
+      }
+      final trash = LocalRecoveryStore.deleted();
+      if (trash.any((e) => e.item.id == id)) {
+        throw StateError('回收站已有同标识记录，请先恢复或导出');
+      }
+      await LocalRecoveryStore.saveDeleted([
+        ...trash,
+        DeletedHomework(
+          target,
+          DateTime.now(),
+          originalBody: Map<String, dynamic>.from(body),
+        ),
+      ]);
+      await Storage.saveHomeworkRows(
+        disk.where((row) => row is! Map || row['id'] != id).toList(),
+      );
+      await Storage.restoreDismissed(id);
+    });
+    homework = _visibleHomework();
+    notifyListeners();
+    await _refreshHomeworkOutputs();
+  }
+
+  Future<void> restoreDeletedHomework(String id) async {
+    await Storage.businessTransaction(() async {
+      final trash = LocalRecoveryStore.deleted();
+      final target = trash.where((e) => e.item.id == id).firstOrNull;
+      if (target == null) return;
+      final disk = Storage.homeworkRowsForEdit();
+      if (disk.whereType<Map>().any((h) => h['id'] == id) ||
+          Storage.dismissedIds().contains(id)) {
+        throw StateError('已有同标识作业，未覆盖任何记录，请先核对');
+      }
+      await Storage.saveHomeworkRows([
+        ...disk,
+        target.originalBody ?? target.item.toJson(),
+      ]);
+      await LocalRecoveryStore.saveDeleted(trash.where((e) => e.item.id != id));
+    });
     homework = _visibleHomework();
     notifyListeners();
     await _refreshHomeworkOutputs();
@@ -914,23 +1008,13 @@ class AppState extends ChangeNotifier {
 
   /// 更新作业备注（任意平台的条目都可以）。
   Future<void> updateNote(String id, String note) async {
-    await Storage.waitForBusinessTransaction();
-    final disk = Storage.homework();
-    final i = disk.indexWhere((h) => h.id == id);
-    if (i < 0) return;
-    disk[i] = disk[i].copyWith(note: note);
-    await Storage.saveHomework(disk);
+    await Storage.patchHomework(id, {'note': note});
     homework = _visibleHomework();
     notifyListeners();
   }
 
   Future<void> setHomeworkStatus(String id, HwStatus status) async {
-    await Storage.waitForBusinessTransaction();
-    final disk = Storage.homework();
-    final index = disk.indexWhere((h) => h.id == id);
-    if (index < 0) return;
-    disk[index] = disk[index].copyWith(status: status);
-    await Storage.saveHomework(disk);
+    await Storage.patchHomework(id, {'status': status.name});
     homework = _visibleHomework();
     notifyListeners();
     await _refreshHomeworkOutputs();

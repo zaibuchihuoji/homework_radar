@@ -65,7 +65,9 @@ void main() {
     }
     messenger.setMockMethodCallHandler(
       const MethodChannel('dexterous.com/flutter/local_notifications'),
-      (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
+      (call) async => call.method == 'pendingNotificationRequests'
+          ? <Map<String, Object?>>[]
+          : true,
     );
     await Storage.init();
     await NotificationService.init();
@@ -210,6 +212,35 @@ void main() {
       expect(Storage.homework().first.note, '旧备注');
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 600));
+    },
+  );
+
+  testWidgets(
+    'editing an old deadline can open the date picker without losing its date',
+    (tester) async {
+      final old = HomeworkItem(
+        id: 'manual_old',
+        platform: PlatformKind.manual,
+        course: '旧课程',
+        title: '去年的作业',
+        dueAt: DateTime(2020, 5, 17, 22, 30),
+      );
+      await Storage.saveHomework([old]);
+      await state.loadLocal();
+      await mount(tester, const HomeworkDetailPage(homeworkId: 'manual_old'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('编辑作业'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('选择时间'));
+      await tester.tap(find.text('选择时间'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(DatePickerDialog), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(Storage.homework().single.dueAt, DateTime(2020, 5, 17, 22, 30));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 1));
     },
   );
 

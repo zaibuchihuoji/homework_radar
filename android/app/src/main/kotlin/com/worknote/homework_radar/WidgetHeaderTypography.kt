@@ -20,7 +20,7 @@ internal class WidgetHeaderTypography private constructor(
     private val metrics = context.resources.displayMetrics
     private fun dp(value: Float) = (value * metrics.density).toInt()
     private fun sp(value: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value.toFloat(), metrics)
-    private val titleText = style.label(title)
+    private val titleText = style.label(title, heading = true)
     private val markText = style.label(mark, ambient = false)
     private val gap = dp(6f)
     private val padding = dp(4f)

@@ -131,7 +131,10 @@ class FocusSummary extends StatelessWidget {
                         title,
                         style: TextStyle(
                           fontSize: 24,
-                          fontWeight: FontWeight.w600,
+                          fontFamily: p.clay ? 'StudySerif' : null,
+                          fontWeight: p.clay
+                              ? FontWeight.w400
+                              : FontWeight.w600,
                           height: 1.3,
                           color: ink,
                         ),

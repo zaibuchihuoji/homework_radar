@@ -16,6 +16,7 @@ internal data class WidgetThemeData(
         "paper", "amoled", "journal" -> "serif"
         else -> "sans-serif"
     }
+    val headingFont get() = if (style == "clay") "serif" else font
     val radius get() = when (style) {
         "pixel", "receipt", "editorial" -> 0f
         "terminal" -> 2f
@@ -42,7 +43,7 @@ internal data class WidgetThemeData(
 
     companion object {
         private val names = setOf("clean", "green", "morandi", "pixel", "amoled", "paper",
-            "comic", "receipt", "editorial", "terminal", "journal")
+            "comic", "receipt", "editorial", "terminal", "journal", "clay")
         fun read(json: String?, systemDark: Boolean): WidgetThemeData = try {
             val root = JSONObject(json ?: "")
             require(root.getInt("version") == 1)

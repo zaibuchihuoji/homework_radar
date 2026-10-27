@@ -18,13 +18,15 @@ class WidgetThemeDataTest {
     }
     @Test fun everyStyleKeepsItsDistinctDecoration() {
         val names = listOf("clean", "green", "morandi", "pixel", "amoled", "paper",
-            "comic", "receipt", "editorial", "terminal", "journal")
+            "comic", "receipt", "editorial", "terminal", "journal", "clay")
         val themes = names.map { WidgetThemeData.read(snapshot(it).toString(), false) }
         assertEquals(names, themes.map { it.style })
-        assertEquals(11, themes.map { it.decoration }.toSet().size)
+        assertEquals(names.size, themes.map { it.decoration }.toSet().size)
         assertEquals("monospace", themes.first { it.style == "terminal" }.font)
         assertEquals("serif", themes.first { it.style == "paper" }.font)
         assertEquals(0f, themes.first { it.style == "pixel" }.radius)
+        assertEquals("sans-serif", themes.first { it.style == "clay" }.font)
+        assertEquals("serif", themes.first { it.style == "clay" }.headingFont)
     }
     @Test fun systemModeWorksWithoutDartAndUnsupportedDarkMatchesApp() {
         for (name in listOf("clean", "green")) {

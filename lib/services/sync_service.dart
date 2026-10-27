@@ -17,6 +17,7 @@ import 'safe_http.dart';
 import 'storage.dart';
 import 'stable_hash.dart';
 import 'sync_policy.dart';
+import 'sync_summary.dart';
 import 'xuetangx_service.dart';
 import 'yuketang_service.dart';
 import 'zhihuishu_service.dart';
@@ -663,6 +664,7 @@ class SyncService {
       }
     }
 
+    final archivedByPlatform = <PlatformKind, Set<String>>{};
     for (final platform in [PlatformKind.mooc, PlatformKind.yuketang]) {
       final scope = platform == PlatformKind.mooc
           ? mooc.schoolTermScope
@@ -700,6 +702,7 @@ class SyncService {
         );
         if (epoch != Storage.syncEpoch) return cancelled();
         final archivedIds = outsideScope.map((h) => h.id).toSet();
+        archivedByPlatform[platform] = archivedIds;
         merged.removeWhere((id, _) => archivedIds.contains(id));
       }
     }
@@ -722,11 +725,42 @@ class SyncService {
     if (epoch != Storage.syncEpoch) return cancelled();
     onCommitted?.call();
     final completedAt = DateTime.now();
+    final failures = <PlatformKind, (int, bool, List<String>)>{
+      PlatformKind.chaoxing: (cx.failedCount, cx.listFailed, cx.failureDetails),
+      PlatformKind.mooc: (
+        mooc.failedCount,
+        mooc.listFailed,
+        mooc.failedCourses,
+      ),
+      PlatformKind.zhihuishu: (
+        zhs.failedCount,
+        zhs.listFailed,
+        zhs.failedCourses,
+      ),
+      PlatformKind.xuetangx: (xt.failedCount, xt.listFailed, xt.failedCourses),
+      PlatformKind.yuketang: (
+        ykt.failedCount,
+        ykt.listFailed,
+        ykt.failedCourses,
+      ),
+    };
     for (final p in selected) {
       final outcome = result.outcomes[p]!;
+      final (failed, listIncomplete, details) = failures[p]!;
       statuses[p] = (previousStatuses[p] ?? const PlatformSyncStatus()).finish(
         outcome,
         completedAt,
+        summary: SyncSummary.compare(
+          platform: p,
+          before: fresh.values,
+          after: result.items,
+          at: completedAt,
+          hidden: dismissed,
+          archivedIds: archivedByPlatform[p] ?? const {},
+          failedRequests: failed,
+          listIncomplete: listIncomplete,
+          details: details,
+        ),
       );
     }
     await Storage.saveSyncStatuses(statuses);

@@ -23,6 +23,39 @@ Widget harness(Widget child, ThemeStyle style, {double scale = 1}) =>
       home: child,
     );
 
+Future<void> pressSave(WidgetTester tester, String label) async {
+  var done = false;
+  Object? failure;
+  await tester.runAsync(() async {
+    final dynamic action = tester
+        .widget<FilledButton>(find.widgetWithText(FilledButton, label))
+        .onPressed!;
+    final dynamic result = action();
+    if (result is Future) {
+      result.then(
+        (_) => done = true,
+        onError: (Object error, StackTrace stack) {
+          failure = error;
+          done = true;
+        },
+      );
+    } else {
+      done = true;
+    }
+  });
+  // Native-channel completions and widget microtasks belong to different
+  // clocks; drain both before the next route or theme owns the shared queue.
+  for (var i = 0; i < 100 && !done; i++) {
+    await tester.pump();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 1)),
+    );
+  }
+  expect(failure, isNull);
+  expect(done, isTrue, reason: 'save did not finish');
+  await tester.pumpAndSettle();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   AndroidFlutterLocalNotificationsPlugin.registerWith();
@@ -36,7 +69,9 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           const MethodChannel('dexterous.com/flutter/local_notifications'),
-          (call) async => call.method == 'pendingNotificationRequests' ? <Map<String, Object?>>[] : true,
+          (call) async => call.method == 'pendingNotificationRequests'
+              ? <Map<String, Object?>>[]
+              : true,
         );
     await Storage.init();
   });
@@ -129,8 +164,7 @@ void main() {
       expect(find.text('未设置截止时间'), findsOneWidget);
       await tester.ensureVisible(find.widgetWithText(FilledButton, '添加'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, '添加'));
-      await tester.pumpAndSettle();
+      await pressSave(tester, '添加');
       expect(Storage.homework().single.dueAt, isNull);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -232,10 +266,13 @@ void main() {
         await tester.pumpWidget(const SizedBox.shrink());
       },
     );
-
-    testWidgets(
-      '${style.name}: homework and note editors save or cancel without losing metadata',
-      (tester) async {
+  }
+  // The app's serialized output queues live for a process, so exercise every
+  // theme in one fake-clock lifetime and await saves before changing routes.
+  testWidgets(
+    'all themes: homework and note editors preserve save and cancel behavior',
+    (tester) async {
+      for (final style in ThemeStyle.values) {
         tester.view.physicalSize = const Size(320, 740);
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.reset);
@@ -251,6 +288,7 @@ void main() {
           score: 91.5,
           sourceKey: 'source-identity',
         );
+        await Storage.saveManualHomeworkTrash({});
         await Storage.saveHomework([original]);
         final state = AppState()..homework = [original];
         await tester.pumpWidget(
@@ -273,8 +311,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.widgetWithText(FilledButton, '添加'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, '添加'));
-        await tester.pumpAndSettle();
+        await pressSave(tester, '添加');
         expect(Storage.homework(), hasLength(1));
         expect(find.byType(TextField), findsNWidgets(3));
         await tester.enterText(find.byType(TextField).at(0), '新课程');
@@ -285,8 +322,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.widgetWithText(FilledButton, '添加'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, '添加'));
-        await tester.pumpAndSettle();
+        await pressSave(tester, '添加');
         tester.view.resetViewInsets();
         await tester.pumpAndSettle();
         expect(Storage.homework(), hasLength(2));
@@ -327,8 +363,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.ensureVisible(find.widgetWithText(FilledButton, '保存'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, '保存'));
-        await tester.pumpAndSettle();
+        await pressSave(tester, '保存');
         var saved = Storage.homework().singleWhere((h) => h.id == original.id);
         expect(saved.course, '修订课程');
         expect(saved.note, '修订备注');
@@ -352,8 +387,7 @@ void main() {
         await openOption('编辑备注');
         await tester.enterText(find.byType(TextField), '独立备注');
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, '保存'));
-        await tester.pumpAndSettle();
+        await pressSave(tester, '保存');
         saved = Storage.homework().singleWhere((h) => h.id == original.id);
         expect(saved.note, '独立备注');
         expect(saved.sourceKey, original.sourceKey);
@@ -366,6 +400,21 @@ void main() {
         await openOption('删除');
         await tester.tap(find.widgetWithText(FilledButton, '删除'));
         await tester.pumpAndSettle();
+        for (
+          var i = 0;
+          i < 100 && find.textContaining('已移入回收站').evaluate().isEmpty;
+          i++
+        ) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 1)),
+          );
+          await tester.pump();
+        }
+        expect(
+          find.textContaining('已移入回收站'),
+          findsOneWidget,
+          reason: style.name,
+        );
         expect(
           Storage.homework().map((h) => h.id),
           isNot(contains(original.id)),
@@ -374,7 +423,7 @@ void main() {
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump(const Duration(seconds: 1));
         state.dispose();
-      },
-    );
-  }
+      }
+    },
+  );
 }

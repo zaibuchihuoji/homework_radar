@@ -5,6 +5,7 @@ import '../models/homework.dart';
 import '../models/homework_draft.dart';
 import '../services/homework_duplicates.dart';
 import '../services/storage.dart';
+import '../services/recognition_draft_store.dart';
 import '../ui/adaptive.dart';
 import '../ui/settings_parts.dart';
 import '../ui/capture_parts.dart';
@@ -16,10 +17,14 @@ class HomeworkRecognitionReviewPage extends StatefulWidget {
     required this.state,
     required this.drafts,
     required this.knownCourses,
+    this.session,
+    this.onDraftChanged,
   });
   final AppState state;
   final List<HomeworkDraft> drafts;
   final List<String> knownCourses;
+  final RecognitionSession? session;
+  final VoidCallback? onDraftChanged;
   @override
   State<HomeworkRecognitionReviewPage> createState() =>
       _HomeworkRecognitionReviewPageState();
@@ -46,10 +51,36 @@ class _HomeworkRecognitionReviewPageState
     super.initState();
     _existing = Storage.homeworkForDuplicateCheck();
     _rows = widget.drafts.map(_Row.new).toList();
-    for (final row in _rows) {
-      row.selected = row.draft.likelyHomework && !_duplicate(row);
+    for (var i = 0; i < _rows.length; i++) {
+      final row = _rows[i];
+      final saved = widget.session?.rows;
+      if (saved != null && i < saved.length) {
+        row.course.text = saved[i].course;
+        row.title.text = saved[i].title;
+        row.due = saved[i].dueAt;
+        row.selected = saved[i].selected;
+      } else {
+        row.selected = row.draft.likelyHomework && !_duplicate(row);
+      }
+      row.course.addListener(_remember);
+      row.title.addListener(_remember);
     }
+    _remember();
     widget.state.addListener(_refresh);
+  }
+
+  void _remember() {
+    widget.session?.rows = [
+      for (final row in _rows)
+        RecognitionReviewRow(
+          source: row.draft,
+          course: row.course.text,
+          title: row.title.text,
+          dueAt: row.due,
+          selected: row.selected,
+        ),
+    ];
+    widget.onDraftChanged?.call();
   }
 
   void _refresh() {
@@ -110,6 +141,7 @@ class _HomeworkRecognitionReviewPageState
         time.minute,
       ),
     );
+    _remember();
   }
 
   Future<void> _save() async {
@@ -221,7 +253,10 @@ class _HomeworkRecognitionReviewPageState
                 Checkbox(
                   key: ValueKey('select_$index'),
                   value: row.selected,
-                  onChanged: (v) => setState(() => row.selected = v ?? false),
+                  onChanged: (v) {
+                    setState(() => row.selected = v ?? false);
+                    _remember();
+                  },
                 ),
                 Expanded(
                   child: Text(
@@ -301,7 +336,10 @@ class _HomeworkRecognitionReviewPageState
                 ),
                 if (row.due != null)
                   TextButton(
-                    onPressed: () => setState(() => row.due = null),
+                    onPressed: () {
+                      setState(() => row.due = null);
+                      _remember();
+                    },
                     child: const Text('清除时间'),
                   ),
               ],

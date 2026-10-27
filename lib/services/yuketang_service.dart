@@ -79,6 +79,7 @@ class YuketangService {
 
   /// 课程级失败次数（单课失败不当「没有作业」）。
   int failedCount = 0;
+  final List<String> failedCourses = [];
 
   /// Positive non-student evidence only, after a complete scan/session check.
   /// Absence on one origin cannot prove removal on another institutional site.
@@ -305,12 +306,14 @@ class YuketangService {
         try {
           final list = await homeworkOf(c);
           if (list == null) {
+            failedCourses.add('《${c.name}》作业获取未完成');
             failedCount++; // 失败不能当「没有作业」
           } else {
             out.addAll(list);
           }
         } catch (_) {
           failedCount++;
+          failedCourses.add('《${c.name}》作业获取未完成');
         }
         done++;
         onProgress?.call(done, cs.length);

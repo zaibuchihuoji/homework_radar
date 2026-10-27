@@ -89,6 +89,7 @@ class ZhihuishuService {
 
   /// 课程级请求失败次数（单课失败不当「没有作业」，同步层靠它判定能否清理）。
   int failedCount = 0;
+  final List<String> failedCourses = [];
 
   /// 命中的作业端点下标（会话内缓存：第一个命中的课程把下标存这里，
   /// 后续课程从它开始试，不再逐个试错）。null = 本会话尚未命中。
@@ -696,12 +697,14 @@ class ZhihuishuService {
         try {
           final list = await homeworkOf(c);
           if (list == null) {
+            failedCourses.add('《${c.name}》作业获取未完成');
             failedCount++; // 失败不能当「没有作业」，同步层靠它判定能否清理
           } else {
             out.addAll(list);
           }
         } catch (_) {
           failedCount++;
+          failedCourses.add('《${c.name}》作业获取未完成');
         }
         done++;
         onProgress?.call(done, cs.length);

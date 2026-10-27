@@ -33,6 +33,8 @@ import 'section_times_page.dart';
 import 'notification_settings_page.dart';
 import 'class_reminder_settings_page.dart';
 import 'background_sync_settings_page.dart';
+import 'data_recovery_page.dart';
+import 'backup_restore_page.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.state});
@@ -434,6 +436,18 @@ class SettingsPage extends StatelessWidget {
           navigation: true,
           onTap: () => _importBackup(context, state),
         ),
+        _divider(context),
+        SettingsRow(
+          icon: Icons.restore_outlined,
+          title: '本地恢复',
+          subtitle: '历史备份与已删除的手动作业',
+          navigation: true,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => DataRecoveryPage(state: state),
+            ),
+          ),
+        ),
       ],
     ),
     SettingsSection(
@@ -580,27 +594,6 @@ class SettingsPage extends StatelessWidget {
   }
 
   Future<void> _importBackup(BuildContext context, AppState state) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => SettingsAlertDialog(
-        title: const Text('导入备份'),
-        content: const Text(
-          '将覆盖当前课表、作业与相关设置，'
-          '账号登录不受影响。继续？',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('导入'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !context.mounted) return;
     try {
       final files = await FilePicker.pickFiles(
         type: FileType.custom,
@@ -608,10 +601,9 @@ class SettingsPage extends StatelessWidget {
       );
       final path = files.isEmpty ? null : files.single.path;
       if (path == null || !context.mounted) return;
-      final msg = await BackupService.importJson(File(path).readAsStringSync());
-      await state.reloadLocal();
+      final raw = await File(path).readAsString();
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      await openBackupRestore(context, state, raw);
     } on FormatException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)
@@ -724,9 +716,13 @@ class SettingsPage extends StatelessWidget {
                     children: [
                       for (final style in [
                         ThemeStyle.clean,
+                        ThemeStyle.clay,
                         ThemeStyle.green,
                         ...ThemeStyle.values.where(
-                          (s) => s != ThemeStyle.clean && s != ThemeStyle.green,
+                          (s) =>
+                              s != ThemeStyle.clean &&
+                              s != ThemeStyle.green &&
+                              s != ThemeStyle.clay,
                         ),
                       ])
                         _styleThumb(
@@ -842,6 +838,38 @@ class SettingsPage extends StatelessWidget {
     );
 
     return switch (style) {
+      ThemeStyle.clay => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            '今天的安排',
+            maxLines: 1,
+            style: TextStyle(
+              fontFamily: 'StudySerif',
+              fontSize: 11,
+              color: pal.ink,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Container(height: .5, color: pal.hairline),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              bar(alpha: .55),
+              const SizedBox(width: 10),
+              Container(
+                width: 16,
+                height: 7,
+                decoration: BoxDecoration(
+                  color: pal.accent,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       // ---- 墨黑：墨洗卡（笔锋圆角）上浮墨滴、飞白与一枚斜钤朱砂小印 ----
       ThemeStyle.amoled => Stack(
         children: [
