@@ -151,6 +151,9 @@ void main() {
           home: StudyNoteEditor(store: store, note: note),
         ),
       );
+      await tester.ensureVisible(find.text('复习与笔记信息'));
+      await tester.tap(find.text('复习与笔记信息'));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('新建自测卡片'));
       await tester.tap(find.text('新建自测卡片'));
       await tester.pumpAndSettle();
@@ -207,8 +210,8 @@ void main() {
           home: StudyNoteEditor(store: store, note: note),
         ),
       );
-      await tester.ensureVisible(find.text('添加图片'));
-      await tester.tap(find.text('添加图片'));
+      await tester.ensureVisible(find.byTooltip('添加图片'));
+      await tester.tap(find.byTooltip('添加图片'));
       await waitUntil(
         tester,
         () async =>
@@ -227,6 +230,11 @@ void main() {
         ),
         bytes,
       );
+      await waitUntil(tester, () async {
+        final document = (await store.readNotes()).single['document'] as Map?;
+        return document != null &&
+            (document['nodes'] as List).last['type'] == 'text';
+      });
     });
   });
 
@@ -316,4 +324,84 @@ void main() {
       );
     }
   }
+  testWidgets('course navigation filters without changing saved notes', (
+    tester,
+  ) async {
+    final store = StudyNoteStore(directory);
+    final original = <Map<String, dynamic>>[
+      {
+        'id': 'a',
+        'title': '课程笔记',
+        'body': '知识',
+        'course': '数学',
+        'blocks': <dynamic>[],
+        'cards': <dynamic>[],
+      },
+      {
+        'id': 'b',
+        'title': '随手笔记',
+        'body': '记录',
+        'course': '',
+        'blocks': <dynamic>[],
+        'cards': <dynamic>[],
+      },
+    ];
+    await tester.runAsync(() async {
+      await store.saveNotes(original);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.light, ThemeStyle.clean),
+          home: StudyNotesPage(store: store),
+        ),
+      );
+      await waitUntil(
+        tester,
+        () async => find.text('课程笔记').evaluate().isNotEmpty,
+      );
+      await tester.tap(find.byKey(const ValueKey('note-category-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, '数学'));
+      await tester.pumpAndSettle();
+      expect(find.text('课程笔记'), findsOneWidget);
+      expect(find.text('随手笔记'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('note-category-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('未分类'));
+      await tester.pumpAndSettle();
+      expect(find.text('随手笔记'), findsOneWidget);
+      expect(find.text('课程笔记'), findsNothing);
+      expect(await store.readNotes(), original);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  testWidgets('editing toolbar stays above keyboard inset', (tester) async {
+    final store = StudyNoteStore(directory);
+    final note = <String, dynamic>{
+      'id': 'keyboard',
+      'body': '',
+      'blocks': <dynamic>[],
+      'cards': <dynamic>[],
+    };
+    await tester.runAsync(() async {
+      await store.saveNotes([note]);
+      tester.view.physicalSize = const Size(390, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetViewInsets);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.light, ThemeStyle.clean),
+          home: StudyNoteEditor(store: store, note: note),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final toolbar = tester.getRect(find.byTooltip('添加图片'));
+      expect(toolbar.bottom, lessThanOrEqualTo(500));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
 }

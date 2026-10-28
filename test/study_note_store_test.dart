@@ -1,4 +1,7 @@
 import 'dart:io';
+
+import 'support/safe_temp_directory.dart';
+
 import 'dart:isolate';
 import 'dart:typed_data';
 
@@ -23,7 +26,7 @@ void main() {
     directory = await Directory.systemTemp.createTemp('study_notes_test_');
   });
   tearDown(() async {
-    await directory.delete(recursive: true);
+    await deleteTestDirectory(directory);
   });
 
   test('saved notes survive opening the store again', () async {

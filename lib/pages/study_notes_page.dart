@@ -3,15 +3,15 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
+import '../services/study_note_document.dart';
 import '../services/study_note_store.dart';
 import '../services/storage.dart';
 import '../services/notification_service.dart';
 import '../ui/settings_parts.dart';
-import '../ui/focus_parts.dart';
 import '../ui/study_note_filter_picker.dart';
-import 'study_note_canvas.dart';
+import '../ui/tokens.dart';
+import 'study_note_document_editor.dart';
 import 'study_note_review.dart';
 
 Future<void> _rescheduleStudyReminders() {
@@ -48,6 +48,7 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
   Object? _error;
   String _query = '';
   String? _courseFilter;
+  bool _uncategorized = false;
   String? _chapterFilter;
   bool _trash = false;
   bool _busy = false;
@@ -119,7 +120,7 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
       'id': id,
       'title': '',
       'body': '',
-      'course': widget.course ?? '',
+      'course': widget.course ?? _courseFilter ?? '',
       'courseTeacher': widget.courseTeacher,
       'courseAnchor': widget.courseAnchor,
       'chapter': '',
@@ -332,6 +333,96 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
     await _load();
   }
 
+  Future<void> _browseCourses(
+    List<Map<String, dynamic>> available,
+    List<String> courses,
+  ) async {
+    final p = paletteOf(context);
+    final selection = await showGeneralDialog<String>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '关闭分类',
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (context, _, _) => Align(
+        alignment: Alignment.centerLeft,
+        child: Material(
+          color: p.modal,
+          child: SafeArea(
+            child: SizedBox(
+              width: min(320, MediaQuery.sizeOf(context).width * .82),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+                    child: Text(
+                      '笔记分类',
+                      style: Theme.of(context).textTheme.titleLarge
+                          ?.copyWith(color: p.ink, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.notes),
+                    title: const Text('全部笔记'),
+                    trailing: Text('${available.length}'),
+                    selected: _courseFilter == null && !_uncategorized,
+                    onTap: () => Navigator.pop(context, 'all'),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.folder_outlined),
+                    title: const Text('未分类'),
+                    trailing: Text(
+                      '${available.where((n) => (n['course'] as String? ?? '').isEmpty).length}',
+                    ),
+                    selected: _uncategorized,
+                    onTap: () => Navigator.pop(context, 'none'),
+                  ),
+                  const Divider(),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                    child: Text('课程', style: TextStyle(color: p.ink2)),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      children: [
+                        for (final course in courses)
+                          ListTile(
+                            leading: const Icon(Icons.folder_outlined),
+                            title: Text(course),
+                            trailing: Text(
+                              '${available.where((n) => n['course'] == course).length}',
+                            ),
+                            selected:
+                                _courseFilter == course && !_uncategorized,
+                            onTap: () =>
+                                Navigator.pop(context, 'course:$course'),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+      transitionBuilder: (context, animation, _, child) => SlideTransition(
+        position: Tween(begin: const Offset(-1, 0), end: Offset.zero).animate(
+          CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+        ),
+        child: child,
+      ),
+    );
+    if (!mounted || selection == null) return;
+    setState(() {
+      _uncategorized = selection == 'none';
+      _courseFilter = selection.startsWith('course:')
+          ? selection.substring(7)
+          : null;
+      _chapterFilter = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final available = (_notes ?? [])
@@ -365,6 +456,9 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
               (note['course'] != widget.course ||
                   note['courseTeacher'] != widget.courseTeacher ||
                   note['courseAnchor'] != widget.courseAnchor)) {
+            return false;
+          }
+          if (_uncategorized && (note['course'] as String? ?? '').isNotEmpty) {
             return false;
           }
           if (_courseFilter != null && note['course'] != _courseFilter) {
@@ -443,22 +537,29 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
-                if (widget.course == null)
+                if (widget.course == null) ...[
+                  IconButton(
+                    key: const ValueKey('note-category-picker'),
+                    tooltip: '浏览笔记分类',
+                    onPressed: () => _browseCourses(available, courses),
+                    icon: const Icon(Icons.folder_outlined),
+                  ),
                   Expanded(
                     child: StudyNoteFilterMenu(
-                      label: _courseFilter ?? '全部课程',
+                      label: _uncategorized ? '未分类' : _courseFilter ?? '全部课程',
                       tooltip: '按课程筛选',
                       allLabel: '全部课程',
                       selected: _courseFilter,
                       choices: courses,
                       optionKeyPrefix: 'note-course-option',
                       onSelected: (value) => setState(() {
+                        _uncategorized = false;
                         _courseFilter = value.isEmpty ? null : value;
                         _chapterFilter = null;
                       }),
                     ),
-                  )
-                else
+                  ),
+                ] else
                   Expanded(
                     child: Text(
                       widget.course!,
@@ -498,58 +599,159 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                 itemBuilder: (context, index) {
                   final note = notes[index];
                   final title = (note['title'] as String? ?? '').trim();
-                  final detail = [
-                    note['course'],
-                    note['chapter'],
-                  ].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
-                  return WorkbenchPanel(
-                    padding: EdgeInsets.zero,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: ListTile(
-                        title: Text(title.isEmpty ? '未命名笔记' : title),
-                        subtitle: Text(
-                          detail.isEmpty
-                              ? (note['body'] as String? ?? '')
-                              : detail,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                  final body = (note['body'] as String? ?? '').trim();
+                  final date = DateTime.tryParse(
+                    note['updatedAt'] as String? ?? '',
+                  );
+                  final course = (note['course'] as String? ?? '').trim();
+                  final p = paletteOf(context);
+                  final document = note['document'];
+                  final nodes = document is Map && document['nodes'] is List
+                      ? document['nodes'] as List
+                      : note['blocks'] as List? ?? const [];
+                  String? imageId;
+                  for (final node in nodes) {
+                    if (node is Map &&
+                        node['type'] == 'image' &&
+                        node['attachmentId'] is String) {
+                      imageId = node['attachmentId'] as String;
+                      break;
+                    }
+                  }
+                  return Column(
+                    children: [
+                      InkWell(
                         onTap: _trash ? null : () => _edit(note),
-                        trailing: Wrap(
-                          spacing: 0,
-                          children: [
-                            if (!_trash)
-                              IconButton(
-                                tooltip: note['favorite'] == true
-                                    ? '取消重点'
-                                    : '标记重点',
-                                icon: Icon(
-                                  note['favorite'] == true
-                                      ? Icons.star
-                                      : Icons.star_border,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 16,
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        if (note['favorite'] == true)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 6,
+                                            ),
+                                            child: Icon(
+                                              Icons.star,
+                                              size: 16,
+                                              color: p.accent,
+                                            ),
+                                          ),
+                                        Expanded(
+                                          child: Text(
+                                            title.isEmpty ? '未命名笔记' : title,
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                  color: p.ink,
+                                                ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    if (body.isNotEmpty) ...[
+                                      const SizedBox(height: 5),
+                                      Text(
+                                        body,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(color: p.ink2),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 9),
+                                    Text(
+                                      [
+                                        if (date != null)
+                                          '${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}',
+                                        if (course.isNotEmpty) course,
+                                      ].join(' · '),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(color: p.ink3),
+                                    ),
+                                  ],
                                 ),
-                                onPressed: () => _change(
-                                  note['id'] as String,
-                                  'favorite',
-                                  note['favorite'] != true,
+                              ),
+                              if (imageId != null && _store != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 12),
+                                  child: FutureBuilder(
+                                    future: _store!.readAttachment(imageId),
+                                    builder: (context, snapshot) =>
+                                        snapshot.hasData
+                                        ? ClipRRect(
+                                            borderRadius: BorderRadius.circular(
+                                              p.radius.clamp(2.0, 8.0),
+                                            ),
+                                            child: Image.memory(
+                                              snapshot.data!,
+                                              width: 56,
+                                              height: 56,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, _, _) =>
+                                                  const SizedBox.shrink(),
+                                            ),
+                                          )
+                                        : const SizedBox.shrink(),
+                                  ),
                                 ),
+                              PopupMenuButton<String>(
+                                tooltip: '笔记操作',
+                                onSelected: (value) {
+                                  if (value == 'favorite') {
+                                    _change(
+                                      note['id'] as String,
+                                      'favorite',
+                                      note['favorite'] != true,
+                                    );
+                                  } else if (value == 'deleted') {
+                                    _change(
+                                      note['id'] as String,
+                                      'deleted',
+                                      !_trash,
+                                    );
+                                  }
+                                },
+                                itemBuilder: (_) => [
+                                  if (!_trash)
+                                    PopupMenuItem(
+                                      value: 'favorite',
+                                      child: Text(
+                                        note['favorite'] == true
+                                            ? '取消重点'
+                                            : '标记重点',
+                                      ),
+                                    ),
+                                  PopupMenuItem(
+                                    value: 'deleted',
+                                    child: Text(_trash ? '恢复笔记' : '移入回收站'),
+                                  ),
+                                ],
                               ),
-                            IconButton(
-                              tooltip: _trash ? '恢复笔记' : '移入回收站',
-                              icon: Icon(
-                                _trash ? Icons.restore : Icons.delete_outline,
-                              ),
-                              onPressed: () => _change(
-                                note['id'] as String,
-                                'deleted',
-                                !_trash,
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
-                    ),
+                      Divider(height: 1, color: p.hairline),
+                    ],
                   );
                 },
               ),
@@ -570,9 +772,10 @@ class StudyNoteEditor extends StatefulWidget {
 
 class _StudyNoteEditorState extends State<StudyNoteEditor>
     with WidgetsBindingObserver {
-  late final TextEditingController _title, _body, _course, _chapter;
+  late final TextEditingController _title, _course, _chapter;
   late Map<String, dynamic> _baseline;
-  late List<dynamic> _blocks;
+  late Map<String, dynamic> _document;
+  late bool _documentEdited;
   late List<dynamic> _cards;
   Map<String, dynamic>? _reminder;
   Timer? _timer;
@@ -588,20 +791,20 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
     _baseline = Map<String, dynamic>.from(
       jsonDecode(jsonEncode(widget.note)) as Map,
     );
-    _blocks = jsonDecode(jsonEncode(widget.note['blocks'] ?? [])) as List;
+    _document = StudyNoteDocument.fromNote(widget.note);
+    _documentEdited = widget.note.containsKey('document');
     _cards = jsonDecode(jsonEncode(widget.note['cards'] ?? [])) as List;
     if (widget.note['reminder'] is Map) {
       _reminder = Map<String, dynamic>.from(widget.note['reminder'] as Map);
     }
     _title = TextEditingController(text: widget.note['title'] as String? ?? '');
-    _body = TextEditingController(text: widget.note['body'] as String? ?? '');
     _course = TextEditingController(
       text: widget.note['course'] as String? ?? '',
     );
     _chapter = TextEditingController(
       text: widget.note['chapter'] as String? ?? '',
     );
-    for (final controller in [_title, _body, _course, _chapter]) {
+    for (final controller in [_title, _course, _chapter]) {
       controller.addListener(_changed);
     }
   }
@@ -617,11 +820,26 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
     _timer?.cancel();
     final revision = _revision;
     if (revision == _saved) return true;
-    final title = _title.text,
-        body = _body.text,
-        course = _course.text,
-        chapter = _chapter.text;
-    final blocks = jsonDecode(jsonEncode(_blocks)) as List;
+    final title = _title.text, course = _course.text, chapter = _chapter.text;
+    Map<String, dynamic>? document;
+    late String body;
+    late List<dynamic> blocks;
+    try {
+      document = _documentEdited
+          ? Map<String, dynamic>.from(jsonDecode(jsonEncode(_document)) as Map)
+          : null;
+      body = document == null
+          ? _baseline['body'] as String? ?? ''
+          : StudyNoteDocument.plainText(document);
+      blocks = document == null
+          ? jsonDecode(jsonEncode(_baseline['blocks'] ?? [])) as List
+          : StudyNoteDocument.legacyBlocks(document);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = '内容暂时无法保存，当前编辑仍保留在此页面，请检查后重试。');
+      }
+      return false;
+    }
     final cards = jsonDecode(jsonEncode(_cards)) as List;
     final reminder = _reminder == null
         ? null
@@ -656,6 +874,7 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
               : null,
           'chapter': chapter,
           'blocks': blocks,
+          ...?(document == null ? null : {'document': document}),
           'cards': cards,
           'reminder': reminder,
           'updatedAt': DateTime.now().toIso8601String(),
@@ -688,69 +907,9 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
     if (await _save() && mounted) Navigator.of(context).pop();
   }
 
-  Future<void> _addImages() async {
-    if (!await _save()) return;
-    try {
-      final files = await ImagePicker().pickMultiImage();
-      for (final file in files) {
-        if (await file.length() > 64 * 1024 * 1024) {
-          throw const FormatException('图片大于 64 MB');
-        }
-        final bytes = await file.readAsBytes();
-        final id = await widget.store.putAttachment(bytes);
-        if (!mounted) return;
-        setState(
-          () => _blocks.add({
-            'type': 'image',
-            'attachmentId': id,
-            'strokes': <dynamic>[],
-          }),
-        );
-        _changed();
-      }
-      if (files.isNotEmpty) await _save();
-    } catch (error) {
-      if (mounted) setState(() => _error = '图片未能添加：$error');
-    }
-  }
-
-  Future<void> _addDrawing() async {
-    setState(() => _blocks.add({'type': 'drawing', 'strokes': <dynamic>[]}));
-    _changed();
-    if (await _save()) await _openCanvas(_blocks.length - 1);
-  }
-
-  Future<void> _openCanvas(int index) async {
-    if (!await _save()) return;
-    final block = Map<String, dynamic>.from(_blocks[index] as Map);
-    try {
-      final image = block['type'] == 'image'
-          ? await widget.store.readAttachment(block['attachmentId'] as String)
-          : null;
-      if (!mounted) return;
-      final strokes = await Navigator.of(context).push<List<dynamic>>(
-        MaterialPageRoute(
-          builder: (_) => StudyNoteCanvas(
-            image: image,
-            strokes: block['strokes'] as List? ?? [],
-            onChanged: (strokes) async {
-              if (!mounted) return false;
-              setState(() => _blocks[index] = {...block, 'strokes': strokes});
-              _changed();
-              return _save();
-            },
-          ),
-        ),
-      );
-      if (!mounted || strokes == null) return;
-    } catch (error) {
-      if (mounted) setState(() => _error = '无法打开画布：$error');
-    }
-  }
-
-  Future<void> _editCard([int? index]) async {
+  Future<void> _editCard([int? index, String? question]) async {
     final existing = index == null
-        ? <String, dynamic>{}
+        ? <String, dynamic>{'question': question ?? ''}
         : Map<String, dynamic>.from(_cards[index] as Map);
     final result = await showDialog<Map<String, String>>(
       context: context,
@@ -874,7 +1033,7 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
-    for (final controller in [_title, _body, _course, _chapter]) {
+    for (final controller in [_title, _course, _chapter]) {
       controller.dispose();
     }
     super.dispose();
@@ -891,151 +1050,145 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
       actions: [
         TextButton(onPressed: _saving ? null : _save, child: const Text('保存')),
       ],
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 36),
-        children: [
-          TextField(
-            key: const ValueKey('note-title'),
-            controller: _title,
-            decoration: const InputDecoration(labelText: '标题'),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _addImages,
-                icon: const Icon(Icons.add_photo_alternate_outlined),
-                label: const Text('添加图片'),
+      body: StudyNoteDocumentEditor(
+        header: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: const ValueKey('note-title'),
+              controller: _title,
+              style: Theme.of(context).textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+              maxLines: null,
+              decoration: const InputDecoration(
+                hintText: '无标题',
+                isCollapsed: true,
+                contentPadding: EdgeInsets.zero,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
               ),
-              OutlinedButton.icon(
-                onPressed: _addDrawing,
-                icon: const Icon(Icons.draw_outlined),
-                label: const Text('添加手写页'),
-              ),
-            ],
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.notifications_outlined),
-            title: const Text('复习提醒'),
-            subtitle: Text(
-              _reminder == null
-                  ? '由你指定时间和重复方式'
-                  : '${DateTime.fromMillisecondsSinceEpoch(_reminder!['at'] as int)} · ${switch (_reminder!['repeat']) {
-                      'daily' => '每天',
-                      'weekly' => '每周',
-                      _ => '一次',
-                    }}',
             ),
-            onTap: _setReminder,
-            trailing: _reminder == null
-                ? const Icon(Icons.chevron_right)
-                : IconButton(
-                    tooltip: '关闭复习提醒',
-                    onPressed: _clearReminder,
-                    icon: const Icon(Icons.notifications_off_outlined),
-                  ),
-          ),
-          ValueListenableBuilder<String?>(
-            valueListenable: NotificationService.studySchedule,
-            builder: (context, status, _) =>
-                Text(status ?? '提醒受系统权限和后台限制影响；iOS 需要定期打开应用。'),
-          ),
-          for (var i = 0; i < _blocks.length; i++)
-            if (_blocks[i] is Map)
-              WorkbenchPanel(
-                padding: EdgeInsets.zero,
-                child: Material(
-                  color: Colors.transparent,
-                  child: ListTile(
-                    leading: Icon(
-                      (_blocks[i] as Map)['type'] == 'image'
-                          ? Icons.image_outlined
-                          : Icons.draw_outlined,
-                    ),
-                    title: Text(
-                      (_blocks[i] as Map)['type'] == 'image'
-                          ? '图片 ${i + 1}'
-                          : '手写页 ${i + 1}',
-                    ),
-                    subtitle: const Text('点击编辑批注'),
-                    onTap: () => _openCanvas(i),
-                    trailing: IconButton(
-                      tooltip: '移除内容',
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: () {
-                        setState(() => _blocks.removeAt(i));
-                        _changed();
-                      },
-                    ),
-                  ),
-                ),
-              ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () => _editCard(),
-                icon: const Icon(Icons.add),
-                label: const Text('新建自测卡片'),
-              ),
-              OutlinedButton.icon(
-                onPressed: _cards.isEmpty ? null : _reviewCards,
-                icon: const Icon(Icons.quiz_outlined),
-                label: const Text('开始自测'),
-              ),
-            ],
-          ),
-          for (var i = 0; i < _cards.length; i++)
-            if (_cards[i] is Map)
-              ListTile(
-                title: Text((_cards[i] as Map)['question'] as String? ?? ''),
-                subtitle: Text(
-                  (_cards[i] as Map)['hard'] == true ? '需要再看' : '点击编辑问题与答案',
-                ),
-                onTap: () => _editCard(i),
-                trailing: IconButton(
-                  tooltip: '删除卡片',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () {
-                    setState(() => _cards.removeAt(i));
-                    _changed();
-                  },
-                ),
-              ),
-          TextField(
-            controller: _course,
-            decoration: const InputDecoration(labelText: '课程（可选）'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _chapter,
-            decoration: const InputDecoration(labelText: '章节（可选）'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            key: const ValueKey('note-body'),
-            controller: _body,
-            minLines: 10,
-            maxLines: null,
-            decoration: const InputDecoration(
-              labelText: '记录知识与复习内容',
-              alignLabelWithHint: true,
+            const SizedBox(height: 12),
+            Text(
+              '${_course.text.isEmpty ? '未分类' : _course.text} · ${StudyNoteDocument.plainText(_document).characters.length} 字',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _error ??
-                (_saving
-                    ? '正在保存…'
-                    : _revision == _saved
-                    ? '已保存到本机'
-                    : '等待自动保存'),
-          ),
-        ],
+            const SizedBox(height: 20),
+          ],
+        ),
+        footer: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 12),
+            ExpansionTile(
+              title: const Text('复习与笔记信息'),
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.notifications_outlined),
+                  title: const Text('复习提醒'),
+                  subtitle: Text(
+                    _reminder == null
+                        ? '由你指定时间和重复方式'
+                        : '${DateTime.fromMillisecondsSinceEpoch(_reminder!['at'] as int)} · ${switch (_reminder!['repeat']) {
+                            'daily' => '每天',
+                            'weekly' => '每周',
+                            _ => '一次',
+                          }}',
+                  ),
+                  onTap: _setReminder,
+                  trailing: _reminder == null
+                      ? const Icon(Icons.chevron_right)
+                      : IconButton(
+                          tooltip: '关闭复习提醒',
+                          onPressed: _clearReminder,
+                          icon: const Icon(Icons.notifications_off_outlined),
+                        ),
+                ),
+                ValueListenableBuilder<String?>(
+                  valueListenable: NotificationService.studySchedule,
+                  builder: (context, status, _) =>
+                      Text(status ?? '提醒受系统权限和后台限制影响；iOS 需要定期打开应用。'),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => _editCard(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('新建自测卡片'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _cards.isEmpty ? null : _reviewCards,
+                      icon: const Icon(Icons.quiz_outlined),
+                      label: const Text('开始自测'),
+                    ),
+                  ],
+                ),
+                for (var i = 0; i < _cards.length; i++)
+                  if (_cards[i] is Map)
+                    ListTile(
+                      title: Text(
+                        (_cards[i] as Map)['question'] as String? ?? '',
+                      ),
+                      subtitle: Text(
+                        (_cards[i] as Map)['hard'] == true
+                            ? '需要再看'
+                            : '点击编辑问题与答案',
+                      ),
+                      onTap: () => _editCard(i),
+                      trailing: IconButton(
+                        tooltip: '删除卡片',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () {
+                          setState(() => _cards.removeAt(i));
+                          _changed();
+                        },
+                      ),
+                    ),
+                ExpansionTile(
+                  title: const Text('课程与章节'),
+                  children: [
+                    TextField(
+                      controller: _course,
+                      decoration: const InputDecoration(labelText: '课程（可选）'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _chapter,
+                      decoration: const InputDecoration(labelText: '章节（可选）'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _error ??
+                  (_saving
+                      ? '正在保存…'
+                      : _revision == _saved
+                      ? '已保存到本机'
+                      : '等待自动保存'),
+            ),
+          ],
+        ),
+        document: _document,
+        store: widget.store,
+        save: _save,
+        onChanged: (document) {
+          _document = document;
+          _documentEdited = true;
+          _changed();
+        },
+        onError: (message) {
+          if (mounted) setState(() => _error = message);
+        },
+        onCreateCard: (text) => _editCard(null, text),
       ),
     ),
   );

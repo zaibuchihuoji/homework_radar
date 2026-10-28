@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+
+import 'support/safe_temp_directory.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +10,7 @@ import 'package:homework_radar/services/backup_service.dart';
 import 'package:homework_radar/services/storage.dart';
 import 'package:homework_radar/services/study_note_store.dart';
 import 'package:homework_radar/services/study_note_bundle.dart';
+import 'package:homework_radar/services/study_note_document.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -25,7 +29,7 @@ void main() {
       final directory = await Directory.systemTemp.createTemp(
         'notes_transaction_',
       );
-      addTearDown(() => directory.delete(recursive: true));
+      addTearDown(() => deleteTestDirectory(directory));
       SharedPreferences.setMockInitialValues({});
       await Storage.init();
       await Storage.saveTimetableSource('原课表');
@@ -60,7 +64,7 @@ void main() {
     PathProviderPlatform.instance = TestSupportPath(root.path);
     addTearDown(() async {
       PathProviderPlatform.instance = oldProvider;
-      await root.delete(recursive: true);
+      await deleteTestDirectory(root);
     });
     SharedPreferences.setMockInitialValues({});
     await Storage.init();
@@ -93,7 +97,7 @@ void main() {
       PathProviderPlatform.instance = TestSupportPath(root.path);
       addTearDown(() async {
         PathProviderPlatform.instance = oldProvider;
-        await root.delete(recursive: true);
+        await deleteTestDirectory(root);
       });
       SharedPreferences.setMockInitialValues({});
       await Storage.init();
@@ -123,7 +127,7 @@ void main() {
       PathProviderPlatform.instance = TestSupportPath(root.path);
       addTearDown(() async {
         PathProviderPlatform.instance = oldProvider;
-        await root.delete(recursive: true);
+        await deleteTestDirectory(root);
       });
       final notes = await StudyNoteStore.openDefault();
       await notes.saveNotes([
@@ -158,7 +162,7 @@ void main() {
       final oldProvider = PathProviderPlatform.instance;
       addTearDown(() async {
         PathProviderPlatform.instance = oldProvider;
-        await root.delete(recursive: true);
+        await deleteTestDirectory(root);
       });
       PathProviderPlatform.instance = TestSupportPath(
         '${root.path}${Platform.pathSeparator}source',
@@ -198,7 +202,7 @@ void main() {
       PathProviderPlatform.instance = TestSupportPath(root.path);
       addTearDown(() async {
         PathProviderPlatform.instance = oldProvider;
-        await root.delete(recursive: true);
+        await deleteTestDirectory(root);
       });
       SharedPreferences.setMockInitialValues({});
       await Storage.init();
@@ -226,7 +230,7 @@ void main() {
       final oldProvider = PathProviderPlatform.instance;
       addTearDown(() async {
         PathProviderPlatform.instance = oldProvider;
-        await root.delete(recursive: true);
+        await deleteTestDirectory(root);
       });
       PathProviderPlatform.instance = TestSupportPath(
         '${root.path}${Platform.pathSeparator}source',
@@ -279,7 +283,7 @@ void main() {
       PathProviderPlatform.instance = TestSupportPath(root.path);
       addTearDown(() async {
         PathProviderPlatform.instance = oldProvider;
-        await root.delete(recursive: true);
+        await deleteTestDirectory(root);
       });
       SharedPreferences.setMockInitialValues({});
       await Storage.init();
@@ -300,6 +304,94 @@ void main() {
       expect(bundle.historyIncluded, isFalse);
       expect(bundle.notes.single['title'], '当前');
       expect((await store.readNotes()).single['title'], '当前');
+    },
+  );
+
+  test(
+    'complete backup restores mixed document, canvas images and old history',
+    () async {
+      final root = await Directory.systemTemp.createTemp('document_bundle_');
+      final oldProvider = PathProviderPlatform.instance;
+      addTearDown(() async {
+        PathProviderPlatform.instance = oldProvider;
+        await deleteTestDirectory(root);
+      });
+      PathProviderPlatform.instance = TestSupportPath(
+        '${root.path}${Platform.pathSeparator}source',
+      );
+      SharedPreferences.setMockInitialValues({});
+      await Storage.init();
+      final source = await StudyNoteStore.openDefault();
+      await source.saveNotes([
+        {'id': 'n', 'body': '旧正文', 'blocks': <dynamic>[]},
+      ]);
+      final bytes = Uint8List.fromList([5, 6, 7, 8]);
+      final imageId = await source.putAttachment(bytes);
+      final document = <String, dynamic>{
+        'version': 1,
+        'nodes': [
+          {
+            'id': 'p',
+            'type': 'text',
+            'style': 'paragraph',
+            'text': '新正文',
+            'marks': [
+              {'type': 'bold', 'start': 0, 'end': 1},
+            ],
+            'annotations': [
+              {
+                'color': 1,
+                'anchor': 0,
+                'points': [
+                  [0.2, 0.3],
+                ],
+              },
+            ],
+          },
+          {
+            'id': 'c',
+            'type': 'canvas',
+            'strokes': <dynamic>[],
+            'items': [
+              {
+                'id': 'i',
+                'type': 'image',
+                'attachmentId': imageId,
+                'x': 0.1,
+                'y': 0.1,
+                'width': 0.4,
+                'height': 0.3,
+              },
+            ],
+          },
+        ],
+      };
+      final note = <String, dynamic>{
+        'id': 'n',
+        'body': StudyNoteDocument.plainText(document),
+        'blocks': StudyNoteDocument.legacyBlocks(document),
+        'document': document,
+        'cards': [
+          {'question': '问题', 'answer': '答案'},
+        ],
+      };
+      await source.saveNotes([note]);
+      final backup = await BackupService.exportBundle();
+      PathProviderPlatform.instance = TestSupportPath(
+        '${root.path}${Platform.pathSeparator}target',
+      );
+      SharedPreferences.setMockInitialValues({});
+      await Storage.init();
+      await BackupService.importBundle(backup);
+      final target = await StudyNoteStore.openDefault();
+      expect((await target.readNotes()).single, note);
+      expect(await target.readAttachment(imageId), bytes);
+      var oldVersionFound = false;
+      for (final version in await target.history()) {
+        final rows = await target.readHistory(version);
+        if (rows.any((row) => row['body'] == '旧正文')) oldVersionFound = true;
+      }
+      expect(oldVersionFound, isTrue);
     },
   );
 }

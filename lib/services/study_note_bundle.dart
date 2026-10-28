@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'study_note_document.dart';
+
 /// Uncompressed, length-delimited backup with content checksums.
 /// No archive paths are extracted, and declared sizes are checked first.
 class StudyNoteBundle {
@@ -121,6 +123,9 @@ class StudyNoteBundle {
           refs.add(attachment);
         }
       }
+      if (note.containsKey('document')) {
+        refs.addAll(StudyNoteDocument.referencedAttachments(note['document']));
+      }
     }
     return refs;
   }
@@ -148,9 +153,17 @@ class StudyNoteBundle {
       total += bytes.length;
       if (total > _maxBundle) throw const FormatException('备份过大');
     }
+    // Older clients cannot interpret editable documents or their nested
+    // attachments, so they must reject these backups instead of restoring a
+    // superficially valid but incomplete note.
+    final hasDocument =
+        notes.any((note) => note.containsKey('document')) ||
+        history.any(
+          (version) => version.any((note) => note.containsKey('document')),
+        );
     final header = utf8.encode(
       jsonEncode({
-        'version': 2,
+        'version': hasDocument ? 3 : 2,
         'business': businessJson,
         'notes': notes,
         'history': history,
@@ -199,7 +212,9 @@ class StudyNoteBundle {
     try {
       final data = jsonDecode(utf8.decode(header));
       if (data is! Map ||
-          (data['version'] != 1 && data['version'] != 2) ||
+          (data['version'] != 1 &&
+              data['version'] != 2 &&
+              data['version'] != 3) ||
           data['business'] is! String ||
           data['notes'] is! List ||
           data['assets'] is! List) {
@@ -209,10 +224,10 @@ class StudyNoteBundle {
           .map((n) => Map<String, dynamic>.from(n as Map))
           .toList();
       final refs = referencedAttachments(notes);
-      if (data['version'] == 2 && data['history'] is! List) {
+      if (data['version'] != 1 && data['history'] is! List) {
         throw const FormatException('笔记历史清单损坏');
       }
-      if (data['version'] == 2 && data['historyIncluded'] is! bool) {
+      if (data['version'] != 1 && data['historyIncluded'] is! bool) {
         throw const FormatException('笔记历史备份标记损坏');
       }
       final history = <List<Map<String, dynamic>>>[];
@@ -224,7 +239,15 @@ class StudyNoteBundle {
         refs.addAll(referencedAttachments(version));
         history.add(version);
       }
-      if (data['version'] == 2 &&
+      if (data['version'] != 3 &&
+          (notes.any((note) => note.containsKey('document')) ||
+              history.any(
+                (version) =>
+                    version.any((note) => note.containsKey('document')),
+              ))) {
+        throw const FormatException('备份版本与笔记内容不匹配');
+      }
+      if (data['version'] != 1 &&
           data['historyIncluded'] == false &&
           history.isNotEmpty) {
         throw const FormatException('笔记历史备份标记不一致');
@@ -262,7 +285,7 @@ class StudyNoteBundle {
         notes: notes,
         attachments: attachments,
         history: history,
-        historyIncluded: data['version'] == 2
+        historyIncluded: data['version'] != 1
             ? data['historyIncluded'] as bool
             : false,
       );

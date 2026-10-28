@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'support/safe_temp_directory.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -45,8 +47,9 @@ void main() {
           const MethodChannel('dexterous.com/flutter/local_notifications'),
           (call) async {
             calls.add(call);
-            if (call.method == 'pendingNotificationRequests')
+            if (call.method == 'pendingNotificationRequests') {
               return <Map<String, Object?>>[];
+            }
             return true;
           },
         );
@@ -55,7 +58,7 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
     NotificationService.clock = DateTime.now;
     PathProviderPlatform.instance = previous;
-    await root.delete(recursive: true);
+    await deleteTestDirectory(root);
   });
 
   test('homework and note reminders are both scheduled', () async {
