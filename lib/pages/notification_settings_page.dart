@@ -97,7 +97,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
     setState(() => _sending = true);
     try {
       await NotificationService.showSimple(
-        id == 'homework_due' ? '作业截止提醒' : '上课提醒',
+        switch (id) {
+          'homework_due' => '作业截止提醒',
+          'study_reminder' => '笔记复习提醒',
+          _ => '上课提醒',
+        },
         '这是一条提醒，点击返回作业通',
         channelId: id,
         payload: id == 'homework_due' ? widget.homeworkId : null,
@@ -119,7 +123,7 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
         const FocusSummary(
           eyebrow: '系统提醒',
           title: '让提醒及时出现',
-          detail: '分别设置作业和上课通知的横幅、声音与测试提醒。',
+          detail: '分别设置作业、上课和笔记复习通知的横幅、声音与测试提醒。',
         ),
         ValueListenableBuilder<bool?>(
           valueListenable: NotificationService.permission,
@@ -151,9 +155,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage>
             title: channel.name,
             children: [
               SettingsRow(
-                icon: channel.id == 'homework_due'
-                    ? Icons.assignment_outlined
-                    : Icons.school_outlined,
+                icon: switch (channel.id) {
+                  'homework_due' => Icons.assignment_outlined,
+                  'study_reminder' => Icons.menu_book_outlined,
+                  _ => Icons.school_outlined,
+                },
                 title: '设置${channel.name}',
                 subtitle: _status(channel.id),
                 navigation: true,

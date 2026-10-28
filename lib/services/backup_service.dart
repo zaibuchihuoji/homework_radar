@@ -3,11 +3,14 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../models/course.dart';
 import '../models/homework.dart';
 import 'storage.dart';
 import 'local_recovery_store.dart';
+import 'study_note_bundle.dart';
+import 'study_note_store.dart';
 
 class BackupPreview {
   const BackupPreview({
@@ -35,6 +38,76 @@ class BackupService {
 
   static const _magic = 'homework_radar';
   static const _version = 3;
+
+  static Future<Uint8List> exportBundle({bool includeHistory = true}) async {
+    final store = await StudyNoteStore.openDefault();
+    return store.withRecoveryLock((_) async {
+      await Storage.waitForBusinessTransaction();
+      final notes = await store.readNotes(
+        requireInitialized: Storage.flag('note_store_used'),
+      );
+      final assets = <String, Uint8List>{};
+      final versions = await store.history();
+      final history = <List<Map<String, dynamic>>>[];
+      if (includeHistory) {
+        for (final version in versions.take(
+          versions.isEmpty ? 0 : versions.length - 1,
+        )) {
+          history.add(await store.readHistory(version));
+        }
+      }
+      final references = StudyNoteBundle.referencedAttachments(notes);
+      for (final version in history) {
+        references.addAll(StudyNoteBundle.referencedAttachments(version));
+      }
+      for (final id in references) {
+        assets[id] = await store.readAttachment(id);
+      }
+      return StudyNoteBundle(
+        businessJson: encode(),
+        notes: notes,
+        attachments: assets,
+        history: history,
+        historyIncluded: includeHistory,
+      ).encode();
+    });
+  }
+
+  static Future<String> importBundle(
+    Uint8List bytes, {
+    String? expectedNoteRevision,
+  }) async {
+    final bundle = StudyNoteBundle.decode(bytes);
+    await previewJson(bundle.businessJson);
+    final store = await StudyNoteStore.openDefault();
+    var revision = expectedNoteRevision;
+    if (!Storage.flag('note_store_used')) {
+      revision = await store.initialize(expectedRevision: expectedNoteRevision);
+      await Storage.setFlag('note_store_used', true);
+    } else {
+      await store.readNotes(requireInitialized: true);
+    }
+    for (final entry in bundle.attachments.entries) {
+      if (await store.putAttachment(entry.value) != entry.key) {
+        throw const FormatException('附件校验失败');
+      }
+    }
+    return store.restoreTransaction(
+      bundle.notes,
+      (version, apply, rollback) async {
+        final result = await _process(
+          bundle.businessJson,
+          apply: true,
+          noteApply: apply,
+          noteRollbackVersion: version,
+          rollbackNotes: rollback,
+        );
+        return '${result.message}；笔记 ${bundle.notes.length} 条';
+      },
+      expectedRevision: revision,
+      importedHistory: bundle.history,
+    );
+  }
 
   static Map<String, dynamic> exportMap() => {
     'app': _magic,
@@ -94,6 +167,9 @@ class BackupService {
   static Future<BackupPreview> _process(
     String raw, {
     required bool apply,
+    Future<void> Function()? noteApply,
+    String? noteRollbackVersion,
+    Future<void> Function()? rollbackNotes,
   }) async {
     final dynamic decoded;
     try {
@@ -364,123 +440,132 @@ class BackupService {
     final isolated = <Map<String, dynamic>>[];
 
     // ---- 落库阶段（解析全部成功；日志保护整组写入）----
-    await Storage.businessTransaction(() async {
-      // Keep a usable undo point even if applying the import later rolls back.
-      await LocalRecoveryStore.capture(
-        encode(),
-        reason: '恢复前备份',
-        includeEmpty: true,
-      );
-      final imported = <dynamic>[
-        for (var i = 0; i < items.length; i++)
-          if (!loggedIn(items[i].platform)) (hw as List)[i],
-      ];
-      final activeHidden = Map<String, String>.from(hidden)
-        ..removeWhere(
-          (id, raw) => loggedIn(
-            HomeworkItem.fromJson(jsonDecode(raw) as Map<String, dynamic>)
-                .platform,
-          ),
+    await Storage.businessTransaction(
+      () async {
+        // Keep a usable undo point even if applying the import later rolls back.
+        await LocalRecoveryStore.capture(
+          encode(),
+          reason: '恢复前备份',
+          includeEmpty: true,
         );
-      for (final p in PlatformKind.values.where(loggedIn)) {
-        final platformItems = items.where((h) => h.platform == p).toList();
-        final platformHidden = <String, String>{
-          for (final e in hidden.entries)
-            if (HomeworkItem.fromJson(
-                  jsonDecode(e.value) as Map<String, dynamic>,
-                ).platform ==
-                p)
-              e.key: e.value,
-        };
-        if (platformItems.isNotEmpty || platformHidden.isNotEmpty) {
-          final now = DateTime.now();
-          isolated.add({
-            'id': '${now.microsecondsSinceEpoch}_backup_${p.key}',
-            'createdAt': now.toIso8601String(),
-            'platform': p.key,
-            'homework': [
-              for (var i = 0; i < items.length; i++)
-                if (items[i].platform == p) (hw as List)[i],
-            ],
-            'hiddenItems': platformHidden,
-          });
-        }
-      }
-      for (final body in Storage.homeworkRowsForEdit()) {
-        try {
-          final item = HomeworkItem.fromJson(
-            Map<String, dynamic>.from(body as Map),
+        final imported = <dynamic>[
+          for (var i = 0; i < items.length; i++)
+            if (!loggedIn(items[i].platform)) (hw as List)[i],
+        ];
+        final activeHidden = Map<String, String>.from(hidden)
+          ..removeWhere(
+            (id, raw) => loggedIn(
+              HomeworkItem.fromJson(jsonDecode(raw) as Map<String, dynamic>)
+                  .platform,
+            ),
           );
-          if (loggedIn(item.platform)) imported.add(body);
-        } catch (_) {
-          // No readable account identity: retain the only current raw copy.
-          imported.add(body);
-        }
-      }
-      for (final e in Storage.hiddenItems().entries) {
-        try {
-          if (loggedIn(
-            HomeworkItem.fromJson(jsonDecode(e.value) as Map<String, dynamic>)
-                .platform,
-          )) {
-            activeHidden[e.key] = e.value;
+        for (final p in PlatformKind.values.where(loggedIn)) {
+          final platformItems = items.where((h) => h.platform == p).toList();
+          final platformHidden = <String, String>{
+            for (final e in hidden.entries)
+              if (HomeworkItem.fromJson(
+                    jsonDecode(e.value) as Map<String, dynamic>,
+                  ).platform ==
+                  p)
+                e.key: e.value,
+          };
+          if (platformItems.isNotEmpty || platformHidden.isNotEmpty) {
+            final now = DateTime.now();
+            isolated.add({
+              'id': '${now.microsecondsSinceEpoch}_backup_${p.key}',
+              'createdAt': now.toIso8601String(),
+              'platform': p.key,
+              'homework': [
+                for (var i = 0; i < items.length; i++)
+                  if (items[i].platform == p) (hw as List)[i],
+              ],
+              'hiddenItems': platformHidden,
+            });
           }
-        } catch (_) {
-          throw const FormatException('当前隐藏作业损坏，请先导出数据再恢复备份');
         }
-      }
-      if (decoded['courses'] is List) {
-        await Storage.saveCourseRows(
-          List<dynamic>.of(decoded['courses'] as List),
-        );
-      }
-      // 作业：与课表同语义——备份里没有这个字段（旧版备份）才不动当前作业；
-      // 有字段且合法的空列表也恢复为空，避免混入目标设备的旧数据。
-      if (hw is List) {
-        await Storage.saveHomeworkRows(imported);
-      }
-      if (start != null) await Storage.saveSemesterStart(start);
-      if (decoded.containsKey('semesterStart') && start == null) {
-        await Storage.clearSemesterStart();
-      }
-      if (manualFlag is bool) {
-        await Storage.setFlag('semester_start_manual', manualFlag);
-      }
-      if (sem is String) {
-        await Storage.saveTimetableSemester(sem);
-      }
-      if (times != null) await Storage.saveSectionTimes(times);
-      if (st is List && st.isEmpty) await Storage.clearSectionTimes();
-      if (decoded['timetableSource'] is String) {
-        await Storage.saveTimetableSource(decoded['timetableSource'] as String);
-      }
-      await Storage.mergeAccountArchives([...parsedArchives, ...isolated]);
-      // 隐藏名单整体替换：导入弹窗承诺「覆盖」，追加合并与承诺不符
-      if (hraw is Map) {
-        await Storage.restoreHiddenItems(activeHidden);
-      }
-      if (trashRaw is Map) await LocalRecoveryStore.saveDeleted(trash);
-      if (colors is Map) await Storage.saveCourseColors(colorMap);
+        for (final body in Storage.homeworkRowsForEdit()) {
+          try {
+            final item = HomeworkItem.fromJson(
+              Map<String, dynamic>.from(body as Map),
+            );
+            if (loggedIn(item.platform)) imported.add(body);
+          } catch (_) {
+            // No readable account identity: retain the only current raw copy.
+            imported.add(body);
+          }
+        }
+        for (final e in Storage.hiddenItems().entries) {
+          try {
+            if (loggedIn(
+              HomeworkItem.fromJson(jsonDecode(e.value) as Map<String, dynamic>)
+                  .platform,
+            )) {
+              activeHidden[e.key] = e.value;
+            }
+          } catch (_) {
+            throw const FormatException('当前隐藏作业损坏，请先导出数据再恢复备份');
+          }
+        }
+        if (decoded['courses'] is List) {
+          await Storage.saveCourseRows(
+            List<dynamic>.of(decoded['courses'] as List),
+          );
+        }
+        // 作业：与课表同语义——备份里没有这个字段（旧版备份）才不动当前作业；
+        // 有字段且合法的空列表也恢复为空，避免混入目标设备的旧数据。
+        if (hw is List) {
+          await Storage.saveHomeworkRows(imported);
+        }
+        if (start != null) await Storage.saveSemesterStart(start);
+        if (decoded.containsKey('semesterStart') && start == null) {
+          await Storage.clearSemesterStart();
+        }
+        if (manualFlag is bool) {
+          await Storage.setFlag('semester_start_manual', manualFlag);
+        }
+        if (sem is String) {
+          await Storage.saveTimetableSemester(sem);
+        }
+        if (times != null) await Storage.saveSectionTimes(times);
+        if (st is List && st.isEmpty) await Storage.clearSectionTimes();
+        if (decoded['timetableSource'] is String) {
+          await Storage.saveTimetableSource(
+            decoded['timetableSource'] as String,
+          );
+        }
+        await Storage.mergeAccountArchives([...parsedArchives, ...isolated]);
+        // 隐藏名单整体替换：导入弹窗承诺「覆盖」，追加合并与承诺不符
+        if (hraw is Map) {
+          await Storage.restoreHiddenItems(activeHidden);
+        }
+        if (trashRaw is Map) await LocalRecoveryStore.saveDeleted(trash);
+        if (colors is Map) await Storage.saveCourseColors(colorMap);
 
-      final s = decoded['settings'];
-      if (s is Map) {
-        if (s['themeMode'] is String) {
-          await Storage.saveThemeMode(s['themeMode']);
+        final s = decoded['settings'];
+        if (s is Map) {
+          if (s['themeMode'] is String) {
+            await Storage.saveThemeMode(s['themeMode']);
+          }
+          if (s['uiStyle'] is String) await Storage.saveUiStyle(s['uiStyle']);
+          if (s['sortMode'] is String) {
+            await Storage.saveSortMode(s['sortMode']);
+          }
+          if (s['classReminder'] is bool) {
+            await Storage.saveClassReminder(s['classReminder']);
+          }
+          if (classMinutes is int) {
+            await Storage.saveClassReminderMinutes(classMinutes);
+          }
+          if (reminder != null) await Storage.saveReminders(reminder);
+          if (s['jwConfig'] is String) {
+            await Storage.saveJwConfigRaw(s['jwConfig']);
+          }
         }
-        if (s['uiStyle'] is String) await Storage.saveUiStyle(s['uiStyle']);
-        if (s['sortMode'] is String) await Storage.saveSortMode(s['sortMode']);
-        if (s['classReminder'] is bool) {
-          await Storage.saveClassReminder(s['classReminder']);
-        }
-        if (classMinutes is int) {
-          await Storage.saveClassReminderMinutes(classMinutes);
-        }
-        if (reminder != null) await Storage.saveReminders(reminder);
-        if (s['jwConfig'] is String) {
-          await Storage.saveJwConfigRaw(s['jwConfig']);
-        }
-      }
-    });
+        if (noteApply != null) await noteApply();
+      },
+      noteRollbackVersion: noteRollbackVersion,
+      rollbackNotes: rollbackNotes,
+    );
 
     // 汇总用「实际导入」条数：按文件原始条数虚报会掩盖坏条目被跳过
     final parts = <String>[

@@ -1,6 +1,6 @@
 /// 首页：作业列表。倒计时按紧迫度分级着色（红→橙→琥珀→灰），已完成绿色；
 /// 各样式保留自己的分组标题。视图：按时间分段（默认）/ 按课程分组；
-/// 支持搜索、学期范围切换、左滑隐藏。
+/// 支持搜索、状态筛选与列表滑动切换；删除或隐藏通过长按操作。
 library;
 
 import 'package:flutter/material.dart';
@@ -40,9 +40,19 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
+  static const _filters = ['todo', 'submitted', 'done', 'all'];
   String _filter = 'todo';
   bool _todayOnly = false;
+  final _filterScroll = ScrollController();
+  final _filterViewportKey = GlobalKey();
+  final _filterKeys = {for (final value in _filters) value: GlobalKey()};
+  late final AnimationController _filterTransition;
+  late final CurvedAnimation _filterCurve;
+  late final Animation<double> _filterOpacity;
+  late Animation<Offset> _filterSlide;
+  double _horizontalDrag = 0;
 
   /// 'time' 按截止时间分段；'course' 按课程分组
   String _sort = 'time';
@@ -59,11 +69,23 @@ class _HomePageState extends State<HomePage> {
 
   /// 正在撕的作业（防重复触发）
   final Set<String> _tearing = {};
-  final Map<String, int> _dismissVersions = {};
-
   @override
   void initState() {
     super.initState();
+    _filterTransition = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+      value: 1,
+    );
+    _filterCurve = CurvedAnimation(
+      parent: _filterTransition,
+      curve: Curves.easeOutCubic,
+    );
+    _filterOpacity = Tween<double>(begin: .72, end: 1).animate(_filterCurve);
+    _filterSlide = Tween<Offset>(
+      begin: Offset.zero,
+      end: Offset.zero,
+    ).animate(_filterCurve);
     _sort = Storage.sortMode();
     _searchCtrl.addListener(
       () => setState(() => _query = _searchCtrl.text.trim()),
@@ -77,8 +99,90 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     _clock?.cancel();
     _searchCtrl.dispose();
+    _filterScroll.dispose();
+    _filterCurve.dispose();
+    _filterTransition.dispose();
     super.dispose();
   }
+
+  void _selectFilter(String value, {bool todayOnly = false}) {
+    if (_filter == value && _todayOnly == todayOnly) return;
+    final direction = _filters.indexOf(value) - _filters.indexOf(_filter);
+    setState(() {
+      _filter = value;
+      _todayOnly = todayOnly;
+      _filterSlide = Tween<Offset>(
+        begin: Offset(direction >= 0 ? -.035 : .035, 0),
+        end: Offset.zero,
+      ).animate(_filterCurve);
+    });
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _filterTransition.value = 1;
+    } else {
+      _filterTransition.forward(from: 0);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealFilter(value));
+  }
+
+  void _revealFilter(String value) {
+    if (!mounted || !_filterScroll.hasClients || _filter != value) return;
+    final viewport = _filterViewportKey.currentContext?.findRenderObject();
+    final selected = _filterKeys[value]?.currentContext?.findRenderObject();
+    if (viewport is! RenderBox ||
+        selected is! RenderBox ||
+        !viewport.hasSize ||
+        !selected.hasSize) {
+      return;
+    }
+    final left = viewport.globalToLocal(selected.localToGlobal(Offset.zero)).dx;
+    final right = left + selected.size.width;
+    final adjustment = left < 8
+        ? left - 8
+        : right > viewport.size.width - 8
+        ? right - viewport.size.width + 8
+        : 0.0;
+    if (adjustment == 0) return;
+    final position = _filterScroll.position;
+    final target = (position.pixels + adjustment).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _filterScroll.jumpTo(target);
+    } else {
+      _filterScroll.animateTo(
+        target,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  Widget _swipeFilterArea(Widget child) => GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onHorizontalDragStart: (_) => _horizontalDrag = 0,
+    onHorizontalDragUpdate: (details) => _horizontalDrag += details.delta.dx,
+    onHorizontalDragEnd: (details) {
+      final distance = _horizontalDrag;
+      final velocity = details.primaryVelocity ?? 0;
+      if (distance.abs() < 48 &&
+          (distance.abs() < 16 || velocity.abs() < 600)) {
+        return;
+      }
+      final direction = distance > 0 ? 1 : -1;
+      final next = (_filters.indexOf(_filter) + direction).clamp(
+        0,
+        _filters.length - 1,
+      );
+      _selectFilter(_filters[next]);
+    },
+    child: child,
+  );
+
+  Widget _animateFilterContent(Widget child) => FadeTransition(
+    opacity: _filterOpacity,
+    child: SlideTransition(position: _filterSlide, child: child),
+  );
 
   bool _isDone(HomeworkItem hw) => hwIsDone(hw);
   bool _isOverdue(HomeworkItem hw) => hwIsOverdue(hw);
@@ -366,19 +470,15 @@ class _HomePageState extends State<HomePage> {
       pending: pending.length,
       today: today,
       todaySelected: _todayOnly,
-      onPendingTap: () => setState(() {
-        _todayOnly = false;
-        _filter = 'todo';
-      }),
-      onTodayTap: () => setState(() {
-        _todayOnly = !_todayOnly;
-        _filter = 'todo';
-      }),
+      onPendingTap: () => _selectFilter('todo'),
+      onTodayTap: () => _selectFilter('todo', todayOnly: !_todayOnly),
     );
   }
 
   Widget _buildFilters() {
     final filters = SingleChildScrollView(
+      key: _filterViewportKey,
+      controller: _filterScroll,
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.fromLTRB(20, 4, 0, 4),
       child: Row(
@@ -409,7 +509,10 @@ class _HomePageState extends State<HomePage> {
     return Semantics(
       button: true,
       selected: selected,
-      child: Container(
+      child: AnimatedContainer(
+        key: _filterKeys[value],
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
         margin: const EdgeInsets.only(right: 12),
         decoration: BoxDecoration(
           border: Border(
@@ -420,10 +523,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         child: TextButton(
-          onPressed: () => setState(() {
-            _filter = value;
-            _todayOnly = false;
-          }),
+          onPressed: () => _selectFilter(value),
           style: TextButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
             foregroundColor: selected ? p.ink : p.ink2,
@@ -497,24 +597,28 @@ class _HomePageState extends State<HomePage> {
     if (filtered.isEmpty) {
       return SliverFillRemaining(
         hasScrollBody: false,
-        child: _empty(
-          icon: state.syncing
-              ? Icons.hourglass_top_rounded
-              : _query.isNotEmpty
-              ? Icons.search_off_rounded
-              : Icons.task_alt_rounded,
-          title: state.syncing
-              ? '正在同步…'
-              : _query.isNotEmpty
-              ? '没有匹配「$_query」的作业'
-              : _todayOnly
-              ? '今天没有待完成的截止作业'
-              : '这里空空的',
-          subtitle: state.syncing
-              ? '第一次同步要拉取全部课程，稍等片刻'
-              : _query.isEmpty
-              ? (_todayOnly ? '点待完成数量或任意状态标签，查看其他作业' : '点 + 可以手动添加作业')
-              : null,
+        child: _swipeFilterArea(
+          _animateFilterContent(
+            _empty(
+              icon: state.syncing
+                  ? Icons.hourglass_top_rounded
+                  : _query.isNotEmpty
+                  ? Icons.search_off_rounded
+                  : Icons.task_alt_rounded,
+              title: state.syncing
+                  ? '正在同步…'
+                  : _query.isNotEmpty
+                  ? '没有匹配「$_query」的作业'
+                  : _todayOnly
+                  ? '今天没有待完成的截止作业'
+                  : '这里空空的',
+              subtitle: state.syncing
+                  ? '第一次同步要拉取全部课程，稍等片刻'
+                  : _query.isEmpty
+                  ? (_todayOnly ? '点待完成数量或任意状态标签，查看其他作业' : '点 + 可以手动添加作业')
+                  : null,
+            ),
+          ),
         ),
       );
     }
@@ -572,19 +676,23 @@ class _HomePageState extends State<HomePage> {
         (context, i) => Padding(
           key: ValueKey('home-row-${rows[i].id}'),
           padding: EdgeInsets.only(bottom: priority ? 0 : 10),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (priority)
-                Divider(
-                  height: 1,
-                  thickness: .5,
-                  indent: 15,
-                  endIndent: 15,
-                  color: paletteOf(context).onAccent.withValues(alpha: .12),
-                ),
-              _hwRow(rows[i], priority: priority, showCourse: showCourse),
-            ],
+          child: _swipeFilterArea(
+            _animateFilterContent(
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (priority)
+                    Divider(
+                      height: 1,
+                      thickness: .5,
+                      indent: 15,
+                      endIndent: 15,
+                      color: paletteOf(context).onAccent.withValues(alpha: .12),
+                    ),
+                  _hwRow(rows[i], priority: priority, showCourse: showCourse),
+                ],
+              ),
+            ),
           ),
         ),
         childCount: rows.length,
@@ -598,10 +706,7 @@ class _HomePageState extends State<HomePage> {
     final header = Tooltip(
       message: '今天截止 $count 项',
       child: InkWell(
-        onTap: () => setState(() {
-          _todayOnly = !_todayOnly;
-          _filter = 'todo';
-        }),
+        onTap: () => _selectFilter('todo', todayOnly: !_todayOnly),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(15, 12, 15, 10),
           child: Row(
@@ -666,7 +771,11 @@ class _HomePageState extends State<HomePage> {
         decoration: workbenchDecoration(context, accent: true),
         sliver: SliverMainAxisGroup(
           slivers: [
-            SliverToBoxAdapter(child: _todayHeader(urgent.length)),
+            SliverToBoxAdapter(
+              child: _swipeFilterArea(
+                _animateFilterContent(_todayHeader(urgent.length)),
+              ),
+            ),
             _lazyRows(urgent, priority: true),
           ],
         ),
@@ -691,15 +800,19 @@ class _HomePageState extends State<HomePage> {
           for (final group in groups)
             if (group.$2.isNotEmpty) ...[
               SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 12, bottom: 10),
-                  child: courseHeaders
-                      ? _groupHeader(
-                          group.$1,
-                          group.$2.length,
-                          group.$2.where((h) => !_isDone(h)).length,
-                        )
-                      : _sectionHeader(group.$1, group.$2.length),
+                child: _swipeFilterArea(
+                  _animateFilterContent(
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12, bottom: 10),
+                      child: courseHeaders
+                          ? _groupHeader(
+                              group.$1,
+                              group.$2.length,
+                              group.$2.where((h) => !_isDone(h)).length,
+                            )
+                          : _sectionHeader(group.$1, group.$2.length),
+                    ),
+                  ),
                 ),
               ),
               _lazyRows(group.$2, showCourse: !courseHeaders),
@@ -778,25 +891,7 @@ class _HomePageState extends State<HomePage> {
     return GestureDetector(
       onTap: () => _openHw(hw),
       onLongPress: () => _openHwOptions(hw),
-      child: Dismissible(
-        key: ValueKey((hw.id, _dismissVersions[hw.id] ?? 0)),
-        direction: DismissDirection.endToStart,
-        background: Container(
-          alignment: Alignment.centerRight,
-          padding: const EdgeInsets.only(right: 22),
-          decoration: BoxDecoration(
-            color: Tokens.danger,
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: const Icon(
-            Icons.delete_outline_rounded,
-            color: Colors.white,
-            size: 24,
-          ),
-        ),
-        onDismissed: (_) => _dismissHw(hw),
-        child: card,
-      ),
+      child: card,
     );
   }
 
@@ -1060,9 +1155,7 @@ class _HomePageState extends State<HomePage> {
       showManualHomeworkEditor(context, widget.state, edit: edit);
 
   Future<void> _dismissHw(HomeworkItem hw) async {
-    // A failed save can restore the row in the same frame. Its old swipe/tear
-    // animation has finished and cannot be reused for the restored card.
-    _dismissVersions[hw.id] = (_dismissVersions[hw.id] ?? 0) + 1;
+    // A finished receipt tear cannot be reused if saving fails.
     _tearKeys.remove(hw.id);
     try {
       await widget.state.dismissHomework(hw);

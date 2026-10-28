@@ -29,6 +29,7 @@ import 'jw_text_import_page.dart';
 import 'jw_xls_import_page.dart';
 import 'timetable_import_confirmation.dart';
 import 'zf_login_page.dart';
+import 'study_notes_page.dart';
 
 Color _brand(BuildContext c) => Tokens.brandOf(c);
 
@@ -1115,6 +1116,37 @@ class _TimetablePageState extends State<TimetablePage> {
                 _sheetRow(dc, Icons.person_outline_rounded, '教师', c.teacher),
                 _sheetRow(dc, Icons.date_range_outlined, '周次', c.weeksText),
                 const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(dc).pop();
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => StudyNotesPage(
+                            course: c.name,
+                            courseTeacher: c.teacher,
+                            courseAnchor:
+                                widget.state.courses
+                                        .where(
+                                          (other) =>
+                                              other.name == c.name &&
+                                              other.teacher == c.teacher,
+                                        )
+                                        .map((other) => other.id)
+                                        .toSet()
+                                        .length >
+                                    1
+                                ? c.id
+                                : null,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.menu_book_outlined, size: 18),
+                    label: const Text('查看课程笔记'),
+                  ),
+                ),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton.icon(

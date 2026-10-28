@@ -402,7 +402,7 @@ class SettingsPage extends StatelessWidget {
   List<Widget> _dataSettings(BuildContext context) => [
     SettingsSection(
       title: '备份与恢复',
-      footer: '备份包含作业、课表、作息和隐藏记录，不包含账号登录信息。',
+      footer: '完整备份包含作业、课表、笔记、历史版本、图片、笔迹与卡片，不包含账号登录信息。单张图片及备份文字清单上限各为 64 MB，备份文件上限 256 MB。请另存备份，避免卸载或设备丢失后无法恢复。',
       children: [
         SettingsRow(
           icon: Icons.file_upload_outlined,
@@ -423,7 +423,7 @@ class SettingsPage extends StatelessWidget {
         SettingsRow(
           icon: Icons.restore_outlined,
           title: '本地恢复',
-          subtitle: '历史备份与已删除的手动作业',
+          subtitle: '作业与课表的历史备份；笔记历史在笔记页面',
           navigation: true,
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(
@@ -554,16 +554,44 @@ class SettingsPage extends StatelessWidget {
 
   Future<void> _exportBackup(BuildContext context) async {
     try {
-      final bytes = Uint8List.fromList(utf8.encode(BackupService.encode()));
+      Uint8List bytes;
+      var currentOnly = false;
+      try {
+        bytes = await BackupService.exportBundle();
+      } catch (_) {
+        if (!context.mounted) return;
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (dc) => AlertDialog(
+            title: const Text('完整备份未能完成'),
+            content: const Text(
+              '历史版本可能无法读取或超出备份大小限制。可尝试仅导出当前数据，该文件不包含笔记历史版本；请保留设备中的旧数据。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dc, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dc, true),
+                child: const Text('仅导出当前数据'),
+              ),
+            ],
+          ),
+        );
+        if (proceed != true) return;
+        bytes = await BackupService.exportBundle(includeHistory: false);
+        currentOnly = true;
+      }
       final now = DateTime.now();
       final name =
           'homework_radar_'
           '${now.year}${now.month.toString().padLeft(2, '0')}'
-          '${now.day.toString().padLeft(2, '0')}.json';
+          '${now.day.toString().padLeft(2, '0')}${currentOnly ? '_current_only' : ''}.hwbackup';
       final path = await FilePicker.saveFile(
         fileName: name,
         bytes: bytes,
-        mimeType: 'application/json',
+        mimeType: 'application/octet-stream',
       );
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -579,14 +607,24 @@ class SettingsPage extends StatelessWidget {
   Future<void> _importBackup(BuildContext context, AppState state) async {
     try {
       final files = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
+        // Mobile systems do not register the private .hwbackup extension.
+        // Filter by validated file contents after selection instead.
+        type: FileType.any,
       );
       final path = files.isEmpty ? null : files.single.path;
       if (path == null || !context.mounted) return;
-      final raw = await File(path).readAsString();
+      final file = File(path);
+      if (await file.length() > 256 * 1024 * 1024) {
+        throw const FormatException('备份文件过大');
+      }
+      final bytes = await file.readAsBytes();
       if (!context.mounted) return;
-      await openBackupRestore(context, state, raw);
+      if (bytes.length >= 8 &&
+          ascii.decode(bytes.sublist(0, 8), allowInvalid: true) == 'HWRNBK01') {
+        await openCompleteBackupRestore(context, state, bytes);
+      } else {
+        await openBackupRestore(context, state, utf8.decode(bytes));
+      }
     } on FormatException catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)

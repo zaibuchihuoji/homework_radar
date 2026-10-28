@@ -93,38 +93,39 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets(
-    'a failed swipe restores its card without a dismissed-widget exception',
-    (tester) async {
-      await tester.runAsync(() async {
-        await Storage.saveHomework([
-          HomeworkItem(
-            id: 'manual_swipe',
-            platform: PlatformKind.manual,
-            course: '数学',
-            title: '隐藏失败还要看得见',
-            status: HwStatus.todo,
-          ),
-        ]);
-        await state.loadLocal();
-      });
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: buildTheme(Brightness.light, ThemeStyle.clean),
-          home: HomePage(state: state, onGoAccounts: () {}),
+  testWidgets('a failed long-press hide keeps the platform homework visible', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      await Storage.saveHomework([
+        HomeworkItem(
+          id: 'manual_swipe',
+          platform: PlatformKind.chaoxing,
+          course: '数学',
+          title: '隐藏失败还要看得见',
+          status: HwStatus.todo,
         ),
-      );
-      await tester.pumpAndSettle();
-      store.failKey = 'flutter.dismissed_ids';
-      store.failOnce = true;
-      await tester.drag(find.byType(Dismissible), const Offset(-700, 0));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(find.text('隐藏失败还要看得见'), findsOneWidget);
-      expect(Storage.dismissedIds(), isEmpty);
-      await tester.pumpWidget(const SizedBox());
-    },
-  );
+      ]);
+      await state.loadLocal();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildTheme(Brightness.light, ThemeStyle.clean),
+        home: HomePage(state: state, onGoAccounts: () {}),
+      ),
+    );
+    await tester.pumpAndSettle();
+    store.failKey = 'flutter.dismissed_ids';
+    store.failOnce = true;
+    await tester.longPress(find.text('隐藏失败还要看得见'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('隐藏这条作业'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('隐藏失败还要看得见'), findsOneWidget);
+    expect(Storage.dismissedIds(), isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets('failed add retains the form and supports one successful retry', (
     tester,
   ) async {

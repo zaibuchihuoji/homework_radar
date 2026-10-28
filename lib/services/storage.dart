@@ -11,6 +11,7 @@ import '../models/homework.dart';
 import 'secure_store.dart';
 import 'safe_http.dart';
 import 'sync_policy.dart';
+import 'study_note_store.dart';
 
 class ReminderSettings {
   ReminderSettings({
@@ -177,7 +178,12 @@ class Storage {
   static Future<T> businessTransaction<T>(
     Future<T> Function() action, {
     bool credentials = false,
+    String? noteRollbackVersion,
+    Future<void> Function()? rollbackNotes,
   }) {
+    if ((noteRollbackVersion == null) != (rollbackNotes == null)) {
+      throw ArgumentError('笔记恢复版本与回滚操作必须同时提供');
+    }
     invalidateSync();
     final task = (_transactionTail ?? Future<void>.value()).then((_) async {
       if (_recoveryPending || _sp.containsKey('business_transaction')) {
@@ -189,7 +195,11 @@ class Storage {
       try {
         await _setString(
           'business_transaction',
-          jsonEncode({...before, '_credentials': credentials}),
+          jsonEncode({
+            ...before,
+            '_credentials': credentials,
+            '_notesRollbackVersion': ?noteRollbackVersion,
+          }),
         );
       } catch (_) {
         // SharedPreferences updates its cache before the platform write. A
@@ -219,6 +229,7 @@ class Storage {
         return value;
       } catch (_) {
         await _restorePreferences(before);
+        if (rollbackNotes != null) await rollbackNotes();
         if (credentials) await SecureStore.finishTransaction(rollback: true);
         await _remove('business_transaction');
         _recoveryPending = false;
@@ -410,11 +421,30 @@ class Storage {
     if (journal != null) {
       _recoveryPending = true;
       final before = Map<String, dynamic>.from(jsonDecode(journal) as Map);
-      await _restorePreferences(before);
-      if (before['_credentials'] == true) {
-        await SecureStore.finishTransaction(rollback: true);
+      if (before.containsKey('_notesRollbackVersion')) {
+        final notes = await StudyNoteStore.openDefault();
+        await notes.withRecoveryLock((restore) async {
+          // A live importer may have completed while we waited for its lock.
+          await _sp.reload();
+          final current = _sp.getString('business_transaction');
+          if (current == null) return;
+          if (current != journal) throw StateError('数据事务已变化，请重新启动');
+          final version = before['_notesRollbackVersion'];
+          if (version is! String) throw StateError('笔记恢复日志损坏');
+          await _restorePreferences(before);
+          await restore(version);
+          if (before['_credentials'] == true) {
+            await SecureStore.finishTransaction(rollback: true);
+          }
+          await _remove('business_transaction');
+        });
+      } else {
+        await _restorePreferences(before);
+        if (before['_credentials'] == true) {
+          await SecureStore.finishTransaction(rollback: true);
+        }
+        await _remove('business_transaction');
       }
-      await _remove('business_transaction');
     }
     _recoveryPending = false;
     _localDataReadyForRecovery = true;

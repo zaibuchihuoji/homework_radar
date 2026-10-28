@@ -9,7 +9,7 @@ void main() {
     for (final brightness in Brightness.values) {
       for (final scale in [1.0, 1.6]) {
         testWidgets(
-          '${style.name}/${brightness.name}/$scale: compact selection keeps five usable tabs',
+          '${style.name}/${brightness.name}/$scale: compact selection keeps every tab usable',
           (tester) async {
             tester.view.physicalSize = const Size(320, 740);
             tester.view.devicePixelRatio = 1;
@@ -33,7 +33,7 @@ void main() {
                 ),
               ),
             );
-            for (var i = 0; i < 5; i++) {
+            for (var i = 0; i < ThemedNavigationBar.labels.length; i++) {
               await tester.tap(find.text(ThemedNavigationBar.labels[i]));
               await tester.pumpAndSettle();
               expect(selected, i);

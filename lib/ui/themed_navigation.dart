@@ -16,13 +16,14 @@ class ThemedNavigationBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
-  static const labels = ['作业', '课表', '日历', '账号', '设置'];
+  static const labels = ['作业', '课表', '日历', '账号', '设置', '笔记'];
   static const icons = <(IconData, IconData)>[
     (Icons.assignment_outlined, Icons.assignment_rounded),
     (Icons.grid_view_outlined, Icons.grid_view_rounded),
     (Icons.calendar_month_outlined, Icons.calendar_month_rounded),
     (Icons.person_outline, Icons.person_rounded),
     (Icons.settings_outlined, Icons.settings_rounded),
+    (Icons.menu_book_outlined, Icons.menu_book_rounded),
   ];
 
   @override
@@ -201,31 +202,36 @@ class ThemedNavigationBar extends StatelessWidget {
                                   ),
                                 ),
                                 const SizedBox(height: 3),
-                                Text(
-                                  labels[i],
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontFamily:
-                                        pal.terminal || pal.receipt || pal.pixel
-                                        ? 'monospace'
-                                        : pal.paper
-                                        ? 'serif'
-                                        : null,
-                                    fontWeight:
-                                        i == selectedIndex ||
-                                            pal.comic ||
-                                            pal.editorial
-                                        ? FontWeight.w700
-                                        : FontWeight.w400,
-                                    color: i == selectedIndex
-                                        ? pal.accent
-                                        : pal.ink2,
-                                    decoration:
-                                        i == selectedIndex &&
-                                            (pal.receipt || pal.journal)
-                                        ? TextDecoration.underline
-                                        : null,
-                                    decorationColor: pal.accent,
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    labels[i],
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontFamily:
+                                          pal.terminal ||
+                                              pal.receipt ||
+                                              pal.pixel
+                                          ? 'monospace'
+                                          : pal.paper
+                                          ? 'serif'
+                                          : null,
+                                      fontWeight:
+                                          i == selectedIndex ||
+                                              pal.comic ||
+                                              pal.editorial
+                                          ? FontWeight.w700
+                                          : FontWeight.w400,
+                                      color: i == selectedIndex
+                                          ? pal.accent
+                                          : pal.ink2,
+                                      decoration:
+                                          i == selectedIndex &&
+                                              (pal.receipt || pal.journal)
+                                          ? TextDecoration.underline
+                                          : null,
+                                      decorationColor: pal.accent,
+                                    ),
                                   ),
                                 ),
                               ],

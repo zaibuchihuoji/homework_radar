@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -27,6 +26,7 @@ class StartupRecoveryApp extends StatefulWidget {
 }
 
 class _StartupRecoveryAppState extends State<StartupRecoveryApp> {
+  final _navigatorKey = GlobalKey<NavigatorState>();
   bool _busy = false;
   String? _message;
 
@@ -54,14 +54,51 @@ class _StartupRecoveryAppState extends State<StartupRecoveryApp> {
         throw StateError('本地事务尚未恢复');
       }
       await Storage.waitForBusinessTransaction();
-      final bytes = Uint8List.fromList(utf8.encode(BackupService.encode()));
+      Uint8List bytes;
+      var currentOnly = false;
+      try {
+        bytes = await BackupService.exportBundle();
+      } catch (_) {
+        final dialogContext = _navigatorKey.currentContext;
+        if (!mounted || dialogContext == null || !dialogContext.mounted) return;
+        final proceed = await showDialog<bool>(
+          context: dialogContext,
+          builder: (dc) => AlertDialog(
+            title: const Text('完整备份未能完成'),
+            content: const Text(
+              '部分历史版本或附件可能无法读取，也可能超过备份大小限制。可尝试仅导出当前数据，该文件不包含笔记历史版本。请保留设备中的旧数据。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dc, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dc, true),
+                child: const Text('仅导出当前数据'),
+              ),
+            ],
+          ),
+        );
+        if (proceed != true) return;
+        bytes = await BackupService.exportBundle(includeHistory: false);
+        currentOnly = true;
+      }
       final path = await FilePicker.saveFile(
-        fileName: 'homework_radar_recovery.json',
+        fileName: currentOnly
+            ? 'homework_radar_recovery_current_only.hwbackup'
+            : 'homework_radar_recovery.hwbackup',
         bytes: bytes,
-        mimeType: 'application/json',
+        mimeType: 'application/octet-stream',
       );
       if (mounted) {
-        setState(() => _message = path == null ? '已取消导出' : '本地备份已导出');
+        setState(
+          () => _message = path == null
+              ? '已取消导出'
+              : currentOnly
+              ? '当前数据已导出，文件不含笔记历史版本'
+              : '本地完整备份已导出',
+        );
       }
     } catch (_) {
       if (mounted) setState(() => _message = '导出未完成，请稍后重试；本地数据未被修改。');
@@ -86,6 +123,7 @@ class _StartupRecoveryAppState extends State<StartupRecoveryApp> {
       }
     }
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       home: Scaffold(
         appBar: AppBar(title: const Text('恢复访问')),
         body: SafeArea(

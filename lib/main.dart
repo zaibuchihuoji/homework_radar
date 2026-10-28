@@ -16,6 +16,7 @@ import 'pages/settings_page.dart';
 import 'pages/splash_page.dart';
 import 'pages/startup_recovery_page.dart';
 import 'pages/timetable_page.dart';
+import 'pages/study_notes_page.dart';
 import 'services/notification_service.dart';
 import 'services/background_sync.dart';
 import 'services/app_update_controller.dart';
@@ -41,6 +42,17 @@ AppState? appStateForHome;
 BackgroundSync? backgroundSyncForApp;
 
 void _openDetail(String homeworkId) {
+  if (NotificationService.isStudyPayload(homeworkId)) {
+    final noteId = NotificationService.studyNoteId(homeworkId);
+    if (noteId != null) {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute<void>(
+          builder: (_) => StudyNotesPage(initialNoteId: noteId),
+        ),
+      );
+    }
+    return;
+  }
   homeworkId = NotificationService.navigationPayload(homeworkId);
   if (homeworkId.isEmpty) return;
   if (NotificationService.isClassPayload(homeworkId)) {
@@ -957,6 +969,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
             KeepAlivePage(child: CalendarPage(state: state)),
             KeepAlivePage(child: AccountsPage(state: state)),
             KeepAlivePage(child: SettingsPage(state: state)),
+            KeepAlivePage(child: StudyNotesPage(active: _selected == 5)),
           ],
         ),
         bottomNavigationBar: ThemedNavigationBar(

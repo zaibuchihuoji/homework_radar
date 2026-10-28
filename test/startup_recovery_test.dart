@@ -1,18 +1,46 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:homework_radar/main.dart' as app;
 import 'package:homework_radar/models/homework.dart';
+import 'package:homework_radar/app_state.dart';
+import 'package:homework_radar/pages/settings_page.dart';
+import 'package:homework_radar/pages/startup_recovery_page.dart';
+import 'package:homework_radar/services/storage.dart';
+import 'package:homework_radar/services/study_note_store.dart';
+import 'package:homework_radar/services/study_note_bundle.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:homework_radar/ui/tokens.dart';
 
 class _RecordingPicker extends FilePickerPlatform {
   Uint8List? saved;
+  FileType? requestedType;
+
+  @override
+  Future<List<PlatformFile>> pickFiles({
+    String? dialogTitle,
+    String? initialDirectory,
+    FileType type = FileType.any,
+    List<String>? allowedExtensions,
+    Function(FilePickerStatus)? onFileLoading,
+    int compressionQuality = 0,
+    AndroidOptions androidOptions = const AndroidOptions(),
+    DarwinOptions darwinOptions = const DarwinOptions(),
+    WindowsOptions windowsOptions = const WindowsOptions(),
+    LinuxOptions linuxOptions = const LinuxOptions(),
+    WebOptions webOptions = const WebOptions(),
+  }) async {
+    requestedType = type;
+    return [];
+  }
 
   @override
   Future<Uri?> saveFile({
@@ -31,9 +59,27 @@ class _RecordingPicker extends FilePickerPlatform {
   }
 }
 
+class _SupportPath extends PathProviderPlatform {
+  _SupportPath(this.path);
+  final String path;
+  @override
+  Future<String?> getApplicationSupportPath() async => path;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   AndroidFlutterLocalNotificationsPlugin.registerWith();
+  late Directory support;
+  late PathProviderPlatform oldProvider;
+  setUp(() async {
+    support = await Directory.systemTemp.createTemp('startup_recovery_');
+    oldProvider = PathProviderPlatform.instance;
+    PathProviderPlatform.instance = _SupportPath(support.path);
+  });
+  tearDown(() async {
+    PathProviderPlatform.instance = oldProvider;
+    await support.delete(recursive: true);
+  });
 
   testWidgets(
     'secure storage failure exposes read-only data and retry without deleting credentials',
@@ -133,9 +179,16 @@ void main() {
         (await SharedPreferences.getInstance()).getString('cx_cookie'),
         'synthetic-legacy-credential',
       );
-      await tester.tap(find.text('导出本地备份'));
-      await tester.pump();
-      final exported = utf8.decode(picker.saved!);
+      await tester.runAsync(() async {
+        await tester.tap(find.text('导出本地备份'));
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (picker.saved == null && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+      });
+      expect(picker.saved, isNotNull);
+      final exported = StudyNoteBundle.decode(picker.saved!).businessJson;
       expect(jsonDecode(exported)['homework'][0]['id'], 'manual_kept');
       expect(exported, isNot(contains('synthetic-legacy-credential')));
       await tester.tap(find.text('重试'));
@@ -153,6 +206,87 @@ void main() {
       app.backgroundSyncForApp!.dispose();
       await tester.pumpWidget(const SizedBox());
       app.appStateForHome!.dispose();
+    },
+  );
+  testWidgets('backup picker permits private backup extensions', (
+    tester,
+  ) async {
+    final previousPicker = FilePickerPlatform.instance;
+    final picker = _RecordingPicker();
+    FilePickerPlatform.instance = picker;
+    addTearDown(() => FilePickerPlatform.instance = previousPicker);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('homework_radar/platform'),
+          (_) async => null,
+        );
+    SharedPreferences.setMockInitialValues({});
+    await Storage.init();
+    final state = AppState();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: app.buildTheme(Brightness.light, ThemeStyle.clean),
+        home: SettingsPage(state: state),
+      ),
+    );
+    await tester.tap(find.text('数据管理'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('导入数据'));
+    await tester.pump();
+    expect(picker.requestedType, FileType.any);
+    await tester.pumpWidget(const SizedBox());
+    state.dispose();
+  });
+  testWidgets(
+    'recovery export labels a current-only backup when history is damaged',
+    (tester) async {
+      final previousPicker = FilePickerPlatform.instance;
+      final picker = _RecordingPicker();
+      FilePickerPlatform.instance = picker;
+      addTearDown(() => FilePickerPlatform.instance = previousPicker);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel('homework_radar/platform'),
+            (_) async => null,
+          );
+      SharedPreferences.setMockInitialValues({});
+      await Storage.init();
+      await tester.runAsync(() async {
+        final store = await StudyNoteStore.openDefault();
+        await store.saveNotes([
+          {'id': 'n', 'title': '旧版'},
+        ]);
+        final old = (await store.history()).last;
+        await store.saveNotes([
+          {'id': 'n', 'title': '当前'},
+        ]);
+        await File('${store.directory.path}${Platform.pathSeparator}$old')
+            .writeAsString('damaged');
+        await tester.pumpWidget(
+          StartupRecoveryApp(
+            retry: () async {},
+            canReadLocalData: true,
+            secureFailure: true,
+          ),
+        );
+        await tester.tap(find.text('导出本地备份'));
+        final deadline = DateTime.now().add(const Duration(seconds: 15));
+        while (find.text('仅导出当前数据').evaluate().isEmpty &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        expect(find.text('完整备份未能完成'), findsOneWidget);
+        await tester.tap(find.text('仅导出当前数据'));
+        while (picker.saved == null && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          await tester.pump(const Duration(milliseconds: 20));
+        }
+        expect(picker.saved, isNotNull);
+        final bundle = StudyNoteBundle.decode(picker.saved!);
+        expect(bundle.historyIncluded, isFalse);
+        expect(bundle.notes.single['title'], '当前');
+      });
     },
   );
 }

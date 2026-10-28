@@ -16,6 +16,8 @@ import 'class_reminder_plan.dart';
 import 'section_times.dart';
 import 'stable_hash.dart';
 import 'storage.dart';
+import 'study_note_store.dart';
+import 'study_note_reminders.dart';
 
 class ClassScheduleStatus {
   const ClassScheduleStatus({
@@ -43,6 +45,11 @@ class NotificationService {
     AndroidNotificationChannel(
       'class_reminder',
       '上课提醒',
+      importance: Importance.high,
+    ),
+    AndroidNotificationChannel(
+      'study_reminder',
+      '笔记复习提醒',
       importance: Importance.high,
     ),
   ];
@@ -94,6 +101,7 @@ class NotificationService {
   static bool? get notificationsEnabled => permission.value;
   static final scheduleError = ValueNotifier<String?>(null);
   static final classSchedule = ValueNotifier(const ClassScheduleStatus());
+  static final studySchedule = ValueNotifier<String?>(null);
   @visibleForTesting
   static DateTime Function() clock = DateTime.now;
   static const _testId = 0x7fffffff;
@@ -101,6 +109,20 @@ class NotificationService {
   static const _testPayload = 'class-reminder-test:';
   static const _homeworkPayload = 'homework-reminder:';
   static const _refreshPayload = 'reminder-refresh:';
+  static const _studyPayload = 'study-note-reminder:';
+
+  static bool isStudyPayload(String payload) =>
+      payload.startsWith(_studyPayload);
+
+  static String? studyNoteId(String payload) {
+    if (!isStudyPayload(payload)) return null;
+    try {
+      final data = jsonDecode(payload.substring(_studyPayload.length));
+      return data is Map && data['id'] is String ? data['id'] as String : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// New alarms carry their deadline so a delayed, still-pending alarm can be
   /// distinguished from one for an edited deadline. Old plain IDs still work.
@@ -304,6 +326,13 @@ class NotificationService {
     bool onlyWhenEmpty = false,
   }) async {
     await init();
+    await Storage.waitForBusinessTransaction();
+    // Never cancel existing alarms if the note store cannot be read.
+    final notes = Storage.flag('note_store_used')
+        ? await (await StudyNoteStore.openDefault()).readNotes(
+            requireInitialized: true,
+          )
+        : <Map<String, dynamic>>[];
     // 完整候选按真实触发时间共同分配预算，远期课程不能挤掉近期作业。
     final now = clock();
     final pending = await _plugin.pendingNotificationRequests();
@@ -428,6 +457,50 @@ class NotificationService {
         );
       }
     }
+    final notePlan = StudyNoteReminderPlan.build(notes, now);
+    final activeTokens = <String, String>{};
+    for (final note in notes) {
+      final reminder = note['reminder'];
+      if (note['deleted'] != true &&
+          note['id'] is String &&
+          reminder is Map &&
+          reminder['token'] is String) {
+        activeTokens[note['id'] as String] = reminder['token'] as String;
+      }
+    }
+    for (final pendingNote in pending) {
+      final payload = pendingNote.payload;
+      if (payload == null || !payload.startsWith(_studyPayload)) continue;
+      try {
+        final value = jsonDecode(payload.substring(_studyPayload.length));
+        if (value is Map &&
+            value['id'] is String &&
+            value['token'] is String &&
+            value['fire'] is int &&
+            activeTokens[value['id']] == value['token'] &&
+            (value['fire'] as int) <= now.millisecondsSinceEpoch) {
+          keptIds.add(pendingNote.id);
+        }
+      } catch (_) {
+        // Unreadable payloads cannot be safely associated with a current note.
+      }
+    }
+    for (final entry in notePlan) {
+      candidates.add(
+        _Reminder(
+          stableHash(
+                'note#${entry.noteId}#${entry.fire.millisecondsSinceEpoch}',
+              ) &
+              0x3fffffff,
+          entry.fire,
+          '复习笔记：${entry.title}',
+          '到时间回顾这篇笔记了',
+          payload:
+              '$_studyPayload${jsonEncode({'id': entry.noteId, 'token': entry.token, 'fire': entry.fire.millisecondsSinceEpoch})}',
+          isNote: true,
+        ),
+      );
+    }
     for (final p in pending) {
       if (p.id == _testId && p.payload?.startsWith(_testPayload) == true) {
         final stamp = int.tryParse(p.payload!.substring(_testPayload.length));
@@ -441,11 +514,29 @@ class NotificationService {
       }
     }
     candidates.sort((a, b) {
+      if (a.isNote != b.isNote) return a.isNote ? 1 : -1;
       final cmp = a.fire.compareTo(b.fire);
       return cmp != 0 ? cmp : a.id.compareTo(b.id);
     });
     final isIos = defaultTargetPlatform == TargetPlatform.iOS;
     DateTime? nextUnscheduled;
+    var classBeyondWindow = false;
+    if (isIos &&
+        notes.any(
+          (note) =>
+              note['deleted'] != true &&
+              note['reminder'] is Map &&
+              const [
+                'daily',
+                'weekly',
+              ].contains((note['reminder'] as Map)['repeat']),
+        )) {
+      final later = StudyNoteReminderPlan.build(
+        notes,
+        now.add(const Duration(days: 56)),
+      );
+      if (later.isNotEmpty) nextUnscheduled = later.first.fire;
+    }
     if (isIos && courses.isNotEmpty && Storage.classReminder()) {
       // The normal plan covers 56 days. Find the next occurrence beyond that
       // window so iOS can ask the user to reopen before reminders run out.
@@ -472,21 +563,37 @@ class NotificationService {
             slots: SectionTimes.current(),
           );
           if (later.entries.isNotEmpty) {
-            nextUnscheduled = later.entries.first.fire;
+            classBeyondWindow = true;
+            final nextClass = later.entries.first.fire;
+            if (nextUnscheduled == null ||
+                nextClass.isBefore(nextUnscheduled)) {
+              nextUnscheduled = nextClass;
+            }
             break;
           }
           cursor = DateTime(cursor.year, cursor.month, cursor.day + 56);
         }
       }
     }
+    final existingCount =
+        candidates.where((item) => !item.isNote).length + keptIds.length;
+    // A new note must not take the final iOS slot from an existing homework
+    // or class reminder merely to install a refresh prompt.
     final needsRefreshSlot =
         isIos &&
-        (nextUnscheduled != null || candidates.length + keptIds.length > 64);
+        (classBeyondWindow ||
+            existingCount > 64 ||
+            (existingCount < 64 &&
+                (nextUnscheduled != null ||
+                    candidates.length + keptIds.length > 64)));
     final budget = isIos ? (needsRefreshSlot ? 63 : 64) : 500;
     var homeworkCount = keptHomework,
         classCount = keptClasses.length,
         total = keptIds.length,
-        failed = 0;
+        failed = 0,
+        skippedNotes = 0,
+        failedNotes = 0,
+        scheduledNotes = 0;
     if (!onlyWhenEmpty) {
       if (keptIds.isEmpty) {
         await _plugin.cancelAllPendingNotifications();
@@ -501,7 +608,9 @@ class NotificationService {
     var actualExact = exact;
     for (final item in candidates) {
       if (total >= budget ||
-          (item.isClass ? classCount >= 400 : homeworkCount >= 100)) {
+          (!item.isNote &&
+              (item.isClass ? classCount >= 400 : homeworkCount >= 100))) {
+        if (item.isNote) skippedNotes++;
         if (isIos &&
             (nextUnscheduled == null || item.fire.isBefore(nextUnscheduled))) {
           nextUnscheduled = item.fire;
@@ -523,7 +632,9 @@ class NotificationService {
           actualExact = false;
         }
         total++;
-        if (item.isClass) {
+        if (item.isNote) {
+          scheduledNotes++;
+        } else if (item.isClass) {
           classCount++;
           scheduledClasses.add(item.entry!);
         } else {
@@ -531,6 +642,7 @@ class NotificationService {
         }
       } catch (_) {
         failed++;
+        if (item.isNote) failedNotes++;
       }
     }
     if (isIos && nextUnscheduled != null && total < 64) {
@@ -557,6 +669,13 @@ class NotificationService {
     }
     scheduledClasses.sort((a, b) => a.fire.compareTo(b.fire));
     scheduleError.value = failed == 0 ? null : '$failed 条提醒排期失败，请检查系统通知设置后重试';
+    studySchedule.value = notePlan.isEmpty
+        ? null
+        : failedNotes > 0
+        ? '已安排 $scheduledNotes 条复习提醒，$failedNotes 条排期失败，请检查系统通知设置。'
+        : skippedNotes > 0
+        ? '已安排 $scheduledNotes 条复习提醒；有 $skippedNotes 条因系统数量限制未安排，请重新打开应用。'
+        : '已安排 $scheduledNotes 条复习提醒，实际送达时间受系统控制。';
     classSchedule.value = ClassScheduleStatus(
       next: scheduledClasses.firstOrNull,
       scheduledCount: classCount,
@@ -579,8 +698,16 @@ class NotificationService {
       tz.TZDateTime.from(item.fire, tz.local),
       NotificationDetails(
         android: AndroidNotificationDetails(
-          item.isClass ? 'class_reminder' : 'homework_due',
-          item.isClass ? '上课提醒' : '作业截止提醒',
+          item.isNote
+              ? 'study_reminder'
+              : item.isClass
+              ? 'class_reminder'
+              : 'homework_due',
+          item.isNote
+              ? '笔记复习提醒'
+              : item.isClass
+              ? '上课提醒'
+              : '作业截止提醒',
           importance: Importance.high,
           priority: Priority.high,
           styleInformation: BigTextStyleInformation(item.body),
@@ -643,6 +770,7 @@ class _Reminder {
     this.body, {
     this.payload,
     this.isClass = false,
+    this.isNote = false,
     this.lesson,
     this.entry,
   });
@@ -652,6 +780,7 @@ class _Reminder {
   final String body;
   final String? payload;
   final bool isClass;
+  final bool isNote;
   final DateTime? lesson;
   final ClassReminderEntry? entry;
   _Reminder withId(int value) => _Reminder(
@@ -661,6 +790,7 @@ class _Reminder {
     body,
     payload: payload,
     isClass: isClass,
+    isNote: isNote,
     lesson: lesson,
     entry: entry,
   );

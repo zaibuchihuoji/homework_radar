@@ -800,9 +800,7 @@ class AppState extends ChangeNotifier {
   /// 手动隐藏某条作业（老师撤回、不需要提交等场景）。
   Future<void> dismissHomework(HomeworkItem hw) async {
     await Storage.waitForBusinessTransaction();
-    // Dismissible 契约要求 onDismissed 当帧从树上移除：先改内存并通知，
-    // 再做落盘与提醒重排——此前两次 prefs 平台通道写在移除之前，
-    // 留了断言/回弹窗口
+    // 先从界面移除，再持久化；写入失败时从磁盘恢复并通知界面。
     homework = homework.where((h) => h.id != hw.id).toList();
     notifyListeners();
     try {

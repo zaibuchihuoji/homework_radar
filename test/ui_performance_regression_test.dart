@@ -68,8 +68,16 @@ void main() {
         ),
       );
       await t.pumpAndSettle();
-      final built = find.byType(Dismissible).evaluate().length;
+      final built = find
+          .byWidgetPredicate(
+            (widget) =>
+                widget.key is ValueKey<String> &&
+                (widget.key! as ValueKey<String>).value.startsWith('home-row-'),
+          )
+          .evaluate()
+          .length;
       debugPrint('$mode rows built on first screen: $built / 300');
+      expect(built, greaterThan(0));
       expect(built, lessThan(25));
       await t.scrollUntilVisible(
         find.text('任务 299'),

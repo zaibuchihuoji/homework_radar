@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -5,6 +7,8 @@ import '../app_state.dart';
 import '../models/homework.dart';
 import '../services/backup_service.dart';
 import '../services/storage.dart';
+import '../services/study_note_bundle.dart';
+import '../services/study_note_store.dart';
 import '../ui/settings_parts.dart';
 
 Future<void> openBackupRestore(
@@ -22,16 +26,51 @@ Future<void> openBackupRestore(
   );
 }
 
+Future<void> openCompleteBackupRestore(
+  BuildContext context,
+  AppState state,
+  Uint8List bytes,
+) async {
+  final bundle = StudyNoteBundle.decode(bytes);
+  final preview = await BackupService.previewJson(bundle.businessJson);
+  final revision = await (await StudyNoteStore.openDefault()).revision();
+  if (!context.mounted) return;
+  await Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => BackupRestorePage(
+        state: state,
+        raw: bundle.businessJson,
+        preview: preview,
+        bundle: bytes,
+        noteCount: bundle.notes.length,
+        noteHistoryCount: bundle.history.length,
+        includesNoteHistory: bundle.historyIncluded,
+        noteRevision: revision,
+      ),
+    ),
+  );
+}
+
 class BackupRestorePage extends StatefulWidget {
   const BackupRestorePage({
     super.key,
     required this.state,
     required this.raw,
     required this.preview,
+    this.bundle,
+    this.noteCount,
+    this.noteHistoryCount,
+    this.includesNoteHistory = false,
+    this.noteRevision,
   });
   final AppState state;
   final String raw;
   final BackupPreview preview;
+  final Uint8List? bundle;
+  final int? noteCount;
+  final int? noteHistoryCount;
+  final bool includesNoteHistory;
+  final String? noteRevision;
   @override
   State<BackupRestorePage> createState() => _BackupRestorePageState();
 }
@@ -55,6 +94,10 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
         content: Text(
           [
             ...clearNotes,
+            if (widget.bundle != null)
+              '笔记将恢复为备份中的 ${widget.noteCount} 条，当前笔记的历史版本会保留。'
+            else
+              '旧版备份不包含笔记，当前笔记会保留。',
             '会先保存当前数据的本地备份，再恢复预览中的内容。账号登录不变；已登录平台的备份作业放入只读归档。',
           ].join('\n'),
         ),
@@ -79,7 +122,12 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
     setState(() => _busy = true);
     var committed = false;
     try {
-      var message = await BackupService.importJson(widget.raw);
+      var message = widget.bundle == null
+          ? await BackupService.importJson(widget.raw)
+          : await BackupService.importBundle(
+              widget.bundle!,
+              expectedNoteRevision: widget.noteRevision,
+            );
       committed = true;
       try {
         await widget.state.reloadLocal();
@@ -139,6 +187,18 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                     title: '作业 ${p.items.length} 项 · 课程 ${p.courses.length} 节',
                     subtitle: '隐藏记录 ${p.hiddenCount} 项 · 回收站 ${p.trashCount} 项',
                   ),
+                  if (widget.noteCount != null)
+                    SettingsRow(
+                      icon: Icons.menu_book_outlined,
+                      title: '笔记 ${widget.noteCount} 条',
+                      subtitle:
+                          '${widget.includesNoteHistory ? '历史版本 ${widget.noteHistoryCount ?? 0} 份' : '不含笔记历史版本'} · 包含图片原件、笔迹和自测卡片',
+                    )
+                  else
+                    const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: SettingsNote('旧版备份不含笔记；恢复时会保留当前笔记。'),
+                    ),
                   if (p.exportedAt != null)
                     Padding(
                       padding: const EdgeInsets.all(16),
