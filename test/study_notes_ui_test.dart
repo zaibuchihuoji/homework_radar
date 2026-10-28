@@ -29,7 +29,18 @@ void main() {
   setUp(
     () async => directory = await Directory.systemTemp.createTemp('notes_ui_'),
   );
-  tearDown(() async => directory.delete(recursive: true));
+  tearDown(() async {
+    final root = await Directory.systemTemp.resolveSymbolicLinks();
+    final target = await directory.resolveSymbolicLinks();
+    if (!target.toLowerCase().startsWith(
+      '${root.toLowerCase()}${Platform.pathSeparator}',
+    )) {
+      throw StateError(
+        'Refusing to remove a test directory outside the temp root',
+      );
+    }
+    await directory.delete(recursive: true);
+  });
   testWidgets('create and save a note', (tester) async {
     final store = StudyNoteStore(directory);
     await tester.runAsync(() async {

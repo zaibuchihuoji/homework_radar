@@ -19,21 +19,37 @@ import '../ui/focus_parts.dart';
 import 'detail_page.dart';
 
 class CalendarPage extends StatefulWidget {
-  const CalendarPage({super.key, required this.state});
+  const CalendarPage({
+    super.key,
+    required this.state,
+    this.initialDate,
+    this.showViewInList = false,
+  });
   final AppState state;
+  final DateTime? initialDate;
+  final bool showViewInList;
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
 class _CalendarPageState extends State<CalendarPage> {
-  DateTime _selected = DateTime.now();
+  late DateTime _selected;
+  CalendarFormat _format = CalendarFormat.month;
   bool _localeReady = false;
   Timer? _clock;
 
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    final initial = widget.initialDate ?? now;
+    final first = DateUtils.dateOnly(now.subtract(const Duration(days: 120)));
+    final last = DateUtils.dateOnly(now.add(const Duration(days: 400)));
+    final initialDay = DateUtils.dateOnly(initial);
+    _selected = initialDay.isBefore(first) || initialDay.isAfter(last)
+        ? now
+        : initial;
     initializeDateFormatting('zh_CN', null).then((_) {
       if (mounted) setState(() => _localeReady = true);
     });
@@ -80,6 +96,7 @@ class _CalendarPageState extends State<CalendarPage> {
       firstDay: DateTime.now().subtract(const Duration(days: 120)),
       lastDay: DateTime.now().add(const Duration(days: 400)),
       focusedDay: _selected,
+      calendarFormat: _format,
       selectedDayPredicate: (day) => isSameDay(day, _selected),
       locale: 'zh_CN',
       startingDayOfWeek: StartingDayOfWeek.monday,
@@ -155,14 +172,16 @@ class _CalendarPageState extends State<CalendarPage> {
     );
   }
 
-  void _moveMonth(int delta) {
+  void _movePeriod(int delta) {
     final first = DateUtils.dateOnly(
       DateTime.now().subtract(const Duration(days: 120)),
     );
     final last = DateUtils.dateOnly(
       DateTime.now().add(const Duration(days: 400)),
     );
-    var target = DateTime(_selected.year, _selected.month + delta, 1);
+    var target = _format == CalendarFormat.week
+        ? _selected.add(Duration(days: 7 * delta))
+        : DateTime(_selected.year, _selected.month + delta, 1);
     if (target.isBefore(first)) target = first;
     if (target.isAfter(last)) target = last;
     setState(() => _selected = target);
@@ -179,6 +198,7 @@ class _CalendarPageState extends State<CalendarPage> {
     final first = DateTime.now().subtract(const Duration(days: 120));
     final last = DateTime.now().add(const Duration(days: 400));
     final selectedMonth = DateTime(_selected.year, _selected.month);
+    final selectedDay = DateUtils.dateOnly(_selected);
     return StyleBackground(
       child: Scaffold(
         backgroundColor: scaffoldBgOf(context),
@@ -187,6 +207,17 @@ class _CalendarPageState extends State<CalendarPage> {
           titleSpacing: 20,
           title: appBarTitle(context, '作业日历', root: true),
           actions: [
+            Tooltip(
+              message: _format == CalendarFormat.month ? '切换到周视图' : '切换到月视图',
+              child: TextButton(
+                onPressed: () => setState(
+                  () => _format = _format == CalendarFormat.month
+                      ? CalendarFormat.week
+                      : CalendarFormat.month,
+                ),
+                child: Text(_format == CalendarFormat.month ? '周视图' : '月视图'),
+              ),
+            ),
             TextButton(
               onPressed: () => setState(() => _selected = DateTime.now()),
               child: const Tooltip(message: '返回今天', child: Text('今天')),
@@ -222,22 +253,26 @@ class _CalendarPageState extends State<CalendarPage> {
                         ),
                       ),
                       IconButton(
-                        tooltip: '上个月',
+                        tooltip: _format == CalendarFormat.week ? '上一周' : '上个月',
                         onPressed:
-                            selectedMonth.isAfter(
-                              DateTime(first.year, first.month),
-                            )
-                            ? () => _moveMonth(-1)
+                            (_format == CalendarFormat.week
+                                ? selectedDay.isAfter(DateUtils.dateOnly(first))
+                                : selectedMonth.isAfter(
+                                    DateTime(first.year, first.month),
+                                  ))
+                            ? () => _movePeriod(-1)
                             : null,
                         icon: const Icon(Icons.chevron_left_rounded),
                       ),
                       IconButton(
-                        tooltip: '下个月',
+                        tooltip: _format == CalendarFormat.week ? '下一周' : '下个月',
                         onPressed:
-                            selectedMonth.isBefore(
-                              DateTime(last.year, last.month),
-                            )
-                            ? () => _moveMonth(1)
+                            (_format == CalendarFormat.week
+                                ? selectedDay.isBefore(DateUtils.dateOnly(last))
+                                : selectedMonth.isBefore(
+                                    DateTime(last.year, last.month),
+                                  ))
+                            ? () => _movePeriod(1)
                             : null,
                         icon: const Icon(Icons.chevron_right_rounded),
                       ),
@@ -245,19 +280,20 @@ class _CalendarPageState extends State<CalendarPage> {
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Row(
+                    child: Wrap(
+                      spacing: 16,
+                      runSpacing: 4,
                       children: [
                         Text(
-                          '$monthCount 项截止',
+                          '${_format == CalendarFormat.week ? '本月 ' : ''}$monthCount 项截止',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: p.ink,
                           ),
                         ),
-                        const SizedBox(width: 16),
                         Text(
-                          '$days 天有安排',
+                          '${_format == CalendarFormat.week ? '本月 ' : ''}$days 天有安排',
                           style: TextStyle(fontSize: 12, color: p.ink2),
                         ),
                       ],
@@ -276,6 +312,17 @@ class _CalendarPageState extends State<CalendarPage> {
                       size: 26,
                     ),
                   ),
+                  if (widget.showViewInList)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () =>
+                            Navigator.of(context)
+                                .pop(DateUtils.dateOnly(_selected)),
+                        icon: const Icon(Icons.filter_alt_outlined, size: 18),
+                        label: const Text('在作业列表中查看'),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   Wrap(
                     spacing: 14,

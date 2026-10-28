@@ -162,7 +162,10 @@ void main() {
           (w) => w is Semantics && w.properties.label == '设置标签页',
         );
         await tester.tap(settings);
-        await tester.pumpAndSettle();
+        // The adjacent notes page may still be loading; wait only for the
+        // navigation transition instead of waiting for its spinner to stop.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
         expect(tester.widget<Semantics>(settings).properties.selected, isTrue);
         expect(find.text('外观与小组件'), findsOneWidget);
         expect(tester.takeException(), isNull);

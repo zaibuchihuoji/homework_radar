@@ -10,6 +10,7 @@ import '../services/storage.dart';
 import '../services/notification_service.dart';
 import '../ui/settings_parts.dart';
 import '../ui/focus_parts.dart';
+import '../ui/study_note_filter_picker.dart';
 import 'study_note_canvas.dart';
 import 'study_note_review.dart';
 
@@ -444,26 +445,17 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
               children: [
                 if (widget.course == null)
                   Expanded(
-                    child: PopupMenuButton<String>(
-                      initialValue: _courseFilter ?? '',
+                    child: StudyNoteFilterMenu(
+                      label: _courseFilter ?? '全部课程',
                       tooltip: '按课程筛选',
+                      allLabel: '全部课程',
+                      selected: _courseFilter,
+                      choices: courses,
+                      optionKeyPrefix: 'note-course-option',
                       onSelected: (value) => setState(() {
                         _courseFilter = value.isEmpty ? null : value;
                         _chapterFilter = null;
                       }),
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(value: '', child: Text('全部课程')),
-                        for (final course in courses)
-                          PopupMenuItem(value: course, child: Text(course)),
-                      ],
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Text(
-                          _courseFilter ?? '全部课程',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
                     ),
                   )
                 else
@@ -475,24 +467,15 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                     ),
                   ),
                 Expanded(
-                  child: PopupMenuButton<String>(
-                    initialValue: _chapterFilter ?? '',
+                  child: StudyNoteFilterMenu(
+                    label: _chapterFilter ?? '全部章节',
                     tooltip: '按章节筛选',
+                    allLabel: '全部章节',
+                    selected: _chapterFilter,
+                    choices: chapters,
+                    optionKeyPrefix: 'note-chapter-option',
                     onSelected: (value) => setState(
                       () => _chapterFilter = value.isEmpty ? null : value,
-                    ),
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(value: '', child: Text('全部章节')),
-                      for (final chapter in chapters)
-                        PopupMenuItem(value: chapter, child: Text(chapter)),
-                    ],
-                    child: Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text(
-                        _chapterFilter ?? '全部章节',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
                     ),
                   ),
                 ),

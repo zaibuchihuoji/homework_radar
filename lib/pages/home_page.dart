@@ -16,7 +16,6 @@ import '../services/stable_hash.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
 import '../ui/hw_card.dart';
-import '../ui/homework_date_bar.dart';
 import '../ui/focus_parts.dart';
 import '../ui/ink_wash.dart';
 import '../ui/receipt_tear.dart';
@@ -120,7 +119,7 @@ class _HomePageState extends State<HomePage>
       _todayOnly = todayOnly;
       if (todayOnly) _selectedDate = null;
       _filterSlide = Tween<Offset>(
-        begin: Offset(direction >= 0 ? -.035 : .035, 0),
+        begin: Offset(direction >= 0 ? .035 : -.035, 0),
         end: Offset.zero,
       ).animate(_filterCurve);
     });
@@ -177,7 +176,8 @@ class _HomePageState extends State<HomePage>
           (distance.abs() < 16 || velocity.abs() < 600)) {
         return;
       }
-      final direction = distance > 0 ? 1 : -1;
+      // Dragging the list left reveals the filter to its right, like PageView.
+      final direction = distance > 0 ? -1 : 1;
       final next = (_filters.indexOf(_filter) + direction).clamp(
         0,
         _filters.length - 1,
@@ -212,6 +212,93 @@ class _HomePageState extends State<HomePage>
         (hw.note?.toLowerCase().contains(q) ?? false);
   }
 
+  Future<void> _openCalendar() async {
+    final date = await Navigator.of(context).push<DateTime>(
+      MaterialPageRoute<DateTime>(
+        builder: (_) => CalendarPage(
+          state: widget.state,
+          initialDate: _selectedDate,
+          showViewInList: true,
+        ),
+      ),
+    );
+    if (!mounted || date == null) return;
+    final enteringDateView = _selectedDate == null;
+    setState(() {
+      _selectedDate = DateUtils.dateOnly(date);
+      _todayOnly = false;
+    });
+    if (enteringDateView) _selectFilter('all');
+  }
+
+  Widget _buildCalendarEntry() {
+    final p = paletteOf(context);
+    final square = p.pixel || p.receipt || p.terminal || p.editorial;
+    final radius = BorderRadius.circular(
+      square
+          ? 2
+          : p.morandi
+          ? 20
+          : 12,
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 2),
+      child: Material(
+        color: p.card,
+        shape: RoundedRectangleBorder(
+          borderRadius: radius,
+          side: BorderSide(
+            color: p.cardBorder,
+            width: p.pixel || p.comic ? 1.5 : 1,
+          ),
+        ),
+        child: InkWell(
+          key: const ValueKey('home-calendar-entry'),
+          onTap: _openCalendar,
+          borderRadius: radius,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.calendar_month_outlined, color: p.accent, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '作业日历',
+                    style: TextStyle(color: p.ink, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: p.ink2),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDateFilter() {
+    final date = _selectedDate!;
+    final p = paletteOf(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 12, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '正在查看 ${date.year}年${date.month}月${date.day}日',
+              style: TextStyle(color: p.ink2, fontSize: 13),
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _selectedDate = null),
+            child: const Text('清除日期'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.state,
@@ -235,27 +322,9 @@ class _HomePageState extends State<HomePage>
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
                 SliverToBoxAdapter(child: _buildHeader(state)),
-                SliverToBoxAdapter(child: _buildOverview(state)),
-                SliverToBoxAdapter(
-                  child: HomeworkDateBar(
-                    homework: state.homework,
-                    selectedDate: _selectedDate,
-                    onDateSelected: (date) {
-                      final enteringDateView =
-                          _selectedDate == null && date != null;
-                      setState(() {
-                        _selectedDate = date;
-                        _todayOnly = false;
-                      });
-                      if (enteringDateView) _selectFilter('all');
-                    },
-                    onOpenCalendar: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => CalendarPage(state: state),
-                      ),
-                    ),
-                  ),
-                ),
+                if (_selectedDate == null)
+                  SliverToBoxAdapter(child: _buildOverview(state)),
+                SliverToBoxAdapter(child: _buildCalendarEntry()),
                 if (_searching) SliverToBoxAdapter(child: _buildSearchBar()),
                 if (state.syncing)
                   SliverToBoxAdapter(
@@ -267,11 +336,19 @@ class _HomePageState extends State<HomePage>
                       ),
                     ),
                   ),
-                if (state.hasAnyAccount || state.homework.isNotEmpty)
+                if (state.hasAnyAccount ||
+                    state.homework.isNotEmpty ||
+                    _selectedDate != null)
                   PinnedHeaderSliver(
                     child: Material(
                       color: bgColor(context),
-                      child: _buildFilters(),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_selectedDate != null) _buildDateFilter(),
+                          _buildFilters(),
+                        ],
+                      ),
                     ),
                   ),
                 if (!state.syncing && state.lastSyncMessage.isNotEmpty)
@@ -570,7 +647,7 @@ class _HomePageState extends State<HomePage>
               if (value == 'todo') ...[
                 const SizedBox(width: 4),
                 Text(
-                  '${widget.state.homework.where(_inSemester).where((h) => !_isDone(h)).length}',
+                  '${widget.state.homework.where((h) => _selectedDate == null ? _inSemester(h) : DateUtils.isSameDay(h.dueAt, _selectedDate)).where((h) => !_isDone(h)).length}',
                   style: const TextStyle(fontSize: 12),
                 ),
               ],

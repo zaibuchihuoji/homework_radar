@@ -237,16 +237,20 @@ void main() {
       (w) => w is Semantics && w.properties.label == label,
     );
     await tester.tap(tab('设置标签页'));
-    await tester.pumpAndSettle();
+    // An offscreen notes loading spinner can keep scheduling frames.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     await state.setStyle(ThemeStyle.morandi);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(tester.widget<Semantics>(tab('设置标签页')).properties.selected, isTrue);
     await tester.tap(tab('账号标签页'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(tester.widget<Semantics>(tab('账号标签页')).properties.selected, isTrue);
     expect(
       tester.widget<PageView>(find.byType(PageView).first).controller!.page,
-      3,
+      2,
     );
     await tester.pumpWidget(const SizedBox());
     state.dispose();

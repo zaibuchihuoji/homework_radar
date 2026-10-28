@@ -62,7 +62,7 @@ void main() {
 
   for (final style in ThemeStyle.values) {
     testWidgets(
-      '${style.name}: swiping changes filters without hiding homework',
+      '${style.name}: left advances and right returns without changing homework',
       (tester) async {
         tester.view.physicalSize = const Size(400, 850);
         tester.view.devicePixelRatio = 1;
@@ -77,15 +77,20 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('待办样本'), findsOneWidget);
 
+        // At the leftmost filter, a right swipe has nowhere to go.
         await tester.drag(find.text('待办样本'), const Offset(260, 0));
+        await tester.pumpAndSettle();
+        expect(find.text('待办样本'), findsOneWidget);
+
+        await tester.drag(find.text('待办样本'), const Offset(-260, 0));
         await tester.pumpAndSettle();
         expect(find.text('提交样本'), findsOneWidget);
         expect(find.text('待办样本'), findsNothing);
 
-        await tester.drag(find.text('提交样本'), const Offset(260, 0));
+        await tester.drag(find.text('提交样本'), const Offset(-260, 0));
         await tester.pumpAndSettle();
         expect(find.text('完成样本'), findsOneWidget);
-        await tester.drag(find.text('完成样本'), const Offset(-260, 0));
+        await tester.drag(find.text('完成样本'), const Offset(260, 0));
         await tester.pumpAndSettle();
         expect(find.text('提交样本'), findsOneWidget);
         expect(jsonEncode(Storage.homeworkRowsForEdit()), before);
@@ -109,42 +114,56 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.drag(find.text('待办样本'), const Offset(260, 0));
+    await tester.drag(find.text('待办样本'), const Offset(-260, 0));
     await tester.pumpAndSettle();
     expect(find.text('这里空空的'), findsOneWidget);
-    await tester.drag(find.text('这里空空的'), const Offset(260, 0));
+    await tester.drag(find.text('这里空空的'), const Offset(-260, 0));
     await tester.pumpAndSettle();
     expect(find.text('这里空空的'), findsOneWidget);
-    await tester.drag(find.text('这里空空的'), const Offset(260, 0));
+    await tester.drag(find.text('这里空空的'), const Offset(-260, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('待办样本'), findsOneWidget);
+    await tester.drag(find.text('待办样本'), const Offset(-260, 0));
     await tester.pumpAndSettle();
     expect(find.text('待办样本'), findsOneWidget);
     await tester.drag(find.text('待办样本'), const Offset(260, 0));
     await tester.pumpAndSettle();
-    expect(find.text('待办样本'), findsOneWidget);
+    expect(find.text('这里空空的'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('filter change moves the incoming content into place', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: buildTheme(Brightness.light, ThemeStyle.clean),
-        home: HomePage(state: state, onGoAccounts: () {}),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.drag(find.text('待办样本'), const Offset(260, 0));
-    await tester.pump();
-    final start = tester.getTopLeft(find.text('提交样本')).dx;
-    await tester.pump(const Duration(milliseconds: 130));
-    final middle = tester.getTopLeft(find.text('提交样本')).dx;
-    await tester.pumpAndSettle();
-    final end = tester.getTopLeft(find.text('提交样本')).dx;
-    expect(start, lessThan(middle));
-    expect(middle, lessThan(end));
-    await tester.pumpWidget(const SizedBox());
-  });
+  testWidgets(
+    'incoming content follows the swipe direction in both directions',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.light, ThemeStyle.clean),
+          home: HomePage(state: state, onGoAccounts: () {}),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(find.text('待办样本'), const Offset(-260, 0));
+      await tester.pump();
+      final start = tester.getTopLeft(find.text('提交样本')).dx;
+      await tester.pump(const Duration(milliseconds: 130));
+      final middle = tester.getTopLeft(find.text('提交样本')).dx;
+      await tester.pumpAndSettle();
+      final end = tester.getTopLeft(find.text('提交样本')).dx;
+      expect(start, greaterThan(middle));
+      expect(middle, greaterThan(end));
+
+      await tester.drag(find.text('提交样本'), const Offset(260, 0));
+      await tester.pump();
+      final backStart = tester.getTopLeft(find.text('待办样本')).dx;
+      await tester.pump(const Duration(milliseconds: 130));
+      final backMiddle = tester.getTopLeft(find.text('待办样本')).dx;
+      await tester.pumpAndSettle();
+      final backEnd = tester.getTopLeft(find.text('待办样本')).dx;
+      expect(backStart, lessThan(backMiddle));
+      expect(backMiddle, lessThan(backEnd));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets('swiping reveals the selected filter on a narrow screen', (
     tester,
@@ -160,7 +179,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     for (final title in ['待办样本', '提交样本', '完成样本']) {
-      await tester.drag(find.text(title), const Offset(220, 0));
+      await tester.drag(find.text(title), const Offset(-220, 0));
       await tester.pumpAndSettle();
     }
     final all = find.widgetWithText(TextButton, '全部');
@@ -185,7 +204,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.drag(find.text('待办样本'), const Offset(260, 0));
+      await tester.drag(find.text('待办样本'), const Offset(-260, 0));
       await tester.pumpAndSettle();
       expect(find.text('提交样本'), findsOneWidget);
       expect(
