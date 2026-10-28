@@ -45,9 +45,11 @@ class StudyNotesPage extends StatefulWidget {
 class _StudyNotesPageState extends State<StudyNotesPage> {
   StudyNoteStore? _store;
   List<Map<String, dynamic>>? _notes;
+  List<Map<String, dynamic>> _folders = [];
   Object? _error;
   String _query = '';
   String? _courseFilter;
+  String? _folderFilter;
   bool _uncategorized = false;
   String? _chapterFilter;
   bool _trash = false;
@@ -74,13 +76,19 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
         await store.initialize();
         await Storage.setFlag('note_store_used', true);
       }
-      final notes = await store.readNotes(
+      final library = await store.readLibrary(
         requireInitialized: widget.store == null,
       );
+      final notes = library.notes;
       if (mounted) {
         setState(() {
           _store = store;
           _notes = notes;
+          _folders = library.folders;
+          if (_folderFilter != null &&
+              !_folders.any((f) => f['id'] == _folderFilter)) {
+            _folderFilter = null;
+          }
           _error = null;
         });
         if (!_openedInitial && widget.initialNoteId != null) {
@@ -124,6 +132,7 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
       'courseTeacher': widget.courseTeacher,
       'courseAnchor': widget.courseAnchor,
       'chapter': '',
+      if (_folderFilter != null) 'notebookId': _folderFilter,
       'favorite': false,
       'deleted': false,
       'blocks': <dynamic>[],
@@ -135,7 +144,8 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => StudyNoteEditor(store: store, note: note),
+          builder: (_) =>
+              StudyNoteEditor(store: store, note: note, folders: _folders),
         ),
       );
       await _load();
@@ -154,7 +164,8 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
     if (store == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => StudyNoteEditor(store: store, note: note),
+        builder: (_) =>
+            StudyNoteEditor(store: store, note: note, folders: _folders),
       ),
     );
     await _load();
@@ -333,6 +344,175 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
     await _load();
   }
 
+  Future<String?> _folderName({String initial = ''}) => showDialog<String>(
+    context: context,
+    builder: (_) => _FolderNameDialog(initial: initial),
+  );
+
+  Future<void> _manageFolder({Map<String, dynamic>? folder}) async {
+    final store = _store;
+    if (store == null) return;
+    final name = await _folderName(initial: folder?['name'] as String? ?? '');
+    if (!mounted || name == null) return;
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入文件夹名称')));
+      return;
+    }
+    try {
+      final random = Random.secure();
+      final id =
+          folder?['id'] as String? ??
+          'folder-${DateTime.now().microsecondsSinceEpoch}-${List.generate(12, (_) => random.nextInt(16).toRadixString(16)).join()}';
+      await store.updateLibrary((library) {
+        if (folder != null &&
+            !library.folders.any(
+              (f) => f['id'] == id && f['name'] == folder['name'],
+            )) {
+          throw StateError('文件夹已变化，请重新选择');
+        }
+        if (library.folders.any(
+          (f) =>
+              f['id'] != id &&
+              (f['name'] as String).trim().toLowerCase() == name.toLowerCase(),
+        )) {
+          throw StateError('文件夹名称已存在');
+        }
+        return StudyNoteLibrary(
+          notes: library.notes,
+          folders: folder == null
+              ? [
+                  ...library.folders,
+                  {'id': id, 'name': name},
+                ]
+              : [
+                  for (final f in library.folders)
+                    if (f['id'] == id) {...f, 'name': name} else f,
+                ],
+        );
+      });
+      await _load();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error is StateError && error.message == '文件夹名称已存在'
+                  ? '文件夹名称已存在，请换一个名称。'
+                  : '文件夹未保存，请重试。',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteFolder(Map<String, dynamic> folder) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dc) => AlertDialog(
+        title: const Text('删除文件夹？'),
+        content: Text('“${folder['name']}”中的笔记将移到未分类，笔记内容会保留。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dc, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dc, true),
+            child: const Text('删除文件夹'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _store == null) return;
+    try {
+      await _store!.updateLibrary((library) {
+        if (!library.folders.any(
+          (f) => f['id'] == folder['id'] && f['name'] == folder['name'],
+        )) {
+          throw StateError('文件夹已变化');
+        }
+        return StudyNoteLibrary(
+          folders: [
+            for (final f in library.folders)
+              if (f['id'] != folder['id']) f,
+          ],
+          notes: [
+            for (final note in library.notes)
+              if (note['notebookId'] == folder['id'])
+                (Map<String, dynamic>.from(note)..remove('notebookId'))
+              else
+                note,
+          ],
+        );
+      });
+      await _load();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('文件夹未删除，笔记已保留。')));
+      }
+    }
+  }
+
+  Future<void> _moveToFolder(Map<String, dynamic> note) async {
+    final store = _store;
+    if (store == null) return;
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dc) => SimpleDialog(
+        title: const Text('移动笔记到'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dc, ''),
+            child: const Text('未分类'),
+          ),
+          for (final folder in _folders)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dc, folder['id'] as String),
+              child: Text(folder['name'] as String),
+            ),
+        ],
+      ),
+    );
+    if (selected == null || !mounted) return;
+    try {
+      await store.updateLibrary((library) {
+        if (selected.isNotEmpty &&
+            !library.folders.any((f) => f['id'] == selected)) {
+          throw StateError('文件夹已不存在');
+        }
+        if (!library.notes.any(
+          (n) => n['id'] == note['id'] && n['deleted'] != true,
+        )) {
+          throw StateError('笔记已不存在');
+        }
+        final updated = <Map<String, dynamic>>[];
+        for (final n in library.notes) {
+          if (n['id'] != note['id']) {
+            updated.add(n);
+          } else {
+            final moved = Map<String, dynamic>.from(n);
+            if (selected.isEmpty) {
+              moved.remove('notebookId');
+            } else {
+              moved['notebookId'] = selected;
+            }
+            updated.add(moved);
+          }
+        }
+        return StudyNoteLibrary(folders: library.folders, notes: updated);
+      });
+      await _load();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('笔记未移动，请刷新后重试。')));
+      }
+    }
+  }
+
   Future<void> _browseCourses(
     List<Map<String, dynamic>> available,
     List<String> courses,
@@ -365,26 +545,93 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                     leading: const Icon(Icons.notes),
                     title: const Text('全部笔记'),
                     trailing: Text('${available.length}'),
-                    selected: _courseFilter == null && !_uncategorized,
+                    selected:
+                        _courseFilter == null &&
+                        _folderFilter == null &&
+                        !_uncategorized,
                     onTap: () => Navigator.pop(context, 'all'),
                   ),
                   ListTile(
                     leading: const Icon(Icons.folder_outlined),
                     title: const Text('未分类'),
                     trailing: Text(
-                      '${available.where((n) => (n['course'] as String? ?? '').isEmpty).length}',
+                      '${available.where((n) => n['notebookId'] == null).length}',
                     ),
                     selected: _uncategorized,
                     onTap: () => Navigator.pop(context, 'none'),
                   ),
-                  const Divider(),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-                    child: Text('课程', style: TextStyle(color: p.ink2)),
-                  ),
                   Expanded(
                     child: ListView(
                       children: [
+                        const Divider(),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 8, 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '我的文件夹',
+                                  style: TextStyle(color: p.ink2),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: '新建文件夹',
+                                onPressed: () =>
+                                    Navigator.pop(context, 'create-folder'),
+                                icon: const Icon(
+                                  Icons.create_new_folder_outlined,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        for (final folder in _folders)
+                          ListTile(
+                            leading: Icon(
+                              Icons.folder_outlined,
+                              color: p.accent,
+                            ),
+                            title: Text(
+                              folder['name'] as String,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            selected: _folderFilter == folder['id'],
+                            onTap: () => Navigator.pop(
+                              context,
+                              'folder:${folder['id']}',
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '${available.where((n) => n['notebookId'] == folder['id']).length}',
+                                ),
+                                PopupMenuButton<String>(
+                                  tooltip: '文件夹操作',
+                                  onSelected: (v) => Navigator.pop(
+                                    context,
+                                    '$v:${folder['id']}',
+                                  ),
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(
+                                      value: 'rename-folder',
+                                      child: Text('重命名'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete-folder',
+                                      child: Text('删除文件夹'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        const Divider(),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                          child: Text('课程', style: TextStyle(color: p.ink2)),
+                        ),
                         for (final course in courses)
                           ListTile(
                             leading: const Icon(Icons.folder_outlined),
@@ -393,7 +640,9 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                               '${available.where((n) => n['course'] == course).length}',
                             ),
                             selected:
-                                _courseFilter == course && !_uncategorized,
+                                _courseFilter == course &&
+                                _folderFilter == null &&
+                                !_uncategorized,
                             onTap: () =>
                                 Navigator.pop(context, 'course:$course'),
                           ),
@@ -414,8 +663,27 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
       ),
     );
     if (!mounted || selection == null) return;
+    if (selection == 'create-folder') {
+      await _manageFolder();
+      return;
+    }
+    if (selection.startsWith('rename-folder:') ||
+        selection.startsWith('delete-folder:')) {
+      final id = selection.substring(selection.indexOf(':') + 1);
+      final folder = _folders.where((f) => f['id'] == id).firstOrNull;
+      if (folder == null) return;
+      if (selection.startsWith('rename-folder:')) {
+        await _manageFolder(folder: folder);
+      } else {
+        await _deleteFolder(folder);
+      }
+      return;
+    }
     setState(() {
       _uncategorized = selection == 'none';
+      _folderFilter = selection.startsWith('folder:')
+          ? selection.substring(7)
+          : null;
       _courseFilter = selection.startsWith('course:')
           ? selection.substring(7)
           : null;
@@ -458,7 +726,10 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                   note['courseAnchor'] != widget.courseAnchor)) {
             return false;
           }
-          if (_uncategorized && (note['course'] as String? ?? '').isNotEmpty) {
+          if (_uncategorized && note['notebookId'] != null) {
+            return false;
+          }
+          if (_folderFilter != null && note['notebookId'] != _folderFilter) {
             return false;
           }
           if (_courseFilter != null && note['course'] != _courseFilter) {
@@ -533,6 +804,36 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
               padding: EdgeInsets.symmetric(horizontal: 20),
               child: Text('这里只显示关联当前课程和教师的笔记；其他同名笔记可在全部课程中查找。'),
             ),
+          if (_uncategorized || _folderFilter != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  const Icon(Icons.folder_outlined, size: 17),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _uncategorized
+                          ? '未分类'
+                          : (_folders
+                                        .where((f) => f['id'] == _folderFilter)
+                                        .firstOrNull?['name']
+                                    as String? ??
+                                '文件夹'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _folderFilter = null;
+                      _uncategorized = false;
+                    }),
+                    child: const Text('查看全部'),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
@@ -546,14 +847,13 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                   ),
                   Expanded(
                     child: StudyNoteFilterMenu(
-                      label: _uncategorized ? '未分类' : _courseFilter ?? '全部课程',
+                      label: _courseFilter ?? '全部课程',
                       tooltip: '按课程筛选',
                       allLabel: '全部课程',
                       selected: _courseFilter,
                       choices: courses,
                       optionKeyPrefix: 'note-course-option',
                       onSelected: (value) => setState(() {
-                        _uncategorized = false;
                         _courseFilter = value.isEmpty ? null : value;
                         _chapterFilter = null;
                       }),
@@ -722,6 +1022,8 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                                       'favorite',
                                       note['favorite'] != true,
                                     );
+                                  } else if (value == 'move') {
+                                    _moveToFolder(note);
                                   } else if (value == 'deleted') {
                                     _change(
                                       note['id'] as String,
@@ -731,6 +1033,11 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
                                   }
                                 },
                                 itemBuilder: (_) => [
+                                  if (!_trash)
+                                    const PopupMenuItem(
+                                      value: 'move',
+                                      child: Text('移动到文件夹'),
+                                    ),
                                   if (!_trash)
                                     PopupMenuItem(
                                       value: 'favorite',
@@ -762,10 +1069,61 @@ class _StudyNotesPageState extends State<StudyNotesPage> {
   }
 }
 
+class _FolderNameDialog extends StatefulWidget {
+  const _FolderNameDialog({required this.initial});
+  final String initial;
+
+  @override
+  State<_FolderNameDialog> createState() => _FolderNameDialogState();
+}
+
+class _FolderNameDialogState extends State<_FolderNameDialog> {
+  late final TextEditingController controller;
+  @override
+  void initState() {
+    super.initState();
+    controller = TextEditingController(text: widget.initial);
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.initial.isEmpty ? '新建文件夹' : '重命名文件夹'),
+    content: TextField(
+      controller: controller,
+      autofocus: true,
+      maxLength: 80,
+      decoration: const InputDecoration(labelText: '文件夹名称'),
+      onSubmitted: (_) => Navigator.pop(context, controller.text.trim()),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: () => Navigator.pop(context, controller.text.trim()),
+        child: const Text('保存'),
+      ),
+    ],
+  );
+}
+
 class StudyNoteEditor extends StatefulWidget {
-  const StudyNoteEditor({super.key, required this.store, required this.note});
+  const StudyNoteEditor({
+    super.key,
+    required this.store,
+    required this.note,
+    this.folders = const [],
+  });
   final StudyNoteStore store;
   final Map<String, dynamic> note;
+  final List<Map<String, dynamic>> folders;
   @override
   State<StudyNoteEditor> createState() => _StudyNoteEditorState();
 }
@@ -778,11 +1136,22 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
   late bool _documentEdited;
   late List<dynamic> _cards;
   Map<String, dynamic>? _reminder;
+  String? _notebookId;
+  late List<Map<String, dynamic>> _availableFolders;
   Timer? _timer;
   Future<void> _tail = Future<void>.value();
   int _revision = 0, _saved = 0;
   bool _saving = false;
+  bool _showDetails = false;
   String? _error;
+
+  String? get _updatedLabel {
+    final value = DateTime.tryParse(_baseline['updatedAt'] as String? ?? '')
+        ?.toLocal();
+    if (value == null) return null;
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${value.year}/${two(value.month)}/${two(value.day)} ${two(value.hour)}:${two(value.minute)}';
+  }
 
   @override
   void initState() {
@@ -793,6 +1162,8 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
     );
     _document = StudyNoteDocument.fromNote(widget.note);
     _documentEdited = widget.note.containsKey('document');
+    _notebookId = widget.note['notebookId'] as String?;
+    _availableFolders = [...widget.folders];
     _cards = jsonDecode(jsonEncode(widget.note['cards'] ?? [])) as List;
     if (widget.note['reminder'] is Map) {
       _reminder = Map<String, dynamic>.from(widget.note['reminder'] as Map);
@@ -821,6 +1192,7 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
     final revision = _revision;
     if (revision == _saved) return true;
     final title = _title.text, course = _course.text, chapter = _chapter.text;
+    final notebookId = _notebookId;
     Map<String, dynamic>? document;
     late String body;
     late List<dynamic> blocks;
@@ -879,6 +1251,11 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
           'reminder': reminder,
           'updatedAt': DateTime.now().toIso8601String(),
         };
+        if (notebookId == null) {
+          written!.remove('notebookId');
+        } else {
+          written!['notebookId'] = notebookId;
+        }
         final updated = [
           for (final note in notes)
             if (note['id'] == widget.note['id']) written! else note,
@@ -904,7 +1281,48 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
   }
 
   Future<void> _leave() async {
+    if (_showDetails) {
+      setState(() => _showDetails = false);
+      return;
+    }
     if (await _save() && mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _selectFolder() async {
+    late List<Map<String, dynamic>> folders;
+    try {
+      folders = (await widget.store.readLibrary()).folders;
+    } catch (_) {
+      if (mounted) setState(() => _error = '文件夹暂时无法读取，请保留当前内容并重试。');
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _availableFolders = folders);
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dc) => SimpleDialog(
+        title: const Text('选择文件夹'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(dc, ''),
+            child: const Text('未分类'),
+          ),
+          for (final folder in folders)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dc, folder['id'] as String),
+              child: Text(folder['name'] as String),
+            ),
+          if (folders.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('可在笔记列表中新建文件夹'),
+            ),
+        ],
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() => _notebookId = selected.isEmpty ? null : selected);
+    _changed();
   }
 
   Future<void> _editCard([int? index, String? question]) async {
@@ -1046,11 +1464,20 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
       if (!didPop) unawaited(_leave());
     },
     child: SettingsScaffold(
-      title: '编辑笔记',
+      title: _showDetails ? '笔记信息' : '',
       actions: [
+        IconButton(
+          tooltip: _showDetails ? '返回正文' : '笔记信息与复习',
+          onPressed: () {
+            FocusScope.of(context).unfocus();
+            setState(() => _showDetails = !_showDetails);
+          },
+          icon: Icon(_showDetails ? Icons.edit_note : Icons.info_outline),
+        ),
         TextButton(onPressed: _saving ? null : _save, child: const Text('保存')),
       ],
       body: StudyNoteDocumentEditor(
+        showDetails: _showDetails,
         header: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1060,8 +1487,12 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
               style: Theme.of(context).textTheme.headlineSmall
                   ?.copyWith(fontWeight: FontWeight.w600),
               maxLines: null,
-              decoration: const InputDecoration(
-                hintText: '无标题',
+              decoration: InputDecoration(
+                hintText: '标题',
+                hintStyle: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  color: paletteOf(context).ink3,
+                  fontWeight: FontWeight.w600,
+                ),
                 isCollapsed: true,
                 contentPadding: EdgeInsets.zero,
                 filled: false,
@@ -1072,10 +1503,43 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              '${_course.text.isEmpty ? '未分类' : _course.text} · ${StudyNoteDocument.plainText(_document).characters.length} 字',
-              style: Theme.of(context).textTheme.bodySmall,
+            InkWell(
+              key: const ValueKey('note-folder-selector'),
+              onTap: _selectFolder,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        [
+                          _availableFolders
+                                      .where((f) => f['id'] == _notebookId)
+                                      .firstOrNull?['name']
+                                  as String? ??
+                              '未分类',
+                          '${StudyNoteDocument.plainText(_document).characters.length} 字',
+                          ?_updatedLabel,
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    const Icon(Icons.keyboard_arrow_down, size: 18),
+                  ],
+                ),
+              ),
             ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
             const SizedBox(height: 20),
           ],
         ),
@@ -1086,6 +1550,20 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
             ExpansionTile(
               title: const Text('复习与笔记信息'),
               children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.folder_outlined),
+                  title: const Text('所在文件夹'),
+                  subtitle: Text(
+                    _availableFolders
+                                .where((f) => f['id'] == _notebookId)
+                                .firstOrNull?['name']
+                            as String? ??
+                        '未分类',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _selectFolder,
+                ),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.notifications_outlined),

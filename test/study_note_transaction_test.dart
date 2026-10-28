@@ -23,6 +23,95 @@ class TestSupportPath extends PathProviderPlatform {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('failed import restores both notes and their folders', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'notes_folder_rollback_',
+    );
+    addTearDown(() => deleteTestDirectory(directory));
+    SharedPreferences.setMockInitialValues({});
+    await Storage.init();
+    final store = StudyNoteStore(directory);
+    final before = StudyNoteLibrary(
+      folders: [
+        {'id': 'f', 'name': '我的文件夹'},
+      ],
+      notes: [
+        {'id': 'old', 'body': '原内容', 'notebookId': 'f'},
+      ],
+    );
+    await store.updateLibrary((_) => before);
+    await expectLater(
+      store.restoreTransaction(
+        [
+          {'id': 'new', 'notebookId': 'new-folder'},
+        ],
+        (version, apply, rollback) => Storage.businessTransaction(
+          () async {
+            await apply();
+            throw StateError('模拟导入失败');
+          },
+          noteRollbackVersion: version,
+          rollbackNotes: rollback,
+        ),
+        folders: [
+          {'id': 'new-folder', 'name': '其他文件夹'},
+        ],
+      ),
+      throwsStateError,
+    );
+    final after = await store.readLibrary();
+    expect(after.folders, before.folders);
+    expect(after.notes, before.notes);
+  });
+  test(
+    'backup and restore keep folder assignments, empty folders and history',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'notes_folder_backup_',
+      );
+      final oldProvider = PathProviderPlatform.instance;
+      PathProviderPlatform.instance = TestSupportPath(root.path);
+      addTearDown(() async {
+        PathProviderPlatform.instance = oldProvider;
+        await deleteTestDirectory(root);
+      });
+      SharedPreferences.setMockInitialValues({});
+      await Storage.init();
+      final store = await StudyNoteStore.openDefault();
+      await store.saveNotes([
+        {'id': 'n', 'body': '原文'},
+      ]);
+      await store.updateLibrary(
+        (library) => StudyNoteLibrary(
+          folders: [
+            {'id': 'math', 'name': '数学'},
+            {'id': 'empty', 'name': '空文件夹'},
+          ],
+          notes: [
+            for (final note in library.notes) {...note, 'notebookId': 'math'},
+          ],
+        ),
+      );
+      final backup = await BackupService.exportBundle();
+      await store.updateLibrary(
+        (library) => const StudyNoteLibrary(notes: [], folders: []),
+      );
+      await BackupService.importBundle(backup);
+      final restored = await store.readLibrary();
+      expect(restored.folders.map((f) => f['name']), ['数学', '空文件夹']);
+      expect(restored.notes.single['notebookId'], 'math');
+      final history = await store.history();
+      var foundLegacy = false;
+      for (final version in history) {
+        final old = await store.readHistoryLibrary(version);
+        if (old.notes.any((n) => n['id'] == 'n' && n['notebookId'] == null) &&
+            old.folders.isEmpty) {
+          foundLegacy = true;
+        }
+      }
+      expect(foundLegacy, isTrue);
+    },
+  );
   test(
     'failed joined import rolls back business data and notes together',
     () async {

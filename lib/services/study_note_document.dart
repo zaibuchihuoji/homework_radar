@@ -187,14 +187,23 @@ class StudyNoteDocument {
   /// Keep legacy search and note previews useful for structured documents.
   static String plainText(Map<String, dynamic> document) {
     referencedAttachments(document);
-    return [
-      for (final node in document['nodes'] as List)
-        if (node['type'] == 'text')
-          node['text'] as String
-        else if (node['type'] == 'canvas')
-          for (final item in node['items'] as List? ?? [])
-            if (item['type'] == 'text') item['text'] as String,
-    ].where((text) => text.isNotEmpty).join('\n');
+    final text = <String>[];
+    for (final node in document['nodes'] as List) {
+      if (node['type'] == 'text') {
+        final value = node['text'] as String;
+        if (value.isNotEmpty ||
+            (document['version'] == 2 && node['keepEmpty'] == true)) {
+          text.add(value);
+        }
+      } else if (node['type'] == 'canvas') {
+        for (final item in node['items'] as List? ?? []) {
+          if (item['type'] == 'text' && (item['text'] as String).isNotEmpty) {
+            text.add(item['text'] as String);
+          }
+        }
+      }
+    }
+    return text.join('\n');
   }
 
   /// Retain the previous representation for older note previews and history.
@@ -279,7 +288,9 @@ class StudyNoteDocument {
   /// Returns all original image files referenced by a document, including
   /// images placed inside a free canvas.
   static Set<String> referencedAttachments(dynamic value) {
-    if (value is! Map || value['version'] != 1 || value['nodes'] is! List) {
+    if (value is! Map ||
+        (value['version'] != 1 && value['version'] != 2) ||
+        value['nodes'] is! List) {
       throw const FormatException('笔记文档格式损坏或版本不受支持');
     }
     final references = <String>{};
@@ -296,6 +307,10 @@ class StudyNoteDocument {
           final text = node['text'];
           if (text is! String || !textStyles.contains(node['style'])) {
             throw const FormatException('笔记文字内容损坏');
+          }
+          if (node.containsKey('keepEmpty') &&
+              (value['version'] != 2 || node['keepEmpty'] is! bool)) {
+            throw const FormatException('笔记空行标记损坏');
           }
           if (node['checked'] != null && node['checked'] is! bool) {
             throw const FormatException('待办状态损坏');

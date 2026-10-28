@@ -43,6 +43,7 @@ Future<void> openCompleteBackupRestore(
         preview: preview,
         bundle: bytes,
         noteCount: bundle.notes.length,
+        folderCount: bundle.folders.length,
         noteHistoryCount: bundle.history.length,
         includesNoteHistory: bundle.historyIncluded,
         noteRevision: revision,
@@ -59,6 +60,7 @@ class BackupRestorePage extends StatefulWidget {
     required this.preview,
     this.bundle,
     this.noteCount,
+    this.folderCount,
     this.noteHistoryCount,
     this.includesNoteHistory = false,
     this.noteRevision,
@@ -68,6 +70,7 @@ class BackupRestorePage extends StatefulWidget {
   final BackupPreview preview;
   final Uint8List? bundle;
   final int? noteCount;
+  final int? folderCount;
   final int? noteHistoryCount;
   final bool includesNoteHistory;
   final String? noteRevision;
@@ -95,7 +98,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
           [
             ...clearNotes,
             if (widget.bundle != null)
-              '笔记将恢复为备份中的 ${widget.noteCount} 条，当前笔记的历史版本会保留。'
+              '笔记将恢复为备份中的 ${widget.noteCount} 条、文件夹 ${widget.folderCount ?? 0} 个，当前笔记的历史版本会保留。'
             else
               '旧版备份不包含笔记，当前笔记会保留。',
             '会先保存当前数据的本地备份，再恢复预览中的内容。账号登录不变；已登录平台的备份作业放入只读归档。',
@@ -192,7 +195,7 @@ class _BackupRestorePageState extends State<BackupRestorePage> {
                       icon: Icons.menu_book_outlined,
                       title: '笔记 ${widget.noteCount} 条',
                       subtitle:
-                          '${widget.includesNoteHistory ? '历史版本 ${widget.noteHistoryCount ?? 0} 份' : '不含笔记历史版本'} · 包含图片原件、笔迹和自测卡片',
+                          '文件夹 ${widget.folderCount ?? 0} 个 · ${widget.includesNoteHistory ? '历史版本 ${widget.noteHistoryCount ?? 0} 份' : '不含笔记历史版本'} · 包含图片原件、笔迹和自测卡片',
                     )
                   else
                     const Padding(

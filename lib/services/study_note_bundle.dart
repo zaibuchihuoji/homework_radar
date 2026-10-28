@@ -14,17 +14,49 @@ class StudyNoteBundle {
     required this.attachments,
     this.history = const [],
     this.historyIncluded = true,
+    this.folders = const [],
+    this.historyFolders = const [],
   });
   final String businessJson;
   final List<Map<String, dynamic>> notes;
   final Map<String, Uint8List> attachments;
   final List<List<Map<String, dynamic>>> history;
   final bool historyIncluded;
+  final List<Map<String, dynamic>> folders;
+  final List<List<Map<String, dynamic>>> historyFolders;
 
   static const _magic = 'HWRNBK01';
   static const _maxHeader = 64 * 1024 * 1024;
   static const _maxBundle = 256 * 1024 * 1024;
   static final _digestPattern = RegExp(r'^[0-9a-f]{64}$');
+
+  static void validateFolders(
+    List<Map<String, dynamic>> folders,
+    List<Map<String, dynamic>> notes,
+  ) {
+    final ids = <String>{};
+    final names = <String>{};
+    for (final folder in folders) {
+      final id = folder['id'], name = folder['name'];
+      if (id is! String ||
+          id.isEmpty ||
+          id.length > 128 ||
+          !ids.add(id) ||
+          name is! String ||
+          name.trim().isEmpty ||
+          name.length > 80 ||
+          !names.add(name.trim().toLowerCase())) {
+        throw const FormatException('笔记文件夹数据无效或重复');
+      }
+    }
+    for (final note in notes) {
+      final folderId = note['notebookId'];
+      if (folderId != null &&
+          (folderId is! String || !ids.contains(folderId))) {
+        throw const FormatException('笔记所属文件夹不存在');
+      }
+    }
+  }
 
   static Set<String> referencedAttachments(List<Map<String, dynamic>> notes) {
     final ids = <String>{};
@@ -134,6 +166,16 @@ class StudyNoteBundle {
     if (!historyIncluded && history.isNotEmpty) {
       throw const FormatException('笔记历史备份标记不一致');
     }
+    if (historyFolders.isNotEmpty && historyFolders.length != history.length) {
+      throw const FormatException('文件夹历史清单不完整');
+    }
+    final folderHistory = historyFolders.isEmpty
+        ? [for (final _ in history) <Map<String, dynamic>>[]]
+        : historyFolders;
+    validateFolders(folders, notes);
+    for (var i = 0; i < history.length; i++) {
+      validateFolders(folderHistory[i], history[i]);
+    }
     final refs = referencedAttachments(notes);
     for (final version in history) {
       refs.addAll(referencedAttachments(version));
@@ -161,13 +203,31 @@ class StudyNoteBundle {
         history.any(
           (version) => version.any((note) => note.containsKey('document')),
         );
+    final hasNewDocument =
+        notes.any(
+          (n) => n['document'] is Map && (n['document'] as Map)['version'] == 2,
+        ) ||
+        history.any(
+          (v) => v.any(
+            (n) =>
+                n['document'] is Map && (n['document'] as Map)['version'] == 2,
+          ),
+        );
+    final hasFolders =
+        hasNewDocument ||
+        folders.isNotEmpty ||
+        folderHistory.any((f) => f.isNotEmpty) ||
+        notes.any((n) => n['notebookId'] != null) ||
+        history.any((v) => v.any((n) => n['notebookId'] != null));
     final header = utf8.encode(
       jsonEncode({
-        'version': hasDocument ? 3 : 2,
+        'version': hasFolders ? 4 : (hasDocument ? 3 : 2),
         'business': businessJson,
         'notes': notes,
         'history': history,
         'historyIncluded': historyIncluded,
+        if (hasFolders) 'folders': folders,
+        if (hasFolders) 'historyFolders': folderHistory,
         'assets': [
           for (final name in names)
             {'id': name, 'size': attachments[name]!.length},
@@ -214,7 +274,8 @@ class StudyNoteBundle {
       if (data is! Map ||
           (data['version'] != 1 &&
               data['version'] != 2 &&
-              data['version'] != 3) ||
+              data['version'] != 3 &&
+              data['version'] != 4) ||
           data['business'] is! String ||
           data['notes'] is! List ||
           data['assets'] is! List) {
@@ -240,12 +301,62 @@ class StudyNoteBundle {
         history.add(version);
       }
       if (data['version'] != 3 &&
+          data['version'] != 4 &&
           (notes.any((note) => note.containsKey('document')) ||
               history.any(
                 (version) =>
                     version.any((note) => note.containsKey('document')),
               ))) {
         throw const FormatException('备份版本与笔记内容不匹配');
+      }
+      if (data['version'] != 4 &&
+          (notes.any(
+                (n) =>
+                    n['document'] is Map &&
+                    (n['document'] as Map)['version'] == 2,
+              ) ||
+              history.any(
+                (v) => v.any(
+                  (n) =>
+                      n['document'] is Map &&
+                      (n['document'] as Map)['version'] == 2,
+                ),
+              ))) {
+        throw const FormatException('备份版本与笔记内容不匹配');
+      }
+      final folders = <Map<String, dynamic>>[];
+      final historyFolders = <List<Map<String, dynamic>>>[];
+      if (data['version'] != 4 &&
+          (data.containsKey('folders') || data.containsKey('historyFolders'))) {
+        throw const FormatException('备份版本与文件夹内容不匹配');
+      }
+      if (data['version'] == 4) {
+        if (data['folders'] is! List ||
+            data['historyFolders'] is! List ||
+            (data['historyFolders'] as List).length != history.length) {
+          throw const FormatException('文件夹备份清单损坏');
+        }
+        for (final raw in data['folders'] as List) {
+          if (raw is! Map) throw const FormatException('文件夹备份清单损坏');
+          folders.add(Map<String, dynamic>.from(raw));
+        }
+        for (final rawList in data['historyFolders'] as List) {
+          if (rawList is! List) throw const FormatException('文件夹历史清单损坏');
+          final list = <Map<String, dynamic>>[];
+          for (final raw in rawList) {
+            if (raw is! Map) throw const FormatException('文件夹历史清单损坏');
+            list.add(Map<String, dynamic>.from(raw));
+          }
+          historyFolders.add(list);
+        }
+      } else {
+        for (final _ in history) {
+          historyFolders.add([]);
+        }
+      }
+      validateFolders(folders, notes);
+      for (var i = 0; i < history.length; i++) {
+        validateFolders(historyFolders[i], history[i]);
       }
       if (data['version'] != 1 &&
           data['historyIncluded'] == false &&
@@ -288,6 +399,8 @@ class StudyNoteBundle {
         historyIncluded: data['version'] != 1
             ? data['historyIncluded'] as bool
             : false,
+        folders: folders,
+        historyFolders: historyFolders,
       );
     } on FormatException {
       rethrow;

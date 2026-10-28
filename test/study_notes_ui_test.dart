@@ -151,6 +151,8 @@ void main() {
           home: StudyNoteEditor(store: store, note: note),
         ),
       );
+      await tester.tap(find.byTooltip('笔记信息与复习'));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('复习与笔记信息'));
       await tester.tap(find.text('复习与笔记信息'));
       await tester.pumpAndSettle();
@@ -369,7 +371,7 @@ void main() {
       await tester.tap(find.text('未分类'));
       await tester.pumpAndSettle();
       expect(find.text('随手笔记'), findsOneWidget);
-      expect(find.text('课程笔记'), findsNothing);
+      expect(find.text('课程笔记'), findsOneWidget);
       expect(await store.readNotes(), original);
       await tester.pumpWidget(const SizedBox());
     });
@@ -401,6 +403,57 @@ void main() {
       final toolbar = tester.getRect(find.byTooltip('添加图片'));
       expect(toolbar.bottom, lessThanOrEqualTo(500));
       expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+  testWidgets('writing uses one paragraph and format does not insert content', (
+    tester,
+  ) async {
+    final store = StudyNoteStore(directory);
+    final note = <String, dynamic>{
+      'id': 'simple',
+      'body': '',
+      'blocks': <dynamic>[],
+      'cards': <dynamic>[],
+    };
+    await tester.runAsync(() async {
+      await store.saveNotes([note]);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.light, ThemeStyle.clay),
+          home: StudyNoteEditor(store: store, note: note),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('复习与笔记信息'), findsNothing);
+      expect(find.text('已保存到本机'), findsNothing);
+      expect(find.byTooltip('插入文字'), findsNothing);
+      for (final label in ['格式', '图片', '批注', '更多']) {
+        expect(find.text(label), findsOneWidget);
+      }
+      await tester.tap(find.byTooltip('文本格式'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('正文'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('note-body')),
+        '第一行\n第二行',
+      );
+      await tester.tap(find.text('保存'));
+      await waitUntil(
+        tester,
+        () async => (await store.readNotes()).single['body'] == '第一行\n第二行',
+      );
+      expect(
+        ((await store.readNotes()).single['document'] as Map)['nodes'],
+        hasLength(1),
+      );
+      await tester.tap(find.byTooltip('笔记信息与复习'));
+      await tester.pumpAndSettle();
+      expect(find.text('复习与笔记信息'), findsOneWidget);
+      await tester.tap(find.byTooltip('返回正文'));
+      await tester.pumpAndSettle();
+      expect(find.text('第一行\n第二行'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     });
   });

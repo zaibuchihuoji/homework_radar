@@ -9,6 +9,12 @@ import 'package:path_provider/path_provider.dart';
 
 import 'study_note_bundle.dart';
 
+class StudyNoteLibrary {
+  const StudyNoteLibrary({required this.notes, required this.folders});
+  final List<Map<String, dynamic>> notes;
+  final List<Map<String, dynamic>> folders;
+}
+
 /// Append-only snapshots. A completed rename is the commit point.
 class StudyNoteStore {
   StudyNoteStore(this.directory);
@@ -40,17 +46,34 @@ class StudyNoteStore {
     return files;
   }
 
-  Future<List<Map<String, dynamic>>> _read(File file) async {
+  Future<List<Map<String, dynamic>>> _read(File file) async =>
+      (await _readLibrary(file)).notes;
+
+  Future<StudyNoteLibrary> _readLibrary(File file) async {
     try {
       final outer = jsonDecode(await file.readAsString());
       if (outer is! Map ||
-          (outer['version'] != 1 && outer['version'] != 2) ||
+          (outer['version'] != 1 &&
+              outer['version'] != 2 &&
+              outer['version'] != 3) ||
           outer['data'] is! String ||
           outer['sha256'] !=
               sha256.convert(utf8.encode(outer['data'] as String)).toString()) {
         throw const FormatException('笔记版本校验失败');
       }
-      final data = jsonDecode(outer['data'] as String);
+      final raw = jsonDecode(outer['data'] as String);
+      final folders = <Map<String, dynamic>>[];
+      dynamic data = raw;
+      if (outer['version'] == 3) {
+        if (raw is! Map || raw['notes'] is! List || raw['folders'] is! List) {
+          throw const FormatException('笔记文件夹清单损坏');
+        }
+        data = raw['notes'];
+        for (final folder in raw['folders'] as List) {
+          if (folder is! Map) throw const FormatException('笔记文件夹清单损坏');
+          folders.add(Map<String, dynamic>.from(folder));
+        }
+      }
       if (data is! List) throw const FormatException('笔记数据格式无效');
       final ids = <String>{};
       final result = <Map<String, dynamic>>[];
@@ -81,7 +104,8 @@ class StudyNoteStore {
         result.add(Map<String, dynamic>.from(body));
       }
       StudyNoteBundle.referencedAttachments(result);
-      return result;
+      StudyNoteBundle.validateFolders(folders, result);
+      return StudyNoteLibrary(notes: result, folders: folders);
     } on FormatException {
       rethrow;
     } catch (_) {
@@ -113,6 +137,18 @@ class StudyNoteStore {
       throw const FormatException('笔记目录缺少已保存的版本');
     }
     return snapshots.isEmpty ? [] : _read(snapshots.last);
+  }
+
+  Future<StudyNoteLibrary> readLibrary({
+    bool requireInitialized = false,
+  }) async {
+    final snapshots = await _snapshots();
+    if (snapshots.isEmpty && requireInitialized) {
+      throw const FormatException('笔记目录缺少已保存的版本');
+    }
+    return snapshots.isEmpty
+        ? const StudyNoteLibrary(notes: [], folders: [])
+        : _readLibrary(snapshots.last);
   }
 
   Future<String> putAttachment(Uint8List bytes) async {
@@ -164,6 +200,14 @@ class StudyNoteStore {
     return _read(File(_path(version)));
   }
 
+  Future<StudyNoteLibrary> readHistoryLibrary(String version) async {
+    if (!_snapshotName.hasMatch(version) ||
+        !(await history()).contains(version)) {
+      throw const FormatException('历史版本不存在');
+    }
+    return _readLibrary(File(_path(version)));
+  }
+
   Future<String> revision() async {
     final versions = await history();
     return versions.isEmpty ? '' : versions.last;
@@ -177,11 +221,11 @@ class StudyNoteStore {
     if (!snapshots.any((file) => file.uri.pathSegments.last == version)) {
       throw const FormatException('历史版本不存在');
     }
-    final notes = await _read(File(_path(version)));
-    for (final id in StudyNoteBundle.referencedAttachments(notes)) {
+    final library = await _readLibrary(File(_path(version)));
+    for (final id in StudyNoteBundle.referencedAttachments(library.notes)) {
       await readAttachment(id);
     }
-    await _commit(snapshots, notes);
+    await _commit(snapshots, library.notes, folders: library.folders);
   }
 
   Future<void> restoreHistory(String version, {String? expectedRevision}) =>
@@ -211,6 +255,8 @@ class StudyNoteStore {
     transaction, {
     String? expectedRevision,
     List<List<Map<String, dynamic>>> importedHistory = const [],
+    List<Map<String, dynamic>>? folders,
+    List<List<Map<String, dynamic>>> importedHistoryFolders = const [],
   }) => _locked(() async {
     var snapshots = await _snapshots();
     final actual = snapshots.isEmpty
@@ -224,14 +270,36 @@ class StudyNoteStore {
       snapshots = await _snapshots();
     }
     final prior = snapshots.last;
-    final oldNotes = await _read(prior);
+    final oldLibrary = await _readLibrary(prior);
     final version = prior.uri.pathSegments.last;
-    return transaction(version, () async {
-      for (final oldVersion in importedHistory) {
-        await _commit(await _snapshots(), oldVersion);
-      }
-      await _commit(await _snapshots(), notes);
-    }, () async => _commit(await _snapshots(), oldNotes));
+    return transaction(
+      version,
+      () async {
+        if (importedHistoryFolders.isNotEmpty &&
+            importedHistoryFolders.length != importedHistory.length) {
+          throw const FormatException('文件夹历史清单不完整');
+        }
+        for (var i = 0; i < importedHistory.length; i++) {
+          await _commit(
+            await _snapshots(),
+            importedHistory[i],
+            folders: importedHistoryFolders.isEmpty
+                ? []
+                : importedHistoryFolders[i],
+          );
+        }
+        await _commit(
+          await _snapshots(),
+          notes,
+          folders: folders ?? oldLibrary.folders,
+        );
+      },
+      () async => _commit(
+        await _snapshots(),
+        oldLibrary.notes,
+        folders: oldLibrary.folders,
+      ),
+    );
   });
 
   Future<void> saveNotes(List<Map<String, dynamic>> notes) =>
@@ -243,16 +311,32 @@ class StudyNoteStore {
   ) => _locked(() async {
     final snapshots = await _snapshots();
     final current = snapshots.isEmpty
-        ? <Map<String, dynamic>>[]
-        : await _read(snapshots.last);
-    await _commit(snapshots, update(current));
+        ? const StudyNoteLibrary(notes: [], folders: [])
+        : await _readLibrary(snapshots.last);
+    await _commit(snapshots, update(current.notes), folders: current.folders);
+  });
+
+  Future<void> updateLibrary(
+    StudyNoteLibrary Function(StudyNoteLibrary) update,
+  ) => _locked(() async {
+    final snapshots = await _snapshots();
+    final current = snapshots.isEmpty
+        ? const StudyNoteLibrary(notes: [], folders: [])
+        : await _readLibrary(snapshots.last);
+    final next = update(current);
+    await _commit(snapshots, next.notes, folders: next.folders);
   });
 
   Future<void> _commit(
     List<File> snapshots,
-    List<Map<String, dynamic>> notes,
-  ) async {
+    List<Map<String, dynamic>> notes, {
+    List<Map<String, dynamic>>? folders,
+  }) async {
+    folders ??= snapshots.isEmpty
+        ? []
+        : (await _readLibrary(snapshots.last)).folders;
     StudyNoteBundle.referencedAttachments(notes);
+    StudyNoteBundle.validateFolders(folders, notes);
     final ids = <String>{};
     for (final note in notes) {
       final id = note['id'];
@@ -289,10 +373,19 @@ class StudyNoteStore {
                     .group(1)!,
               ) +
               1;
-    final data = jsonEncode(index);
+    final usesFolders =
+        folders.isNotEmpty ||
+        notes.any(
+          (n) =>
+              n['notebookId'] != null ||
+              (n['document'] is Map && (n['document'] as Map)['version'] == 2),
+        );
+    final data = jsonEncode(
+      usesFolders ? {'notes': index, 'folders': folders} : index,
+    );
     final bytes = utf8.encode(
       jsonEncode({
-        'version': 2,
+        'version': usesFolders ? 3 : 2,
         'sha256': sha256.convert(utf8.encode(data)).toString(),
         'data': data,
       }),

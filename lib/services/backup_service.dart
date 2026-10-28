@@ -43,17 +43,21 @@ class BackupService {
     final store = await StudyNoteStore.openDefault();
     return store.withRecoveryLock((_) async {
       await Storage.waitForBusinessTransaction();
-      final notes = await store.readNotes(
+      final library = await store.readLibrary(
         requireInitialized: Storage.flag('note_store_used'),
       );
+      final notes = library.notes;
       final assets = <String, Uint8List>{};
       final versions = await store.history();
       final history = <List<Map<String, dynamic>>>[];
+      final historyFolders = <List<Map<String, dynamic>>>[];
       if (includeHistory) {
         for (final version in versions.take(
           versions.isEmpty ? 0 : versions.length - 1,
         )) {
-          history.add(await store.readHistory(version));
+          final oldLibrary = await store.readHistoryLibrary(version);
+          history.add(oldLibrary.notes);
+          historyFolders.add(oldLibrary.folders);
         }
       }
       final references = StudyNoteBundle.referencedAttachments(notes);
@@ -69,6 +73,8 @@ class BackupService {
         attachments: assets,
         history: history,
         historyIncluded: includeHistory,
+        folders: library.folders,
+        historyFolders: historyFolders,
       ).encode();
     });
   }
@@ -106,6 +112,8 @@ class BackupService {
       },
       expectedRevision: revision,
       importedHistory: bundle.history,
+      folders: bundle.folders,
+      importedHistoryFolders: bundle.historyFolders,
     );
   }
 

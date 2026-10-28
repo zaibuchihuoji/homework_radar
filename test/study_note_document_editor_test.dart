@@ -68,7 +68,9 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('note-body')), findsOneWidget);
         expect(await store.revision(), revision);
-        await tester.tap(find.byTooltip('插入文字'));
+        await tester.tap(find.byTooltip('更多工具'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('插入独立段落'));
         await tester.pumpAndSettle();
         final second = find.byWidgetPredicate(
           (widget) =>
@@ -189,7 +191,9 @@ void main() {
           find.byKey(const ValueKey('note-body')),
         );
         field.controller!.selection = const TextSelection.collapsed(offset: 3);
-        await tester.tap(find.byTooltip('插入文字'));
+        await tester.tap(find.byTooltip('更多工具'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('插入独立段落'));
         await tester.pumpAndSettle();
         final added = find.byWidgetPredicate(
           (widget) =>
@@ -344,7 +348,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('整理内容'));
+      await tester.tap(find.byTooltip('更多工具'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('整理内容'));
       await tester.pumpAndSettle();
       final first = find.byKey(const ValueKey('document-node:a'));
       final last = find.byKey(const ValueKey('document-node:c'));
@@ -411,7 +417,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('添加画布'));
+      await tester.tap(find.byTooltip('更多工具'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('添加画布'));
       await waitForSave(
         tester,
         () async => find.byType(StudyNoteCanvas).evaluate().isNotEmpty,
@@ -480,7 +488,9 @@ void main() {
           expect(tester.takeException(), isNull);
           await tester.tap(find.byTooltip('完成批注'));
           await tester.pumpAndSettle();
-          await tester.tap(find.byTooltip('添加画布'));
+          await tester.tap(find.byTooltip('更多工具'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('添加画布'));
           await waitForSave(
             tester,
             () async => find.byType(StudyNoteCanvas).evaluate().isNotEmpty,
