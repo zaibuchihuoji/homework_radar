@@ -16,6 +16,7 @@ import '../services/stable_hash.dart';
 import '../services/storage.dart';
 import '../ui/adaptive.dart';
 import '../ui/hw_card.dart';
+import '../ui/homework_date_bar.dart';
 import '../ui/focus_parts.dart';
 import '../ui/ink_wash.dart';
 import '../ui/receipt_tear.dart';
@@ -26,6 +27,7 @@ import '../ui/themed_masthead.dart';
 import '../ui/study_overview.dart';
 import '../ui/sync_status_parts.dart';
 import 'background_sync_settings_page.dart';
+import 'calendar_page.dart';
 import 'detail_page.dart';
 import 'homework_edit_dialogs.dart';
 import 'homework_recognition_page.dart';
@@ -45,6 +47,7 @@ class _HomePageState extends State<HomePage>
   static const _filters = ['todo', 'submitted', 'done', 'all'];
   String _filter = 'todo';
   bool _todayOnly = false;
+  DateTime? _selectedDate;
   final _filterScroll = ScrollController();
   final _filterViewportKey = GlobalKey();
   final _filterKeys = {for (final value in _filters) value: GlobalKey()};
@@ -106,11 +109,16 @@ class _HomePageState extends State<HomePage>
   }
 
   void _selectFilter(String value, {bool todayOnly = false}) {
-    if (_filter == value && _todayOnly == todayOnly) return;
+    if (_filter == value &&
+        _todayOnly == todayOnly &&
+        !(todayOnly && _selectedDate != null)) {
+      return;
+    }
     final direction = _filters.indexOf(value) - _filters.indexOf(_filter);
     setState(() {
       _filter = value;
       _todayOnly = todayOnly;
+      if (todayOnly) _selectedDate = null;
       _filterSlide = Tween<Offset>(
         begin: Offset(direction >= 0 ? -.035 : .035, 0),
         end: Offset.zero,
@@ -228,6 +236,26 @@ class _HomePageState extends State<HomePage>
               slivers: [
                 SliverToBoxAdapter(child: _buildHeader(state)),
                 SliverToBoxAdapter(child: _buildOverview(state)),
+                SliverToBoxAdapter(
+                  child: HomeworkDateBar(
+                    homework: state.homework,
+                    selectedDate: _selectedDate,
+                    onDateSelected: (date) {
+                      final enteringDateView =
+                          _selectedDate == null && date != null;
+                      setState(() {
+                        _selectedDate = date;
+                        _todayOnly = false;
+                      });
+                      if (enteringDateView) _selectFilter('all');
+                    },
+                    onOpenCalendar: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => CalendarPage(state: state),
+                      ),
+                    ),
+                  ),
+                ),
                 if (_searching) SliverToBoxAdapter(child: _buildSearchBar()),
                 if (state.syncing)
                   SliverToBoxAdapter(
@@ -572,27 +600,35 @@ class _HomePageState extends State<HomePage>
       );
     }
 
-    var filtered = state.homework.where(_inSemester).where(_matchQuery).where((
-      hw,
-    ) {
-      if (_todayOnly) {
-        final due = hw.dueAt;
-        final now = DateTime.now();
-        if (_isDone(hw) ||
-            due == null ||
-            due.year != now.year ||
-            due.month != now.month ||
-            due.day != now.day) {
-          return false;
-        }
-      }
-      return switch (_filter) {
-        'todo' => !_isDone(hw),
-        'submitted' => hw.status == HwStatus.submitted,
-        'done' => hw.status == HwStatus.done,
-        _ => true,
-      };
-    }).toList()..sort(_byDue);
+    var filtered =
+        state.homework
+            .where((hw) => _selectedDate != null || _inSemester(hw))
+            .where(_matchQuery)
+            .where((hw) {
+              if (_selectedDate != null &&
+                  !DateUtils.isSameDay(hw.dueAt, _selectedDate)) {
+                return false;
+              }
+              if (_todayOnly) {
+                final due = hw.dueAt;
+                final now = DateTime.now();
+                if (_isDone(hw) ||
+                    due == null ||
+                    due.year != now.year ||
+                    due.month != now.month ||
+                    due.day != now.day) {
+                  return false;
+                }
+              }
+              return switch (_filter) {
+                'todo' => !_isDone(hw),
+                'submitted' => hw.status == HwStatus.submitted,
+                'done' => hw.status == HwStatus.done,
+                _ => true,
+              };
+            })
+            .toList()
+          ..sort(_byDue);
 
     if (filtered.isEmpty) {
       return SliverFillRemaining(
@@ -609,13 +645,19 @@ class _HomePageState extends State<HomePage>
                   ? '正在同步…'
                   : _query.isNotEmpty
                   ? '没有匹配「$_query」的作业'
+                  : _selectedDate != null
+                  ? '这一天没有符合条件的作业'
                   : _todayOnly
                   ? '今天没有待完成的截止作业'
                   : '这里空空的',
               subtitle: state.syncing
                   ? '第一次同步要拉取全部课程，稍等片刻'
                   : _query.isEmpty
-                  ? (_todayOnly ? '点待完成数量或任意状态标签，查看其他作业' : '点 + 可以手动添加作业')
+                  ? (_selectedDate != null
+                        ? '切换状态或点全部作业查看其他作业'
+                        : _todayOnly
+                        ? '点待完成数量或任意状态标签，查看其他作业'
+                        : '点 + 可以手动添加作业')
                   : null,
             ),
           ),

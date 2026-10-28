@@ -9,7 +9,6 @@ import 'package:home_widget/home_widget.dart';
 
 import 'app_state.dart';
 import 'pages/accounts_page.dart';
-import 'pages/calendar_page.dart';
 import 'pages/detail_page.dart';
 import 'pages/home_page.dart';
 import 'pages/settings_page.dart';
@@ -963,13 +962,12 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           },
           children: [
             KeepAlivePage(
-              child: HomePage(state: state, onGoAccounts: () => _go(3)),
+              child: HomePage(state: state, onGoAccounts: () => _go(2)),
             ),
             KeepAlivePage(child: TimetablePage(state: state)),
-            KeepAlivePage(child: CalendarPage(state: state)),
             KeepAlivePage(child: AccountsPage(state: state)),
             KeepAlivePage(child: SettingsPage(state: state)),
-            KeepAlivePage(child: StudyNotesPage(active: _selected == 5)),
+            KeepAlivePage(child: StudyNotesPage(active: _selected == 4)),
           ],
         ),
         bottomNavigationBar: ThemedNavigationBar(

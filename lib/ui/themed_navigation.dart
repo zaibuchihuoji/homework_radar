@@ -16,11 +16,10 @@ class ThemedNavigationBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onSelected;
 
-  static const labels = ['作业', '课表', '日历', '账号', '设置', '笔记'];
+  static const labels = ['作业', '课表', '账号', '设置', '笔记'];
   static const icons = <(IconData, IconData)>[
     (Icons.assignment_outlined, Icons.assignment_rounded),
     (Icons.grid_view_outlined, Icons.grid_view_rounded),
-    (Icons.calendar_month_outlined, Icons.calendar_month_rounded),
     (Icons.person_outline, Icons.person_rounded),
     (Icons.settings_outlined, Icons.settings_rounded),
     (Icons.menu_book_outlined, Icons.menu_book_rounded),
