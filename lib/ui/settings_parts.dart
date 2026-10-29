@@ -19,6 +19,7 @@ class SettingsScaffold extends StatelessWidget {
     this.actions,
     this.bottomNavigationBar,
     this.root = false,
+    this.resizeToAvoidBottomInset,
   });
 
   final String title;
@@ -26,10 +27,12 @@ class SettingsScaffold extends StatelessWidget {
   final List<Widget>? actions;
   final Widget? bottomNavigationBar;
   final bool root;
+  final bool? resizeToAvoidBottomInset;
 
   @override
   Widget build(BuildContext context) => StyleBackground(
     child: Scaffold(
+      resizeToAvoidBottomInset: resizeToAvoidBottomInset,
       backgroundColor: scaffoldBgOf(context),
       appBar: AppBar(
         elevation: 0,

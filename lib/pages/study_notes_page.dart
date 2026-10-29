@@ -1144,6 +1144,7 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
   bool _saving = false;
   bool _showDetails = false;
   String? _error;
+  String? _saveError;
 
   String? get _updatedLabel {
     final value = DateTime.tryParse(_baseline['updatedAt'] as String? ?? '')
@@ -1208,7 +1209,9 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
           : StudyNoteDocument.legacyBlocks(document);
     } catch (_) {
       if (mounted) {
-        setState(() => _error = '内容暂时无法保存，当前编辑仍保留在此页面，请检查后重试。');
+        setState(() {
+          _saveError = '内容暂时无法保存，当前编辑仍保留在此页面，请检查后重试。';
+        });
       }
       return false;
     }
@@ -1271,12 +1274,17 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
       await task;
     } catch (error) {
       if (mounted) {
-        _error = error is StateError && error.message == '笔记已在其他页面修改'
+        _saveError = error is StateError && error.message == '笔记已在其他页面修改'
             ? '笔记已在其他页面修改，当前编辑仍保留在此页面，请先复制内容再退出。'
             : '保存失败，内容仍在当前页面，请检查存储空间后重试。';
       }
     }
-    if (mounted) setState(() => _saving = false);
+    if (mounted) {
+      setState(() {
+        _saving = false;
+        if (success) _saveError = null;
+      });
+    }
     return success;
   }
 
@@ -1478,6 +1486,45 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
       ],
       body: StudyNoteDocumentEditor(
         showDetails: _showDetails,
+        status: _error == null && _saveError == null
+            ? null
+            : Material(
+                key: ValueKey(
+                  _saveError != null ? 'note-save-error' : 'note-status-error',
+                ),
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          (_saveError ?? _error)!,
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onErrorContainer,
+                          ),
+                        ),
+                      ),
+                      if (_saveError != null)
+                        TextButton(
+                          onPressed: _saving ? null : _save,
+                          child: const Text('重试保存'),
+                        )
+                      else
+                        IconButton(
+                          tooltip: '关闭提示',
+                          onPressed: () => setState(() => _error = null),
+                          icon: const Icon(Icons.close),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
         header: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1532,14 +1579,6 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
                 ),
               ),
             ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
             const SizedBox(height: 20),
           ],
         ),
@@ -1646,7 +1685,8 @@ class _StudyNoteEditorState extends State<StudyNoteEditor>
             ),
             const SizedBox(height: 12),
             Text(
-              _error ??
+              _saveError ??
+                  _error ??
                   (_saving
                       ? '正在保存…'
                       : _revision == _saved

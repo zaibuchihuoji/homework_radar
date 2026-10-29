@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' show PointMode;
 
@@ -20,6 +19,9 @@ class StudyNoteCanvas extends StatefulWidget {
     this.onCanvasChanged,
     this.saveAttachment,
     this.readAttachment,
+    this.startInMoveMode = false,
+    this.imageAlignment = Alignment.center,
+    this.imageSize,
   });
   final Uint8List? image;
   final List<dynamic> strokes;
@@ -29,6 +31,9 @@ class StudyNoteCanvas extends StatefulWidget {
   onCanvasChanged;
   final Future<String> Function(Uint8List bytes)? saveAttachment;
   final Future<Uint8List> Function(String id)? readAttachment;
+  final bool startInMoveMode;
+  final AlignmentGeometry imageAlignment;
+  final Size? imageSize;
   @override
   State<StudyNoteCanvas> createState() => _StudyNoteCanvasState();
 }
@@ -56,6 +61,7 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
     super.initState();
     _strokes = jsonDecode(jsonEncode(widget.strokes)) as List;
     _items = jsonDecode(jsonEncode(widget.items)) as List;
+    _move = widget.startInMoveMode;
   }
 
   @override
@@ -124,22 +130,105 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
     if (_eraser) {
       _strokes.removeWhere((stroke) {
         if (stroke is! Map || stroke['points'] is! List) return false;
-        return (stroke['points'] as List).any((point) {
+        final points = <Offset>[];
+        for (final point in stroke['points'] as List) {
           if (point is! List ||
               point.length != 2 ||
               point[0] is! num ||
               point[1] is! num) {
-            return false;
+            continue;
           }
-          final dx = ((point[0] as num).toDouble() - x) * size.width;
-          final dy = ((point[1] as num).toDouble() - y) * size.height;
-          return sqrt(dx * dx + dy * dy) < 18;
-        });
+          points.add(
+            Offset(
+              (point[0] as num).toDouble() * size.width,
+              (point[1] as num).toDouble() * size.height,
+            ),
+          );
+        }
+        if (points.any((point) => (point - position).distance < 18)) {
+          return true;
+        }
+        for (var i = 1; i < points.length; i++) {
+          final segment = points[i] - points[i - 1];
+          final lengthSquared =
+              segment.dx * segment.dx + segment.dy * segment.dy;
+          if (lengthSquared == 0) continue;
+          final relative = position - points[i - 1];
+          final t =
+              ((relative.dx * segment.dx + relative.dy * segment.dy) /
+                      lengthSquared)
+                  .clamp(0.0, 1.0);
+          if ((points[i - 1] + segment * t - position).distance < 18) {
+            return true;
+          }
+        }
+        return false;
       });
     } else {
       _current?.add([x, y]);
     }
   }
+
+  void _startStroke(Offset position, Size size) {
+    _remember();
+    if (!_eraser) {
+      _current = <List<double>>[];
+      _strokes.add({
+        'color': _color.toARGB32(),
+        'width': _width,
+        'points': _current,
+      });
+    }
+    _point(position, size);
+  }
+
+  void _finishStroke() {
+    _current = null;
+    _persist();
+  }
+
+  Widget _modeButton({
+    required String label,
+    required String tooltip,
+    required IconData icon,
+    required bool active,
+    required VoidCallback? onPressed,
+  }) => Expanded(
+    child: Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 5),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: onPressed == null
+                    ? Theme.of(context).disabledColor
+                    : active
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
+              ),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: onPressed == null
+                      ? Theme.of(context).disabledColor
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   Future<void> _editText([int? index]) async {
     final existing = index == null
@@ -273,8 +362,11 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
           behavior: HitTestBehavior.opaque,
           dragStartBehavior: DragStartBehavior.down,
           onTap: () {
-            setState(() => _selectedId = id);
-            if (item['type'] == 'text') _editText(index);
+            if (_selectedId == id && item['type'] == 'text') {
+              _editText(index);
+            } else {
+              setState(() => _selectedId = id);
+            }
           },
           onPanStart: (_) {
             _remember();
@@ -340,17 +432,6 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
                 if (selected) ...[
                   Positioned(
                     right: 0,
-                    top: 0,
-                    child: GestureDetector(
-                      onTap: () => _removeItem(id),
-                      child: const DecoratedBox(
-                        decoration: BoxDecoration(color: Colors.white70),
-                        child: Icon(Icons.close, size: 20),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    right: 0,
                     bottom: 0,
                     child: GestureDetector(
                       dragStartBehavior: DragStartBehavior.down,
@@ -395,6 +476,7 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
     },
     child: SettingsScaffold(
       title: widget.image == null ? '自由画布' : '图片批注',
+      resizeToAvoidBottomInset: false,
       actions: [
         TextButton(
           onPressed: _saving
@@ -409,129 +491,140 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
       ],
       body: Column(
         children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                IconButton(
-                  tooltip: '画笔',
-                  onPressed: () => setState(() {
+          Row(
+            children: [
+              _modeButton(
+                label: '画笔',
+                tooltip: '画笔',
+                icon: Icons.edit,
+                active: !_move && !_eraser && !_objectMode,
+                onPressed: () => setState(() {
+                  _move = false;
+                  _eraser = false;
+                  _objectMode = false;
+                }),
+              ),
+              _modeButton(
+                label: '橡皮',
+                tooltip: '橡皮',
+                icon: Icons.auto_fix_normal,
+                active: _eraser,
+                onPressed: () => setState(() {
+                  _move = false;
+                  _eraser = true;
+                  _objectMode = false;
+                }),
+              ),
+              _modeButton(
+                label: '缩放',
+                tooltip: '移动和缩放',
+                icon: Icons.zoom_in,
+                active: _move,
+                onPressed: () => setState(() {
+                  _move = true;
+                  _eraser = false;
+                  _objectMode = false;
+                }),
+              ),
+              IconButton(
+                tooltip: '撤销',
+                onPressed: _undo.isEmpty ? null : () => _restore(_undo, _redo),
+                icon: const Icon(Icons.undo),
+              ),
+              IconButton(
+                tooltip: '重做',
+                onPressed: _redo.isEmpty ? null : () => _restore(_redo, _undo),
+                icon: const Icon(Icons.redo),
+              ),
+              PopupMenuButton<String>(
+                tooltip: '画笔设置',
+                onSelected: (value) => setState(() {
+                  switch (value) {
+                    case 'blue':
+                      _color = const Color(0xff244d7a);
+                    case 'red':
+                      _color = const Color(0xffcc4b44);
+                    case 'green':
+                      _color = const Color(0xff286b4f);
+                    case 'thin':
+                      _width = 2;
+                    case 'medium':
+                      _width = 4;
+                    case 'thick':
+                      _width = 8;
+                    case 'reset':
+                      _transform.value = Matrix4.identity();
+                  }
+                  if (const {'blue', 'red', 'green'}.contains(value)) {
                     _move = false;
                     _eraser = false;
                     _objectMode = false;
-                  }),
-                  icon: Icon(
-                    Icons.edit,
-                    color: !_move && !_eraser && !_objectMode
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                ),
-                IconButton(
-                  tooltip: '橡皮',
-                  onPressed: () => setState(() {
-                    _move = false;
-                    _eraser = true;
-                    _objectMode = false;
-                  }),
-                  icon: Icon(
-                    Icons.auto_fix_normal,
-                    color: _eraser
-                        ? Theme.of(context).colorScheme.primary
-                        : null,
-                  ),
-                ),
-                IconButton(
-                  tooltip: '移动和缩放',
-                  onPressed: () => setState(() {
-                    _move = true;
-                    _objectMode = false;
-                  }),
-                  icon: Icon(
-                    Icons.zoom_in,
-                    color: _move ? Theme.of(context).colorScheme.primary : null,
-                  ),
-                ),
-                IconButton(
-                  tooltip: '撤销',
-                  onPressed: _undo.isEmpty
-                      ? null
-                      : () => _restore(_undo, _redo),
-                  icon: const Icon(Icons.undo),
-                ),
-                IconButton(
-                  tooltip: '重做',
-                  onPressed: _redo.isEmpty
-                      ? null
-                      : () => _restore(_redo, _undo),
-                  icon: const Icon(Icons.redo),
-                ),
-                if (widget.image == null && widget.onCanvasChanged != null) ...[
-                  IconButton(
-                    tooltip: '添加画布文字',
-                    onPressed: () => _editText(),
-                    icon: const Icon(Icons.text_fields),
-                  ),
-                  if (widget.saveAttachment != null)
-                    IconButton(
-                      tooltip: '添加画布图片',
-                      onPressed: _addImages,
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                    ),
-                  IconButton(
-                    tooltip: '移动画布内容',
-                    onPressed: () => setState(() {
-                      _objectMode = true;
-                      _move = false;
-                      _eraser = false;
-                    }),
-                    icon: Icon(
-                      Icons.open_with,
-                      color: _objectMode
-                          ? Theme.of(context).colorScheme.primary
-                          : null,
-                    ),
-                  ),
+                  }
+                }),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'blue', child: Text('蓝色画笔')),
+                  PopupMenuItem(value: 'red', child: Text('红色画笔')),
+                  PopupMenuItem(value: 'green', child: Text('绿色画笔')),
+                  PopupMenuDivider(),
+                  PopupMenuItem(value: 'thin', child: Text('细笔')),
+                  PopupMenuItem(value: 'medium', child: Text('中笔')),
+                  PopupMenuItem(value: 'thick', child: Text('粗笔')),
+                  PopupMenuDivider(),
+                  PopupMenuItem(value: 'reset', child: Text('复位画布')),
                 ],
-                IconButton(
-                  tooltip: '复位画布',
-                  onPressed: () =>
-                      setState(() => _transform.value = Matrix4.identity()),
-                  icon: const Icon(Icons.center_focus_strong),
-                ),
-                for (final color in [
-                  const Color(0xff244d7a),
-                  const Color(0xffcc4b44),
-                  const Color(0xff286b4f),
-                ])
-                  IconButton(
-                    tooltip: '选择画笔颜色',
-                    onPressed: () => setState(() {
-                      _color = color;
-                      _move = false;
-                      _eraser = false;
-                      _objectMode = false;
-                    }),
-                    icon: Icon(
-                      _color == color
-                          ? Icons.radio_button_checked
-                          : Icons.circle,
-                      color: color,
-                    ),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.palette_outlined, size: 20),
+                      Text('设置', style: TextStyle(fontSize: 11)),
+                    ],
                   ),
-                PopupMenuButton<double>(
-                  tooltip: '画笔粗细',
-                  onSelected: (value) => setState(() => _width = value),
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 2, child: Text('细笔')),
-                    PopupMenuItem(value: 4, child: Text('中笔')),
-                    PopupMenuItem(value: 8, child: Text('粗笔')),
-                  ],
-                  icon: const Icon(Icons.line_weight),
+                ),
+              ),
+            ],
+          ),
+          if (widget.image == null && widget.onCanvasChanged != null)
+            Row(
+              children: [
+                _modeButton(
+                  label: '添加文字',
+                  tooltip: '添加画布文字',
+                  icon: Icons.text_fields,
+                  active: false,
+                  onPressed: () => _editText(),
+                ),
+                if (widget.saveAttachment != null)
+                  _modeButton(
+                    label: '添加图片',
+                    tooltip: '添加画布图片',
+                    icon: Icons.add_photo_alternate_outlined,
+                    active: false,
+                    onPressed: _addImages,
+                  ),
+                _modeButton(
+                  label: '移动内容',
+                  tooltip: '移动画布内容',
+                  icon: Icons.open_with,
+                  active: _objectMode,
+                  onPressed: () => setState(() {
+                    _objectMode = true;
+                    _move = false;
+                    _eraser = false;
+                  }),
+                ),
+                _modeButton(
+                  label: '删除',
+                  tooltip: '删除画布内容',
+                  icon: Icons.delete_outline,
+                  active: false,
+                  onPressed: _objectMode && _selectedId != null
+                      ? () => _removeItem(_selectedId!)
+                      : null,
                 ),
               ],
             ),
-          ),
           Expanded(
             child: InteractiveViewer(
               transformationController: _transform,
@@ -551,19 +644,11 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
                       return GestureDetector(
                         key: const ValueKey('note-canvas'),
                         behavior: HitTestBehavior.opaque,
+                        dragStartBehavior: DragStartBehavior.down,
                         onPanStart: _move || _objectMode
                             ? null
                             : (details) => setState(() {
-                                _remember();
-                                if (!_eraser) {
-                                  _current = <List<double>>[];
-                                  _strokes.add({
-                                    'color': _color.toARGB32(),
-                                    'width': _width,
-                                    'points': _current,
-                                  });
-                                }
-                                _point(details.localPosition, size);
+                                _startStroke(details.localPosition, size);
                               }),
                         onPanUpdate: _move || _objectMode
                             ? null
@@ -572,15 +657,18 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
                               ),
                         onPanEnd: _move || _objectMode
                             ? null
-                            : (_) {
-                                _current = null;
-                                _persist();
-                              },
+                            : (_) => _finishStroke(),
                         onPanCancel: _move || _objectMode
                             ? null
-                            : () {
-                                _current = null;
-                                _persist();
+                            : _finishStroke,
+                        onTapUp: _move || _objectMode
+                            ? null
+                            : (details) {
+                                setState(
+                                  () =>
+                                      _startStroke(details.localPosition, size),
+                                );
+                                _finishStroke();
                               },
                         child: ColoredBox(
                           color: Colors.white,
@@ -591,13 +679,33 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
                                 Image.memory(
                                   widget.image!,
                                   fit: BoxFit.contain,
+                                  alignment: widget.imageAlignment,
                                   cacheWidth:
-                                      (size.width *
-                                              MediaQuery.devicePixelRatioOf(
-                                                context,
-                                              ))
-                                          .round()
-                                          .clamp(1, 2048),
+                                      widget.imageSize != null &&
+                                          widget.imageSize!.width /
+                                                  widget.imageSize!.height <
+                                              0.8
+                                      ? null
+                                      : (size.width *
+                                                MediaQuery.devicePixelRatioOf(
+                                                  context,
+                                                ) *
+                                                2)
+                                            .round()
+                                            .clamp(1, 2048),
+                                  cacheHeight:
+                                      widget.imageSize != null &&
+                                          widget.imageSize!.width /
+                                                  widget.imageSize!.height <
+                                              0.8
+                                      ? (size.height *
+                                                MediaQuery.devicePixelRatioOf(
+                                                  context,
+                                                ) *
+                                                2)
+                                            .round()
+                                            .clamp(1, 2048)
+                                      : null,
                                 ),
                               for (var i = 0; i < _items.length; i++)
                                 _itemWidget(i, size),
@@ -618,13 +726,23 @@ class _StudyNoteCanvasState extends State<StudyNoteCanvas> {
           ),
           Padding(
             padding: const EdgeInsets.all(8),
-            child: Text(
-              _error ??
-                  (_saving
-                      ? '正在保存…'
-                      : _objectMode
-                      ? '拖动内容移动，选中后可调整大小或移除。'
-                      : '切换到移动和缩放后可双指缩放；橡皮按整条笔迹擦除。'),
+            // Reserve the height of all status messages so saving a stroke
+            // cannot resize or move the canvas underneath the user's hand.
+            child: IndexedStack(
+              index: _error != null
+                  ? 3
+                  : _saving
+                  ? 2
+                  : _objectMode
+                  ? 1
+                  : 0,
+              alignment: Alignment.centerLeft,
+              children: [
+                const Text('切换到移动和缩放后可双指缩放；橡皮按整条笔迹擦除。'),
+                const Text('点选内容后可删除或拖动，再次点击文字可编辑。'),
+                const Text('正在保存…'),
+                Text(_error ?? '笔迹保存失败，请检查存储空间并重试。'),
+              ],
             ),
           ),
         ],

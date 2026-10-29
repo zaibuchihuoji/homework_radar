@@ -1,7 +1,16 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'
+    show
+        Clipboard,
+        ClipboardData,
+        KeyDownEvent,
+        KeyRepeatEvent,
+        LogicalKeyboardKey;
 import 'package:image_picker/image_picker.dart';
 
 import '../services/study_note_document.dart';
@@ -30,6 +39,7 @@ class StudyNoteDocumentEditor extends StatefulWidget {
     required this.onCreateCard,
     this.header,
     this.footer,
+    this.status,
     this.showDetails = false,
   });
 
@@ -41,6 +51,7 @@ class StudyNoteDocumentEditor extends StatefulWidget {
   final Future<void> Function(String text) onCreateCard;
   final Widget? header;
   final Widget? footer;
+  final Widget? status;
   final bool showDetails;
 
   @override
@@ -53,6 +64,8 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
   final _controllers = <String, StudyNoteTextController>{};
   final _focusNodes = <String, FocusNode>{};
   final _attachments = <String, Future<Uint8List>>{};
+  final _imageSizes = <String, Future<Size>>{};
+  final _imageViewports = <String, Rect>{};
   String? _activeId;
   int _nextId = 0;
   bool _inking = false;
@@ -116,7 +129,13 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
     });
   }
 
-  Widget _tool(IconData icon, String label, {bool active = false}) => Padding(
+  Widget _tool(
+    IconData icon,
+    String label, {
+    bool active = false,
+    bool enabled = true,
+    Color? color,
+  }) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 9),
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -124,12 +143,20 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
         Icon(
           icon,
           size: 21,
-          color: active ? paletteOf(context).accent : paletteOf(context).ink2,
+          color: enabled
+              ? (color ??
+                    (active
+                        ? paletteOf(context).accent
+                        : paletteOf(context).ink2))
+              : paletteOf(context).ink3,
         ),
         const SizedBox(height: 3),
         Text(
           label,
-          style: TextStyle(fontSize: 11, color: paletteOf(context).ink2),
+          style: TextStyle(
+            fontSize: 11,
+            color: enabled ? paletteOf(context).ink2 : paletteOf(context).ink3,
+          ),
         ),
       ],
     ),
@@ -221,6 +248,7 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
     }
     setState(() {
       _document = restored;
+      _imageViewports.clear();
       _activeId = textIds.contains(snapshot.activeId)
           ? snapshot.activeId
           : textIds.firstOrNull;
@@ -265,6 +293,48 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
 
   List<dynamic> _copyList(List<dynamic> value) =>
       jsonDecode(jsonEncode(value)) as List;
+
+  Future<Size> _imageSize(Uint8List bytes) async {
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    ui.ImageDescriptor? descriptor;
+    try {
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
+      return Size(descriptor.width.toDouble(), descriptor.height.toDouble());
+    } finally {
+      descriptor?.dispose();
+      buffer.dispose();
+    }
+  }
+
+  // Existing image strokes are expressed in a 4:5 canvas, including its
+  // letterboxing. Keep that coordinate system and only crop the preview.
+  Rect _imageViewport(Size image, List<dynamic> strokes, Alignment alignment) {
+    const canvas = Rect.fromLTWH(0, 0, 0.8, 1);
+    final fitted = applyBoxFit(BoxFit.contain, image, canvas.size).destination;
+    var visible = alignment
+        .inscribe(fitted, canvas)
+        .inflate(0.04)
+        .intersect(canvas);
+    for (final stroke in strokes) {
+      if (stroke is! Map || stroke['points'] is! List) continue;
+      for (final point in stroke['points'] as List) {
+        if (point is! List ||
+            point.length != 2 ||
+            point[0] is! num ||
+            point[1] is! num) {
+          continue;
+        }
+        final position = Offset(
+          (point[0] as num).toDouble() * canvas.width,
+          (point[1] as num).toDouble() * canvas.height,
+        );
+        visible = visible.expandToInclude(
+          Rect.fromCircle(center: position, radius: 0.18),
+        );
+      }
+    }
+    return visible.intersect(canvas);
+  }
 
   List<dynamic> _mergeMarks(List<dynamic> marks) {
     String attributes(Map<String, dynamic> mark) => jsonEncode(
@@ -575,6 +645,18 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
     final node = _nodes[index];
     final controller = _controllers[node['id']];
     final selection = controller?.selection;
+    // At the beginning of a paragraph, insert before it. An untouched empty
+    // editor also has an invalid selection; reuse that paragraph after the
+    // inserted content instead of leaving a blank line in front of it.
+    if (splitText &&
+        node['type'] == 'text' &&
+        ((selection != null &&
+                selection.isValid &&
+                selection.extentOffset == 0) ||
+            ((selection == null || !selection.isValid) &&
+                (node['text'] as String).isEmpty))) {
+      return index;
+    }
     if (splitText &&
         node['type'] == 'text' &&
         selection != null &&
@@ -610,6 +692,252 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
       }
     }
     return index + 1;
+  }
+
+  bool _isRemovableEmptyLine(int index) {
+    if (index < 0 || index + 1 >= _nodes.length) return false;
+    final node = _nodes[index];
+    final next = _nodes[index + 1];
+    return node['type'] == 'text' &&
+        node['style'] == 'paragraph' &&
+        node['text'] == '' &&
+        (node['marks'] as List? ?? []).isEmpty &&
+        (node['annotations'] as List? ?? []).isEmpty &&
+        node.keys.every(
+          const {
+            'id',
+            'type',
+            'text',
+            'style',
+            'marks',
+            'annotations',
+            'keepEmpty',
+          }.contains,
+        ) &&
+        (next['type'] == 'image' || next['type'] == 'canvas');
+  }
+
+  bool _canJoinPrevious(int index, {bool allowDifferent = false}) {
+    if (index <= 0 || index >= _nodes.length) return false;
+    final previous = _nodes[index - 1];
+    final current = _nodes[index];
+    if (previous['type'] != 'text' || current['type'] != 'text') return false;
+    const known = {
+      'id',
+      'type',
+      'text',
+      'style',
+      'marks',
+      'annotations',
+      'keepEmpty',
+      'checked',
+    };
+    if (!previous.keys.every(known.contains) ||
+        !current.keys.every(known.contains)) {
+      return false;
+    }
+    if (current['text'] == '') {
+      return (current['marks'] as List? ?? []).isEmpty &&
+          (current['annotations'] as List? ?? []).isEmpty;
+    }
+    return allowDifferent ||
+        (previous['style'] == current['style'] &&
+            previous['checked'] == current['checked']);
+  }
+
+  Future<void> _requestJoinPrevious(String id) async {
+    final index = _nodes.indexWhere((node) => node['id'] == id);
+    if (_canJoinPrevious(index)) {
+      _joinPrevious(id);
+      return;
+    }
+    if (!_canJoinPrevious(index, allowDifferent: true)) return;
+    final original = jsonEncode([_nodes[index - 1], _nodes[index]]);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('合并不同格式的段落？'),
+        content: const Text('合并后采用上一段的格式和待办状态。文字与笔迹会保留，也可以撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('合并段落'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final current = _nodes.indexWhere((node) => node['id'] == id);
+    if (current <= 0 ||
+        jsonEncode([_nodes[current - 1], _nodes[current]]) != original) {
+      widget.onError('段落内容已发生变化，请重新确认后再合并。');
+      return;
+    }
+    _joinPrevious(id, allowDifferent: true);
+  }
+
+  void _joinPrevious(String id, {bool allowDifferent = false}) {
+    final index = _nodes.indexWhere((node) => node['id'] == id);
+    if (!_canJoinPrevious(index, allowDifferent: allowDifferent)) return;
+    final previous = _nodes[index - 1];
+    final current = _nodes[index];
+    final previousId = previous['id'] as String;
+    final previousText = previous['text'] as String;
+    final currentText = current['text'] as String;
+    final previousController = _controllers[previousId]!;
+    _recordBeforeEdit();
+    final removedController = _controllers.remove(id);
+    final removedFocus = _focusNodes.remove(id);
+    setState(() {
+      if (currentText.isNotEmpty) {
+        final marks = <dynamic>[
+          ..._copyList(previous['marks'] as List? ?? []),
+          for (final raw in current['marks'] as List? ?? [])
+            {
+              ..._copy(raw as Map),
+              'start': (raw['start'] as int) + previousText.length,
+              'end': (raw['end'] as int) + previousText.length,
+            },
+        ];
+        final annotations = <dynamic>[];
+        for (final raw in previous['annotations'] as List? ?? []) {
+          final stroke = _copy(raw as Map);
+          if (stroke['anchor'] == null) stroke['detached'] = true;
+          annotations.add(stroke);
+        }
+        for (final raw in current['annotations'] as List? ?? []) {
+          final stroke = _copy(raw as Map);
+          if (stroke['anchor'] is int) {
+            stroke['anchor'] = (stroke['anchor'] as int) + previousText.length;
+          } else {
+            stroke['detached'] = true;
+          }
+          annotations.add(stroke);
+        }
+        previous['text'] = previousText + currentText;
+        previous['marks'] = _mergeMarks(marks);
+        previous['annotations'] = annotations;
+        previousController.value = TextEditingValue(
+          text: previous['text'] as String,
+          selection: TextSelection.collapsed(offset: previousText.length),
+        );
+        previousController.setMarks(previous['marks'] as List);
+      } else {
+        previousController.selection = TextSelection.collapsed(
+          offset: previousText.length,
+        );
+      }
+      _nodes.removeAt(index);
+      _activeId = previousId;
+      _inkUndo.clear();
+      _inkRedo.clear();
+      _typingStyleId = null;
+      _typingCursor = null;
+      _typingMarks.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      removedController?.dispose();
+      removedFocus?.dispose();
+    });
+    _publish();
+    _focusText(previousId);
+  }
+
+  Future<void> _selectAndCopyText() async {
+    final text = StudyNoteDocument.plainText(_document);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('选择笔记文字'),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('长按并拖动选择文字，也可以复制全文。'),
+                const SizedBox(height: 16),
+                SelectableText(text.isEmpty ? '暂无文字' : text),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('关闭'),
+          ),
+          TextButton(
+            onPressed: text.isEmpty
+                ? null
+                : () async {
+                    try {
+                      await Clipboard.setData(ClipboardData(text: text));
+                      if (dialogContext.mounted) Navigator.pop(dialogContext);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('已复制笔记文字')),
+                        );
+                      }
+                    } catch (_) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('复制失败，请重试')),
+                        );
+                      }
+                    }
+                  },
+            child: const Text('复制全文'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _removeEmptyLine(String id) {
+    final index = _nodes.indexWhere((node) => node['id'] == id);
+    if (!_isRemovableEmptyLine(index)) return;
+    _recordBeforeEdit();
+    final wasFocused = _focusNodes[id]?.hasFocus ?? false;
+    final removedController = _controllers.remove(id);
+    final removedFocus = _focusNodes.remove(id);
+    String? targetId;
+    setState(() {
+      _nodes.removeAt(index);
+      if (!_nodes.any((node) => node['type'] == 'text')) {
+        final newId = _id();
+        _nodes.insert(index + 1, {
+          'id': newId,
+          'type': 'text',
+          'text': '',
+          'style': 'paragraph',
+          'marks': <dynamic>[],
+          'annotations': <dynamic>[],
+        });
+        _controllers[newId] = StudyNoteTextController();
+      }
+      targetId =
+          index + 1 < _nodes.length && _nodes[index + 1]['type'] == 'text'
+          ? _nodes[index + 1]['id'] as String
+          : _nodes.firstWhere((node) => node['type'] == 'text')['id'] as String;
+      if (_activeId == id) _activeId = targetId;
+      _inkUndo.clear();
+      _inkRedo.clear();
+      _typingStyleId = null;
+      _typingCursor = null;
+      _typingMarks.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      removedController?.dispose();
+      removedFocus?.dispose();
+    });
+    _publish();
+    if (wasFocused && targetId != null) _focusText(targetId!);
   }
 
   void _insertText({bool afterNodeOnly = false}) {
@@ -928,8 +1256,9 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
     if (await widget.save()) await _openCanvas(id);
   }
 
-  Future<void> _openCanvas(String id) async {
-    if (!await widget.save()) return;
+  Future<void> _openCanvas(String id, {bool startInMoveMode = false}) async {
+    if (!await widget.save() || !mounted) return;
+    FocusScope.of(context).unfocus();
     final index = _nodes.indexWhere((node) => node['id'] == id);
     if (index < 0) return;
     final node = _copy(_nodes[index]);
@@ -937,6 +1266,18 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
       final image = node['type'] == 'image'
           ? await widget.store.readAttachment(node['attachmentId'] as String)
           : null;
+      Size? imageSize;
+      if (image != null) {
+        try {
+          imageSize = await _imageSizes.putIfAbsent(
+            node['attachmentId'] as String,
+            () => _imageSize(image),
+          );
+        } catch (_) {
+          // The original attachment stays available even if its dimensions
+          // cannot be read; the canvas can still report a preview error.
+        }
+      }
       if (!mounted) return;
       _inkUndo.clear();
       _inkRedo.clear();
@@ -944,6 +1285,11 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
         MaterialPageRoute(
           builder: (_) => StudyNoteCanvas(
             image: image,
+            imageSize: imageSize,
+            startInMoveMode: startInMoveMode,
+            imageAlignment: node['legacyImageAlignment'] == true
+                ? Alignment.topLeft
+                : Alignment.center,
             strokes: node['strokes'] as List? ?? [],
             items: node['items'] as List? ?? [],
             saveAttachment: node['type'] == 'canvas'
@@ -983,7 +1329,10 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                 return widget.save();
               }
               _recordBeforeEdit();
-              setState(() => _nodes[current]['strokes'] = strokes);
+              setState(() {
+                _nodes[current]['strokes'] = strokes;
+                _imageViewports.remove(id);
+              });
               _publish();
               return widget.save();
             },
@@ -999,11 +1348,24 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
     final originalIndex = _nodes.indexWhere((node) => node['id'] == id);
     if (originalIndex < 0) return;
     final original = jsonEncode(_nodes[originalIndex]);
+    final type = _nodes[originalIndex]['type'];
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('移除这段内容？'),
-        content: const Text('该内容会从当前笔记移除，之前保存的历史版本仍可恢复。'),
+        title: Text(
+          type == 'image'
+              ? '删除图片？'
+              : type == 'canvas'
+              ? '删除画布？'
+              : '删除这段内容？',
+        ),
+        content: Text(
+          type == 'image'
+              ? '图片及其批注会从当前笔记中移除。可撤销或从笔记历史版本恢复。'
+              : type == 'canvas'
+              ? '画布里的文字、图片和笔迹会从当前笔记中移除。可撤销或从笔记历史版本恢复。'
+              : '该内容会从当前笔记移除，之前保存的历史版本仍可恢复。',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -1011,7 +1373,7 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('移除'),
+            child: const Text('删除'),
           ),
         ],
       ),
@@ -1035,6 +1397,7 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
       );
     }
     _publish();
+    await widget.save();
   }
 
   void _moveNode(String id, int delta) {
@@ -1046,9 +1409,47 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
     _publish();
   }
 
+  Future<void> _adjustImageAlignment(String id) async {
+    final legacy = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('调整笔迹对齐'),
+        content: const Text('旧版本的正文和批注页可能显示在不同位置。请选择与原笔迹相符的方式；图片和笔迹数据不会改变。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('标准对齐'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('按旧正文对齐'),
+          ),
+        ],
+      ),
+    );
+    if (legacy == null || !mounted) return;
+    final index = _nodes.indexWhere((node) => node['id'] == id);
+    if (index < 0 || _nodes[index]['type'] != 'image') return;
+    if ((_nodes[index]['legacyImageAlignment'] == true) == legacy) return;
+    _recordBeforeEdit();
+    setState(() {
+      _imageViewports.remove(id);
+      if (legacy) {
+        _nodes[index]['legacyImageAlignment'] = true;
+      } else {
+        _nodes[index].remove('legacyImageAlignment');
+      }
+    });
+    _publish();
+  }
+
   Widget _nodeMenu(String id, int index, Color color) =>
       PopupMenuButton<String>(
-        tooltip: '内容操作',
+        tooltip: _nodes[index]['type'] == 'image' ? '图片操作' : '内容操作',
         padding: EdgeInsets.zero,
         onSelected: (value) {
           _activeId = id;
@@ -1063,6 +1464,10 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
               _addImages(afterNodeOnly: true);
             case 'canvas':
               _addCanvas(afterNodeOnly: true);
+            case 'size':
+              _openCanvas(id, startInMoveMode: true);
+            case 'alignment':
+              _adjustImageAlignment(id);
             case 'remove':
               _remove(id);
           }
@@ -1082,15 +1487,182 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
           const PopupMenuItem(value: 'text', child: Text('在下方插入文字')),
           const PopupMenuItem(value: 'image', child: Text('在下方插入图片')),
           const PopupMenuItem(value: 'canvas', child: Text('在下方插入画布')),
+          if (_nodes[index]['type'] == 'image')
+            const PopupMenuItem(value: 'size', child: Text('放大查看')),
+          if (_nodes[index]['type'] == 'image' &&
+              (_nodes[index]['strokes'] as List? ?? []).isNotEmpty)
+            const PopupMenuItem(value: 'alignment', child: Text('调整笔迹对齐')),
           const PopupMenuDivider(),
-          const PopupMenuItem(value: 'remove', child: Text('移除内容')),
+          PopupMenuItem(
+            value: 'remove',
+            child: Text(_nodes[index]['type'] == 'image' ? '移除图片' : '移除内容'),
+          ),
         ],
         child: SizedBox(
-          width: 32,
-          height: 32,
+          width: 40,
+          height: 40,
           child: Icon(Icons.more_horiz, size: 19, color: color),
         ),
       );
+
+  Widget _imageNode(Map<String, dynamic> node, int index) {
+    final id = node['id'] as String;
+    final attachment = node['attachmentId'] as String;
+    final strokes = node['strokes'] as List? ?? [];
+    final imageAlignment = node['legacyImageAlignment'] == true
+        ? Alignment.topLeft
+        : Alignment.center;
+    const height = 200.0;
+    return SizedBox(
+      height: height,
+      child: FutureBuilder<Uint8List>(
+        future: _attachments.putIfAbsent(
+          attachment,
+          () => widget.store.readAttachment(attachment),
+        ),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return const Center(child: Text('图片暂时无法读取，请保留原笔记。'));
+          }
+          if (!snapshot.hasData) {
+            return const Center(child: Text('正在加载图片…'));
+          }
+          final bytes = snapshot.data!;
+          return FutureBuilder<Size>(
+            future: _imageSizes.putIfAbsent(
+              attachment,
+              () => _imageSize(bytes),
+            ),
+            builder: (context, dimensions) {
+              if (!dimensions.hasData && !dimensions.hasError) {
+                return const Center(child: Text('正在加载图片…'));
+              }
+              final viewport = dimensions.hasData
+                  ? _imageViewports.putIfAbsent(
+                      id,
+                      () => _imageViewport(
+                        dimensions.data!,
+                        strokes,
+                        imageAlignment,
+                      ),
+                    )
+                  : const Rect.fromLTWH(0, 0, 0.8, 1);
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final scale = math.min(
+                    constraints.maxWidth / viewport.width,
+                    height / viewport.height,
+                  );
+                  final visibleWidth = viewport.width * scale;
+                  final visibleHeight = viewport.height * scale;
+                  final targetWidth = math.max(48.0, visibleWidth);
+                  final targetHeight = math.max(48.0, visibleHeight);
+                  return Align(
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(
+                      width: targetWidth,
+                      height: targetHeight,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: InkWell(
+                              onTap: _inking ? null : () => _openCanvas(id),
+                              child: Center(
+                                child: SizedBox(
+                                  width: visibleWidth,
+                                  height: visibleHeight,
+                                  child: ClipRect(
+                                    key: ValueKey('note-image-viewport:$id'),
+                                    child: Stack(
+                                      clipBehavior: Clip.hardEdge,
+                                      children: [
+                                        Positioned(
+                                          left: -viewport.left * scale,
+                                          top: -viewport.top * scale,
+                                          width: 0.8 * scale,
+                                          height: scale,
+                                          child: ColoredBox(
+                                            color: Colors.white,
+                                            child: StudyNoteInkLayer(
+                                              strokes: strokes,
+                                              enabled: _inking,
+                                              eraser: _eraser,
+                                              color: _inkColor,
+                                              width: _inkWidth,
+                                              onChanged: (value) => _changeInk(
+                                                id,
+                                                'strokes',
+                                                value,
+                                              ),
+                                              child: SizedBox.expand(
+                                                child: Image.memory(
+                                                  bytes,
+                                                  fit: BoxFit.contain,
+                                                  alignment: imageAlignment,
+                                                  cacheWidth:
+                                                      dimensions.hasData &&
+                                                          dimensions
+                                                                      .data!
+                                                                      .width /
+                                                                  dimensions
+                                                                      .data!
+                                                                      .height <
+                                                              0.8
+                                                      ? null
+                                                      : (0.8 *
+                                                                scale *
+                                                                MediaQuery.devicePixelRatioOf(
+                                                                  context,
+                                                                ))
+                                                            .round()
+                                                            .clamp(1, 2048),
+                                                  cacheHeight:
+                                                      dimensions.hasData &&
+                                                          dimensions
+                                                                      .data!
+                                                                      .width /
+                                                                  dimensions
+                                                                      .data!
+                                                                      .height <
+                                                              0.8
+                                                      ? (scale *
+                                                                MediaQuery.devicePixelRatioOf(
+                                                                  context,
+                                                                ))
+                                                            .round()
+                                                            .clamp(1, 2048)
+                                                      : null,
+                                                  gaplessPlayback: true,
+                                                  errorBuilder: (_, _, _) =>
+                                                      const Center(
+                                                        child: Text(
+                                                          '图片无法预览，原文件仍保留。',
+                                                        ),
+                                                      ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1101,6 +1673,7 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (widget.status != null) widget.status!,
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) => ListView(
@@ -1155,19 +1728,20 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                if (_organizing && node['type'] != 'text')
+                                if (node['type'] != 'text')
                                   Row(
                                     children: [
-                                      ReorderableDragStartListener(
-                                        index: index,
-                                        child: const Padding(
-                                          padding: EdgeInsets.all(12),
-                                          child: Icon(
-                                            Icons.drag_indicator,
-                                            size: 18,
+                                      if (_organizing)
+                                        ReorderableDragStartListener(
+                                          index: index,
+                                          child: const Padding(
+                                            padding: EdgeInsets.all(12),
+                                            child: Icon(
+                                              Icons.drag_indicator,
+                                              size: 18,
+                                            ),
                                           ),
                                         ),
-                                      ),
                                       Expanded(
                                         child: Text(
                                           switch (node['type']) {
@@ -1179,6 +1753,18 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                                             color: p.ink2,
                                             fontSize: 12,
                                           ),
+                                        ),
+                                      ),
+                                      TextButton.icon(
+                                        onPressed: () => _remove(id),
+                                        icon: const Icon(
+                                          Icons.delete_outline,
+                                          size: 18,
+                                        ),
+                                        label: Text(
+                                          node['type'] == 'image'
+                                              ? '删除图片'
+                                              : '删除画布',
                                         ),
                                       ),
                                       _nodeMenu(id, index, p.ink2),
@@ -1282,54 +1868,160 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                                                       'annotations',
                                                       strokes,
                                                     ),
-                                                child: TextField(
-                                                  key: node == firstText
-                                                      ? const ValueKey(
-                                                          'note-body',
-                                                        )
-                                                      : ValueKey(
-                                                          'note-text:$id',
+                                                child: Focus(
+                                                  canRequestFocus: false,
+                                                  onKeyEvent: (_, event) {
+                                                    final editingValue =
+                                                        _controllers[id]?.value;
+                                                    final selection =
+                                                        editingValue?.selection;
+                                                    final composing =
+                                                        editingValue?.composing;
+                                                    if ((event
+                                                                is KeyDownEvent ||
+                                                            event
+                                                                is KeyRepeatEvent) &&
+                                                        event.logicalKey ==
+                                                            LogicalKeyboardKey
+                                                                .backspace &&
+                                                        selection != null &&
+                                                        selection.isCollapsed &&
+                                                        selection
+                                                                .extentOffset ==
+                                                            0 &&
+                                                        (composing == null ||
+                                                            !composing
+                                                                .isValid ||
+                                                            composing
+                                                                .isCollapsed) &&
+                                                        (_isRemovableEmptyLine(
+                                                              index,
+                                                            ) ||
+                                                            _canJoinPrevious(
+                                                              index,
+                                                              allowDifferent:
+                                                                  true,
+                                                            ))) {
+                                                      if (_isRemovableEmptyLine(
+                                                        index,
+                                                      )) {
+                                                        _removeEmptyLine(id);
+                                                      } else {
+                                                        _requestJoinPrevious(
+                                                          id,
+                                                        );
+                                                      }
+                                                      return KeyEventResult
+                                                          .handled;
+                                                    }
+                                                    return KeyEventResult
+                                                        .ignored;
+                                                  },
+                                                  child: TextField(
+                                                    key: node == firstText
+                                                        ? const ValueKey(
+                                                            'note-body',
+                                                          )
+                                                        : ValueKey(
+                                                            'note-text:$id',
+                                                          ),
+                                                    controller:
+                                                        _controllers[id],
+                                                    focusNode: _focusNodes
+                                                        .putIfAbsent(
+                                                          id,
+                                                          () => FocusNode(),
                                                         ),
-                                                  controller: _controllers[id],
-                                                  focusNode: _focusNodes
-                                                      .putIfAbsent(
-                                                        id,
-                                                        () => FocusNode(),
-                                                      ),
-                                                  maxLines: null,
-                                                  minLines:
-                                                      node == _nodes.last &&
-                                                          node['style'] ==
-                                                              'paragraph'
-                                                      ? ((constraints.maxHeight -
-                                                                    115) /
-                                                                27)
-                                                            .floor()
-                                                            .clamp(3, 30)
-                                                      : 1,
-                                                  style: textStyle,
-                                                  onTap: () => _activeId = id,
-                                                  onChanged: (value) =>
-                                                      _changeText(node, value),
-                                                  decoration:
-                                                      const InputDecoration(
-                                                        hintText: '开始书写…',
-                                                        isCollapsed: true,
-                                                        contentPadding:
-                                                            EdgeInsets.zero,
-                                                        filled: false,
-                                                        border:
-                                                            InputBorder.none,
-                                                        enabledBorder:
-                                                            InputBorder.none,
-                                                        focusedBorder:
-                                                            InputBorder.none,
-                                                        disabledBorder:
-                                                            InputBorder.none,
-                                                      ),
+                                                    maxLines: null,
+                                                    minLines:
+                                                        node == _nodes.last &&
+                                                            node['style'] ==
+                                                                'paragraph'
+                                                        ? ((constraints.maxHeight -
+                                                                      115) /
+                                                                  27)
+                                                              .floor()
+                                                              .clamp(3, 30)
+                                                        : 1,
+                                                    style: textStyle,
+                                                    onTap: () => _activeId = id,
+                                                    onChanged: (value) =>
+                                                        _changeText(
+                                                          node,
+                                                          value,
+                                                        ),
+                                                    decoration:
+                                                        const InputDecoration(
+                                                          hintText: '开始书写…',
+                                                          isCollapsed: true,
+                                                          contentPadding:
+                                                              EdgeInsets.zero,
+                                                          filled: false,
+                                                          border:
+                                                              InputBorder.none,
+                                                          enabledBorder:
+                                                              InputBorder.none,
+                                                          focusedBorder:
+                                                              InputBorder.none,
+                                                          disabledBorder:
+                                                              InputBorder.none,
+                                                        ),
+                                                  ),
                                                 ),
                                               ),
                                             ),
+                                            if (!_inking &&
+                                                !_organizing &&
+                                                (_isRemovableEmptyLine(index) ||
+                                                    (node['text'] == '' &&
+                                                        _canJoinPrevious(
+                                                          index,
+                                                        ))))
+                                              Tooltip(
+                                                message:
+                                                    node['style'] == 'check'
+                                                    ? '删除空项'
+                                                    : '删除空行',
+                                                child: TextButton.icon(
+                                                  onPressed: () {
+                                                    if (_isRemovableEmptyLine(
+                                                      index,
+                                                    )) {
+                                                      _removeEmptyLine(id);
+                                                    } else {
+                                                      _joinPrevious(id);
+                                                    }
+                                                  },
+                                                  style: TextButton.styleFrom(
+                                                    foregroundColor: p.ink2,
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 6,
+                                                        ),
+                                                    minimumSize: const Size(
+                                                      0,
+                                                      32,
+                                                    ),
+                                                    visualDensity:
+                                                        VisualDensity.compact,
+                                                    tapTargetSize:
+                                                        MaterialTapTargetSize
+                                                            .shrinkWrap,
+                                                  ),
+                                                  icon: const Icon(
+                                                    Icons.backspace_outlined,
+                                                    size: 16,
+                                                  ),
+                                                  label: Text(
+                                                    node['style'] == 'check'
+                                                        ? '删除空项'
+                                                        : '删除空行',
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
                                             if (_organizing)
                                               _nodeMenu(id, index, p.ink2),
                                           ],
@@ -1356,69 +2048,7 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                                     ),
                                   )
                                 else if (node['type'] == 'image')
-                                  InkWell(
-                                    onTap: () => _openCanvas(id),
-                                    child: FutureBuilder<Uint8List>(
-                                      future: _attachments.putIfAbsent(
-                                        node['attachmentId'] as String,
-                                        () => widget.store.readAttachment(
-                                          node['attachmentId'] as String,
-                                        ),
-                                      ),
-                                      builder: (context, snapshot) {
-                                        if (snapshot.hasError) {
-                                          return const Padding(
-                                            padding: EdgeInsets.all(16),
-                                            child: Text('图片暂时无法读取，请保留原笔记。'),
-                                          );
-                                        }
-                                        if (!snapshot.hasData) {
-                                          return const SizedBox(height: 80);
-                                        }
-                                        return SizedBox(
-                                          height: 200,
-                                          child: Center(
-                                            child: AspectRatio(
-                                              aspectRatio: 0.8,
-                                              child: ColoredBox(
-                                                color: Colors.white,
-                                                child: StudyNoteInkLayer(
-                                                  strokes:
-                                                      node['strokes']
-                                                          as List? ??
-                                                      [],
-                                                  enabled: _inking,
-                                                  eraser: _eraser,
-                                                  color: _inkColor,
-                                                  width: _inkWidth,
-                                                  onChanged: (strokes) =>
-                                                      _changeInk(
-                                                        id,
-                                                        'strokes',
-                                                        strokes,
-                                                      ),
-                                                  child: Image.memory(
-                                                    snapshot.data!,
-                                                    fit: BoxFit.contain,
-                                                    errorBuilder:
-                                                        (
-                                                          context,
-                                                          error,
-                                                          stack,
-                                                        ) => const Center(
-                                                          child: Text(
-                                                            '图片无法预览，原文件仍保留。',
-                                                          ),
-                                                        ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  )
+                                  _imageNode(node, index)
                                 else
                                   InkWell(
                                     onTap: () => _openCanvas(id),
@@ -1557,6 +2187,11 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                                 _insertText();
                               case 'organize':
                                 setState(() => _organizing = !_organizing);
+                              case 'join':
+                                final id = _activeId;
+                                if (id != null) _requestJoinPrevious(id);
+                              case 'selectText':
+                                _selectAndCopyText();
                             }
                           },
                           itemBuilder: (_) => [
@@ -1569,6 +2204,20 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                               child: Text(_organizing ? '完成整理' : '整理内容'),
                             ),
                             const PopupMenuDivider(),
+                            PopupMenuItem(
+                              value: 'join',
+                              enabled: _canJoinPrevious(
+                                _nodes.indexWhere(
+                                  (node) => node['id'] == _activeId,
+                                ),
+                                allowDifferent: true,
+                              ),
+                              child: const Text('合并到上一段'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'selectText',
+                              child: Text('选择与复制文字'),
+                            ),
                             const PopupMenuItem(
                               value: 'text',
                               child: Text('插入独立段落'),
@@ -1580,43 +2229,54 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                     ],
                   ),
                 if (_inking && !widget.showDetails)
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        IconButton(
-                          tooltip: '撤销批注',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: _inkUndo.isEmpty
-                              ? null
-                              : () => _restoreInk(undo: true),
-                          icon: const Icon(Icons.undo),
-                        ),
-                        IconButton(
-                          tooltip: '重做批注',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: _inkRedo.isEmpty
-                              ? null
-                              : () => _restoreInk(undo: false),
-                          icon: const Icon(Icons.redo),
-                        ),
-                        IconButton(
-                          tooltip: _eraser ? '切换画笔' : '橡皮',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => setState(() => _eraser = !_eraser),
-                          icon: Icon(
-                            _eraser ? Icons.edit : Icons.auto_fix_normal,
-                          ),
-                        ),
-                        PopupMenuButton<String>(
-                          tooltip: '画笔设置',
-                          icon: Icon(
-                            Icons.palette_outlined,
-                            color: studyNoteInkColor(
-                              _inkColor,
-                              darkBackground: p.bg.computeLuminance() < 0.3,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Tooltip(
+                          message: '撤销批注',
+                          child: InkWell(
+                            onTap: _inkUndo.isEmpty
+                                ? null
+                                : () => _restoreInk(undo: true),
+                            child: _tool(
+                              Icons.undo,
+                              '撤销',
+                              enabled: _inkUndo.isNotEmpty,
                             ),
                           ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Tooltip(
+                          message: '重做批注',
+                          child: InkWell(
+                            onTap: _inkRedo.isEmpty
+                                ? null
+                                : () => _restoreInk(undo: false),
+                            child: _tool(
+                              Icons.redo,
+                              '重做',
+                              enabled: _inkRedo.isNotEmpty,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Tooltip(
+                          message: _eraser ? '切换画笔' : '橡皮',
+                          child: InkWell(
+                            onTap: () => setState(() => _eraser = !_eraser),
+                            child: _tool(
+                              _eraser ? Icons.edit : Icons.auto_fix_normal,
+                              _eraser ? '画笔' : '橡皮',
+                              active: _eraser,
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: PopupMenuButton<String>(
+                          tooltip: '画笔设置',
                           onSelected: (value) => setState(() {
                             switch (value) {
                               case 'blue':
@@ -1646,9 +2306,17 @@ class _StudyNoteDocumentEditorState extends State<StudyNoteDocumentEditor> {
                             PopupMenuItem(value: 'medium', child: Text('中笔')),
                             PopupMenuItem(value: 'thick', child: Text('粗笔')),
                           ],
+                          child: _tool(
+                            Icons.palette_outlined,
+                            '设置',
+                            color: studyNoteInkColor(
+                              _inkColor,
+                              darkBackground: p.bg.computeLuminance() < 0.3,
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 if (_inking && !widget.showDetails)
                   Padding(

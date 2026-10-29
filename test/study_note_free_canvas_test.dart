@@ -8,6 +8,97 @@ import 'package:homework_radar/pages/study_note_canvas.dart';
 import 'package:homework_radar/ui/tokens.dart';
 
 void main() {
+  testWidgets(
+    'selected canvas objects can be deleted without losing other ink',
+    (tester) async {
+      const ink = [
+        {
+          'color': 0xffcc4b44,
+          'width': 3,
+          'points': [
+            [0.1, 0.2],
+            [0.4, 0.5],
+          ],
+        },
+      ];
+      const items = [
+        {
+          'id': 'photo',
+          'type': 'image',
+          'attachmentId': 'sample',
+          'x': 0.1,
+          'y': 0.1,
+          'width': 0.35,
+          'height': 0.25,
+        },
+        {
+          'id': 'text',
+          'type': 'text',
+          'text': '保留文字',
+          'x': 0.55,
+          'y': 0.55,
+          'width': 0.35,
+          'height': 0.2,
+        },
+      ];
+      var savedStrokes = <dynamic>[];
+      var savedItems = <dynamic>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTheme(Brightness.dark, ThemeStyle.clay),
+          home: StudyNoteCanvas(
+            strokes: ink,
+            items: items,
+            onChanged: (_) async => true,
+            onCanvasChanged: (strokes, entries) async {
+              savedStrokes = jsonDecode(jsonEncode(strokes)) as List;
+              savedItems = jsonDecode(jsonEncode(entries)) as List;
+              return true;
+            },
+          ),
+        ),
+      );
+      await tester.tap(find.byTooltip('移动画布内容'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('canvas-item:photo')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('删除画布内容'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('移除').last);
+      await tester.pumpAndSettle();
+      expect(savedItems, [items[1]]);
+      expect(savedStrokes, ink);
+      await tester.tap(find.byTooltip('撤销'));
+      await tester.pumpAndSettle();
+      expect(savedItems, items);
+      expect(savedStrokes, ink);
+      await tester.tap(find.byKey(const ValueKey('canvas-item:text')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('canvas-text-input')), findsNothing);
+      await tester.tap(find.byTooltip('删除画布内容'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('移除').last);
+      await tester.pumpAndSettle();
+      expect(savedItems, [items[0]]);
+      expect(savedStrokes, ink);
+    await tester.tap(find.byTooltip('撤销'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('canvas-item:text')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('canvas-item:text')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('canvas-text-input')),
+      '修改后的文字',
+    );
+    await tester.tap(find.widgetWithText(TextButton, '保存').last);
+    await tester.pumpAndSettle();
+    expect((savedItems[1] as Map)['text'], '修改后的文字');
+    expect(savedStrokes, ink);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('canvas text can be placed, moved and saved with handwriting', (
     tester,
   ) async {
